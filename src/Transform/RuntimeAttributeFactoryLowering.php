@@ -124,6 +124,10 @@ final class RuntimeAttributeFactoryLowering extends NodeVisitorAbstract
             return true;
         }
 
+        if ($value instanceof Expr\ClassConstFetch) {
+            return true;
+        }
+
         return (new NodeFinder())->findFirst($value, static function (Node $node): bool {
             return $node instanceof Expr\New_
                 || $node instanceof Expr\Closure
@@ -131,7 +135,6 @@ final class RuntimeAttributeFactoryLowering extends NodeVisitorAbstract
                 // though it is not represented by an Array_ AST node.
                 || $node instanceof Expr\Cast\Array_
                 || $node instanceof Expr\Cast\Object_
-                || $node instanceof Expr\ClassConstFetch
                 || (($node instanceof Expr\FuncCall || $node instanceof Expr\StaticCall)
                     && $node->isFirstClassCallable());
         }) !== null;

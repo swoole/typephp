@@ -78,30 +78,6 @@ final class RuntimeAttributeFactoryLowering extends NodeVisitorAbstract
             return null;
         }
 
-        if (!$node instanceof Node\Attribute) {
-            return null;
-        }
-        if (CompileTimeAttributeRegistry::get($node->name->toString()) !== null) {
-            return null;
-        }
-
-        foreach ($node->args as $argument) {
-            if (!$this->requiresFactory($argument->value)) {
-                continue;
-            }
-
-            $factory = $this->createFactory($argument->value);
-            $argument->value->setAttribute(self::FACTORY_NAME_ATTRIBUTE, $factory['fullName']);
-            if ($this->requiresLazyValue($argument->value)) {
-                $argument->value->setAttribute(self::FACTORY_LAZY_VALUE_ATTRIBUTE, true);
-            }
-            if ($this->namespaceFactories !== []) {
-                $index = array_key_last($this->namespaceFactories);
-                $this->namespaceFactories[$index][] = $factory['node'];
-            } else {
-                $this->globalFactories[] = $factory['node'];
-            }
-        }
         return null;
     }
 
@@ -115,6 +91,33 @@ final class RuntimeAttributeFactoryLowering extends NodeVisitorAbstract
                 array_push($node->stmts, ...$factories);
             }
             $this->namespace = '';
+        } elseif ($node instanceof Node\Attribute) {
+            // Process attribute args in leaveNode so that NameResolver has
+            // already resolved all Name nodes in the argument expressions.
+            // Using enterNode would see unresolved Name('IdType') instead of
+            // Name\FullyQualified('App\\Enums\\IdType'), causing enum case
+            // detection to fail for cross-file enums.
+            if (CompileTimeAttributeRegistry::get($node->name->toString()) !== null) {
+                return null;
+            }
+
+            foreach ($node->args as $argument) {
+                if (!$this->requiresFactory($argument->value)) {
+                    continue;
+                }
+
+                $factory = $this->createFactory($argument->value);
+                $argument->value->setAttribute(self::FACTORY_NAME_ATTRIBUTE, $factory['fullName']);
+                if ($this->requiresLazyValue($argument->value)) {
+                    $argument->value->setAttribute(self::FACTORY_LAZY_VALUE_ATTRIBUTE, true);
+                }
+                if ($this->namespaceFactories !== []) {
+                    $index = array_key_last($this->namespaceFactories);
+                    $this->namespaceFactories[$index][] = $factory['node'];
+                } else {
+                    $this->globalFactories[] = $factory['node'];
+                }
+            }
         }
         return null;
     }
@@ -271,9 +274,8 @@ final class RuntimeAttributeFactoryLowering extends NodeVisitorAbstract
                     }
                 }
                 if ($node instanceof Node\Name) {
-                    // Attribute factories are created while the outer
-                    // traverser is entering the Attribute node, before its
-                    // argument names have been visited by NameResolver.
+                    // Attribute factories are created in leaveNode after
+                    // NameResolver has resolved all Name nodes.
                     if ($node instanceof Node\Name\Relative) {
                         $name = ltrim($this->namespace . '\\' . $node->toString(), '\\');
                         return new Node\Name\FullyQualified($name, $node->getAttributes());

@@ -49,7 +49,12 @@ class UtilsTest extends TestCase
     public function testGenCValueFloat(): void
     {
         $result = $this->invokeMethod('genCValue', 3.14);
-        $this->assertSame((string) 3.14, $result);
+
+        // The literal has to read back as the same double. Its exact spelling
+        // is not part of the contract, but a string cast would depend on the
+        // precision ini and lose digits.
+        $this->assertSame(3.14, (float) $result);
+        $this->assertMatchesRegularExpression('/[.E]/i', $result);
     }
 
     public function testGenCValueBool(): void

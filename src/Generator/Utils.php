@@ -31,7 +31,9 @@ trait Utils
             return $this->genIntegerLiteral($value);
         }
         if (is_float($value)) {
-            return (string) $value;
+            // A string cast formats with the precision ini, which defaults to
+            // 14 and would bake a truncated constant into the binary.
+            return $this->genFloatLiteral($value);
         }
         if (is_bool($value)) {
             return $value ? '1' : '0';

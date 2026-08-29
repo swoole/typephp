@@ -792,7 +792,7 @@ trait FuncCallOptimizer
         return $array . '.offsetExists(' . $key . ')';
     }
 
-    protected function genRound(string $n, Node\Expr\FuncCall $e, array $c): string
+    protected function genRound(string $n, Node\Expr\FuncCall $e, array $c): string|false
     {
         $type = $this->detectTypeOfExpr($e->args[0]->value);
         if ($type === Type::DECIMAL) {
@@ -804,6 +804,13 @@ trait FuncCallOptimizer
         }
         $args = count($e->args);
         if ($args >= 3) {
+            // php::fn::round() models the mode as an Int, which covers only the
+            // legacy PHP_ROUND_* constants. Since PHP 8.4 the parameter is a
+            // RoundingMode enum: converting it to an int picks a different mode,
+            // so anything that is not statically an int goes to the runtime.
+            if ($this->detectTypeOfExpr($e->args[2]->value) !== Type::INT) {
+                return false;
+            }
             return 'php::fn::round(' . $this->getArg($e, 0) . ', ' . $this->convertIntExpr($this->getArg($e, 1)) . ', ' . $this->convertIntExpr($this->getArg($e, 2)) . ')';
         }
         if ($args >= 2) {

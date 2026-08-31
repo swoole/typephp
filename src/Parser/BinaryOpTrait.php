@@ -24,6 +24,8 @@ trait BinaryOpTrait
         $this->assertExprCanBeUsedAsValue($left, 'binary operand');
         $this->assertExprCanBeUsedAsValue($right, 'binary operand');
 
+        $this->demoteAutoDecimalLiteralAgainstFloat($left, $right);
+
         // Arithmetic logic: convert to a numeric type first when possible
         $leftExpr  = $this->parseOrderedBinaryOperand($left);
         $rightExpr = $this->parseOrderedBinaryOperand($right);
@@ -951,6 +953,7 @@ trait BinaryOpTrait
         if ($pythonOperator !== null) {
             return $pythonOperator;
         }
+        $this->demoteAutoDecimalLiteralAgainstFloat($expr->left, $expr->right);
         $left  = $this->parseCompareExpr($expr->left);
         $right = $this->parseCompareExpr($expr->right);
         $leftIsNative = $this->isNativeObjectClass($this->detectClassOfExpr($expr->left));
@@ -1113,8 +1116,36 @@ trait BinaryOpTrait
             ?? 'php::compare(' . $this->parseOrderedOperand($expr->left, false) . ', ' . $this->parseOrderedOperand($expr->right, false) . ')';
     }
 
+    /**
+     * When an auto-Decimal-classified float literal meets a float-typed
+     * expression in a binary operation, demote the literal to its exact
+     * double. PHP evaluates every float literal as a double, so rejecting
+     * the mix ("Cannot convert float expression to Decimal") refuses valid
+     * PHP — e.g. `0.1 + 0.2 == 0.30000000000000004` from a var_export round
+     * trip — and keeping the Decimal would change comparison semantics.
+     */
+    protected function demoteAutoDecimalLiteralAgainstFloat(NodeAbstract $left, NodeAbstract $right): void
+    {
+        if ($this->decimalTypes) {
+            return;
+        }
+        $leftType = $this->detectTypeOfExpr($left);
+        $rightType = $this->detectTypeOfExpr($right);
+        foreach ([[$left, $leftType, $rightType], [$right, $rightType, $leftType]] as [$node, $type, $otherType]) {
+            if ($type === Type::DECIMAL
+                && $otherType === Type::FLOAT
+                && $node instanceof Node\Scalar\Float_
+                && $this->isDecimalLiteral($node)
+            ) {
+                $node->setAttribute(self::ATTR_FORCE_FLOAT_LITERAL, true);
+            }
+        }
+    }
+
     protected function genBigNumericCmp(Expr\BinaryOp $expr, string $suffix = ''): ?string
     {
+        $this->demoteAutoDecimalLiteralAgainstFloat($expr->left, $expr->right);
+
         $leftType = $this->detectTypeOfExpr($expr->left);
         $rightType = $this->detectTypeOfExpr($expr->right);
 

@@ -160,6 +160,7 @@ class CompilerBase implements PropertyAccessContext
     protected const string ATTR_STATEMENT_EXPRESSION = 'aotStatementExpression';
     protected const string ATTR_MULTI_RETURN_IMPL = 'aotMultiReturnImpl';
     protected const string ATTR_SCOPED_CALLBACK = 'aotScopedCallback';
+    protected const string ATTR_FORCE_FLOAT_LITERAL = 'aotForceFloatLiteral';
 
     /**
      * Keyword methods (to* builtins) with mandated return types.

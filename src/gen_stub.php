@@ -2828,6 +2828,13 @@ class EvaluatedValue
             // leaking heredoc/nowdoc source syntax into generated C++.
             return '"' . getTranslator()->escapeString((string) $this->value) . '"';
         } elseif ($this->type->isInt()) {
+            // PHP_INT_MIN cannot be spelled as one negative literal: C parses
+            // "-9223372036854775808" as negation applied to an out-of-range
+            // positive literal, which is ill-formed. Reuse the ZEND_LONG_MIN
+            // macro, exactly like the expression path (genIntegerLiteral).
+            if ($this->value === PHP_INT_MIN) {
+                return 'ZEND_LONG_MIN';
+            }
             return strval($this->value);
         } elseif ($this->type->isFloat()) {
             return getTranslator()->genFloatLiteral((float) $this->value);

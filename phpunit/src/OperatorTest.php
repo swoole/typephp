@@ -107,7 +107,8 @@ class OperatorTest extends \BaseTest
         $this->assertStringContainsString('1.0', $cpp);
         $this->assertStringContainsString('0.0', $cpp);
         $this->assertStringContainsString('std::numeric_limits<double>::infinity()', $cpp);
-        $this->assertStringContainsString('-std::numeric_limits<double>::infinity()', $cpp);
+        // Unary minus always parenthesizes its operand (see parseUnaryMinus).
+        $this->assertStringContainsString('-(std::numeric_limits<double>::infinity())', $cpp);
         $this->assertStringContainsString('std::numeric_limits<double>::quiet_NaN()', $cpp);
         $this->assertStringContainsString('2.7182818284590451', $cpp);
         $this->assertStringNotContainsString('2.718281828459)', $cpp);

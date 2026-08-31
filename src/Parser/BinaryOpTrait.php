@@ -393,10 +393,13 @@ trait BinaryOpTrait
             return $value === null ? null : -$value;
         }
         if ($expr instanceof Node\Expr\ConstFetch) {
-            $name = strtolower($expr->name->toString());
+            // PHP constants are case-sensitive and unqualified names resolve
+            // through the namespace first, so only a fetch that provably
+            // names the global constant may fold to its value.
+            $name = $this->resolveGlobalFoldableConstantName($expr);
             return match ($name) {
-                'php_int_max' => PHP_INT_MAX,
-                'php_int_min' => PHP_INT_MIN,
+                'PHP_INT_MAX' => PHP_INT_MAX,
+                'PHP_INT_MIN' => PHP_INT_MIN,
                 default => null,
             };
         }
@@ -439,6 +442,34 @@ trait BinaryOpTrait
                 : null,
             default => null,
         };
+    }
+
+    /**
+     * Resolve a constant fetch to the global constant name it provably
+     * denotes, or null when the fetch may refer to something else.
+     *
+     * A `use const` alias resolves to its target. A fully qualified name is
+     * already global. An unqualified name inside a namespace participates in
+     * PHP's runtime fallback (Namespace\NAME can be defined before the fetch
+     * executes), so it never provably names the global constant. A qualified
+     * relative name resolves inside a namespace/import and is never global.
+     */
+    protected function resolveGlobalFoldableConstantName(Node\Expr\ConstFetch $expr): ?string
+    {
+        $name = ltrim($expr->name->toString(), '\\');
+        if (isset($this->useConstants[$name])) {
+            return ltrim($this->useConstants[$name], '\\');
+        }
+        if ($expr->name instanceof Node\Name\FullyQualified) {
+            return $name;
+        }
+        if (!$expr->name->isUnqualified()) {
+            return null;
+        }
+        if ($this->namespace) {
+            return null;
+        }
+        return $name;
     }
 
     protected function constantDivisionValue(int|float $left, int|float $right, bool $nativeSemantics): int|float|null

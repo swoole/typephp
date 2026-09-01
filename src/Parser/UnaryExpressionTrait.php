@@ -125,7 +125,14 @@ trait UnaryExpressionTrait
         }
         $code = $this->parseExprAsValue($expr->expr);
 
-        // Always parenthesize the operand. An unparenthesized operand can
+        // A bare numeric literal is a single C++ token; negating it directly
+        // cannot change the parse, and keeps the emitted code (and the test
+        // snapshots built on it) readable.
+        if (preg_match('/^(?:\d[\d\'.]*(?:[eE][+-]?\d+)?|0[xX][0-9a-fA-F\']+|0[bB][01\']+)(?:[uU]?[lL]{0,2})?$/', $code)) {
+            return '-' . $code;
+        }
+
+        // Parenthesize every other operand. An unparenthesized operand can
         // change the C++ parse: `-($a ? $b : $c)` would emit
         // `-cond ? b : c`, binding the minus to the condition and possibly
         // selecting the wrong branch, and `- -$a` would paste into the C++

@@ -317,6 +317,9 @@ class Preprocessor extends CompilerBase
             // generated until the complete symbol table is available.
             $this->preparedFileAsts[$this->file] = $stmts;
             $this->declarationExpressionsFinalized = false;
+            // The prepared class graph changed; override flags must be
+            // re-finalized before the next conversion.
+            $this->methodOverrideFlagsFinalized = false;
             // CompilerTest and embedding users may invoke prepareFile()
             // directly instead of the project pipeline. Preserve same-file
             // forward Native references for that public entry path as well.
@@ -2162,6 +2165,46 @@ class Preprocessor extends CompilerBase
         }
 
         $this->resetMethod();
+    }
+
+    /**
+     * Finalize the classMethodOverride flags once the complete class graph is
+     * known.
+     *
+     * The incremental registration in prepareClassMethod() depends on file
+     * preprocessing order: with a "sandwich" order (ancestor first, leaf
+     * second, intermediate class last), the ancestor method's override flag is
+     * missed, causing MethodCallTrait::findNativeMethod() to devirtualize a
+     * call that should be dynamically dispatched.
+     *
+     * Runs once per class-graph change, before conversion starts. For every
+     * declared method it walks the complete parent chain and marks each
+     * ancestor method of the same name as overridden, following the existing
+     * upward-marking semantics. This is order-independent and costs roughly
+     * method count x inheritance depth.
+     */
+    protected function finalizeMethodOverrideFlags(): void
+    {
+        $this->assertCompilerPhase(self::PHASE_CONVERT, 'method override flag finalization');
+        if ($this->methodOverrideFlagsFinalized) {
+            return;
+        }
+        $this->methodOverrideFlagsFinalized = true;
+        foreach (array_keys($this->classMethodOverride) as $fullMethodNameLower) {
+            $pos = strrpos($fullMethodNameLower, '::');
+            if ($pos === false) {
+                continue;
+            }
+            $methodLower = substr($fullMethodNameLower, $pos + 2);
+            $classLower = substr($fullMethodNameLower, 0, $pos);
+            while (($parentClass = $this->symbols->parent($classLower)) !== '') {
+                $parentMethodLower = strtolower($parentClass) . '::' . $methodLower;
+                if (isset($this->classMethodOverride[$parentMethodLower])) {
+                    $this->classMethodOverride[$parentMethodLower] = true;
+                }
+                $classLower = strtolower($parentClass);
+            }
+        }
     }
 
     private function assertKeywordMethodMayBeDeclared(

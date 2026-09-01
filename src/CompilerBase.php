@@ -333,6 +333,7 @@ class CompilerBase implements PropertyAccessContext
     /** @var array<string, array<Node\Stmt>> Prepared declaration ASTs keyed by real path. */
     protected array $preparedFileAsts = [];
     protected bool $declarationExpressionsFinalized = false;
+    protected bool $methodOverrideFlagsFinalized = false;
     protected const array PHP_RUNTIME_TYPE_MAP = [
         'integer' => Type::INT,
         'double' => Type::FLOAT,

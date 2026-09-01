@@ -548,6 +548,7 @@ class Translator extends Preprocessor
             if (!$this->declarationExpressionsFinalized) {
                 $this->finalizeDeclarationExpressions(array_keys($this->preparedFileAsts));
             }
+            $this->finalizeMethodOverrideFlags();
             $file = realpath($file);
             $phpCode = $this->loadFile($file);
             $this->localHeaders = [];

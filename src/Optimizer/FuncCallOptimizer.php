@@ -965,7 +965,7 @@ trait FuncCallOptimizer
             );
         }
         if ($this->isScalarString($arg)) {
-            $cls = $this->getClass($arg->value);
+            $cls = $this->getClassDef($arg->value);
             if ($cls && $cls->extends) return $this->getLiteralString($cls->extends);
             if ($cls && !$cls->extends) return 'false';
         }

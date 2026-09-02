@@ -3287,6 +3287,9 @@ CODE;
                         }
                     }
                     if ($traitStmt instanceof Node\Stmt\Property) {
+                        if ($traitStmt->getAttribute(self::TRAIT_ORIGIN_ATTRIBUTE) === null) {
+                            $traitStmt->setAttribute(self::TRAIT_ORIGIN_ATTRIBUTE, $traitFullName);
+                        }
                         foreach ($traitStmt->props as $k2 => $prop) {
                             $propName = strtolower($prop->name->toString());
                             if (isset($properties[$propName])) {
@@ -5609,7 +5612,14 @@ CODE;
             } elseif ($stmt instanceof Node\Stmt\Property) {
                 foreach ($stmt->props as $prop) {
                     if (!$this->classDef->hasProperty($prop->name->toString())) {
-                        $this->parseClassPropertyDef($stmt);
+                        $origin = $stmt->getAttribute(self::TRAIT_ORIGIN_ATTRIBUTE);
+                        if (is_string($origin)) {
+                            $this->withTraitNameContext($origin, function () use ($stmt): void {
+                                $this->parseClassPropertyDef($stmt);
+                            });
+                        } else {
+                            $this->parseClassPropertyDef($stmt);
+                        }
                         break;
                     }
                 }

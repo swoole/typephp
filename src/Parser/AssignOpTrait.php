@@ -1650,6 +1650,12 @@ trait AssignOpTrait
         $this->assertNativeArrayAccessDirectWrite($expr->var, false);
         $this->checkLeftValue($expr->var);
 
+        $arrayContainerCanChange = $expr->var instanceof Expr\ArrayDimFetch
+            && $expr->var->dim !== null
+            && ($this->shouldMaterializeOrderedOperand($expr->var->var)
+                || $this->shouldMaterializeOrderedOperand($expr->var->dim)
+                || $this->shouldMaterializeOrderedOperand($expr->expr));
+
         // Zend evaluates the target's receiver and array keys exactly once,
         // before the isset check and regardless of its outcome. The lowering
         // below mentions the target several times (isset, read, write), so
@@ -1711,11 +1717,19 @@ trait AssignOpTrait
             }
         }
 
-        $isset = $var !== null && $this->isNativeObjectVar($var)
-            ? $var . ' != nullptr'
-            : $this->parseChainedExpr($expr->var, self::OP_ISSET);
-
-        $var ??= $this->parseWritableIdentifier($expr->var);
+        $arrayAccessTarget = $this->resolveCoalesceArrayAccessTarget(
+            $expr->var,
+            $arrayContainerCanChange,
+        );
+        if ($var !== null && $this->isNativeObjectVar($var)) {
+            $isset = $var . ' != nullptr';
+        } elseif ($arrayAccessTarget !== null) {
+            $var = $this->addTmpVar(Type::VAR);
+            $isset = $this->parseArrayAccessCoalescePresence($arrayAccessTarget, $var);
+        } else {
+            $isset = $this->parseChainedExpr($expr->var, self::OP_ISSET);
+            $var ??= $this->parseWritableIdentifier($expr->var);
+        }
         $propertyWriteTarget = $this->preparePropertyWriteTarget($expr->var);
 
         if ($propertyWriteTarget !== null) {
@@ -1744,7 +1758,6 @@ trait AssignOpTrait
             $this->errorUndefinedVariable($expr->expr);
         }
 
-        $arrayAccessTarget = $this->resolveCoalesceArrayAccessTarget($expr->var);
         if ($arrayAccessTarget !== null) {
             return $this->emitCoalesceArrayAccessAssignment(
                 $arrayAccessTarget,
@@ -1800,79 +1813,149 @@ trait AssignOpTrait
     }
 
     /**
-     * ArrayAccess dimensions do not expose writable buckets: offsetGet()
-     * returns a value, while a write must dispatch through offsetSet(). Keep
-     * ordinary arrays on the existing lvalue path so assignments into array
-     * references continue to update the referenced bucket in place.
-     *
-     * @return array{container: string, key: string, objectCondition: string}|null
+     * A fixed php::Array exposes a real bucket lvalue through item(), but an
+     * object or dynamically represented container may dispatch [] through
+     * ArrayAccess. Its offsetGet() result is a value, not the write target;
+     * the not-set branch must therefore use offsetSet().
      */
-    private function resolveCoalesceArrayAccessTarget(Expr $target): ?array
-    {
+    private function resolveCoalesceArrayAccessTarget(
+        Expr $target,
+        bool $includeFixedArray,
+    ): ?Expr\ArrayDimFetch {
         if (!$target instanceof Expr\ArrayDimFetch
             || $target->dim === null
-            || !$this->isVarExpr($target->var)
             || $this->isStdContainerExpr($target)
+            || $this->isNativeObjectClass($this->detectClassOfExpr($target->var))
         ) {
             return null;
         }
 
-        $container = $this->parseIdentifier($target->var);
-        $containerType = $this->getVarType($container);
-        if (!in_array($containerType, [Type::OBJECT, Type::VAR, Type::REF], true)) {
-            return null;
+        $types = [Type::OBJECT, Type::VAR, Type::REF];
+        if ($includeFixedArray) {
+            // A key/container expression or the RHS can pass the source
+            // variable by reference and replace an inferred php::Array with an
+            // ArrayAccess object. Keep the direct array lvalue fast path only
+            // when no intervening expression can change its representation.
+            $types[] = Type::ARRAY;
         }
-
-        return [
-            'container' => $container,
-            'key' => $this->parseIdentifier($target->dim),
-            // Even a statically object-typed PHP variable may currently hold
-            // null. PHP converts that null to an array on dimension write, so
-            // only the runtime object case may dispatch through offsetSet().
-            'objectCondition' => $container . '.isObject()',
-        ];
+        return in_array($this->detectTypeOfExpr($target->var), $types, true)
+            ? $target
+            : null;
     }
 
     /**
-     * @param array{container: string, key: string, objectCondition: string} $target
+     * Keep the coalesce read and write operations separate for a target that
+     * can be ArrayAccess at runtime. The presence expression supplies the
+     * already-read hit value. The miss branch completes the RHS before
+     * dispatching the write, exactly like the general captured-RHS path.
+     *
      * @param list<string> $rightBefore
      * @param list<string> $rightAfter
      */
     private function emitCoalesceArrayAccessAssignment(
-        array $target,
+        Expr\ArrayDimFetch $target,
         string $isset,
-        string $readTarget,
+        string $selectedValue,
         string $right,
         array $rightBefore,
         array $rightAfter,
     ): string {
-        $current = $this->genTmpVarName();
-        $rhs = $this->genTmpVarName();
-        $container = $target['container'];
-        $key = $target['key'];
-        $isObject = $this->genTmpVarName();
+        $rhs = $this->addTmpVar(Type::VAR);
+        $store = $this->parseArrayAccessCoalesceStore($target, $rhs);
 
         $code = '[&]() -> php::Var {' . PHP_EOL;
-        $code .= $this->getIndent() . 'const bool ' . $isObject . ' = '
-            . $target['objectCondition'] . ';' . PHP_EOL;
-        $code .= $this->getIndent() . 'if (' . $isset . ') {' . PHP_EOL;
-        $code .= $this->getIndent(2) . 'php::Var ' . $current . ' = ' . $isObject
-            . ' ? ' . $container . '.offsetGet(' . $key . ') : ' . $readTarget . ';' . PHP_EOL;
-        $code .= $this->getIndent(2) . 'if (!' . $current . '.isNull()) {' . PHP_EOL;
-        $code .= $this->getIndent(3) . 'return ' . $current . ';' . PHP_EOL;
-        $code .= $this->getIndent(2) . '}' . PHP_EOL;
-        $code .= $this->getIndent() . '}' . PHP_EOL;
+        $code .= $this->getIndent() . 'if (' . $isset . ') { return ' . $selectedValue . '; }' . PHP_EOL;
         $code .= $this->formatCapturedStmtLines($rightBefore);
-        $code .= $this->getIndent() . 'php::Var ' . $rhs . ' = ' . $right . ';' . PHP_EOL;
+        $code .= $this->getIndent() . $rhs . ' = ' . $right . ';' . PHP_EOL;
         $code .= $this->formatCapturedStmtLines($rightAfter);
-        $code .= $this->getIndent() . 'if (' . $isObject . ') {' . PHP_EOL;
-        $code .= $this->getIndent(2) . $container . '.offsetSet(' . $key . ', ' . $rhs . ');' . PHP_EOL;
-        $code .= $this->getIndent() . '} else {' . PHP_EOL;
-        $code .= $this->getIndent(2) . $readTarget . ' = ' . $rhs . ';' . PHP_EOL;
-        $code .= $this->getIndent() . '}' . PHP_EOL;
+        $code .= $this->getIndent() . $store . ';' . PHP_EOL;
         $code .= $this->getIndent() . 'return ' . $rhs . ';' . PHP_EOL;
-        $code .= $this->getIndent() . '}()';
-        return $code;
+        return $code . $this->getIndent() . '}()';
+    }
+
+    /**
+     * Read a stabilized ArrayAccess-capable target without routing the object
+     * through php::exists(..., result). That generic chain first invokes the
+     * object's has-dimension handler and then performs an IS-mode read, which
+     * invokes offsetExists() a second time. Zend's ??= calls offsetExists()
+     * once, calls offsetGet() only after a positive result, and still treats a
+     * null offsetGet() result as a miss.
+     *
+     * A referenced source variable can also change representation while a key
+     * expression or offsetExists() runs. Keep non-object values on the generic
+     * chain path; only the phase snapshot's runtime object uses the explicit
+     * ArrayAccess sequence.
+     */
+    private function parseArrayAccessCoalescePresence(
+        Expr\ArrayDimFetch $target,
+        string $selectedValue,
+    ): string {
+        if ($this->isVarExpr($target->var)) {
+            $container = $this->parseIdentifier($target->var);
+            $this->checkVarMustExist($target->var, $container);
+            $containerPresence = null;
+        } elseif ($target->var instanceof Expr\ArrayDimFetch && $target->var->dim !== null) {
+            // Apply the same phase semantics recursively. The generic chain
+            // walker performs an IS-mode read after its has-dimension check,
+            // which invokes offsetExists() twice on intermediate ArrayAccess.
+            $container = $this->addTmpVar(Type::VAR);
+            $containerPresence = $this->parseArrayAccessCoalescePresence(
+                $target->var,
+                $container,
+            );
+        } else {
+            // A property/call result is evaluated as a value. A writable read
+            // here would create missing outer array buckets before the RHS.
+            $container = $this->parseIdentifier($target->var);
+            $containerPresence = null;
+        }
+        $key = $this->parseIdentifier($target->dim);
+
+        // Snapshot the container and key for the complete presence/read
+        // phase. offsetExists() may rebind either source variable, but Zend
+        // still invokes offsetGet() on the same object with the same key. The
+        // write phase deliberately evaluates the source expressions again.
+        $stableContainer = $this->genTmpVarName();
+        $stableKey = $this->genTmpVarName();
+
+        $objectPresence = '(' . $stableContainer . '.offsetExists(' . $stableKey . ')'
+            . ' && ((' . $selectedValue . ' = ' . $stableContainer . '.offsetGet(' . $stableKey . ')),'
+            . ' !' . $selectedValue . '.isNull()))';
+        $otherPresence = 'php::exists(' . $stableContainer . ', '
+            . '{{php::ArrayDimFetch, ' . Type::VAR . '(' . $stableKey . ')}}, '
+            . $selectedValue . ')';
+        $presence = '(' . $stableContainer . '.isObject() ? '
+            . $objectPresence . ' : ' . $otherPresence . ')';
+
+        $probe = '([&](' . Type::VAR . ' ' . $stableContainer . ') { '
+            . Type::VAR . ' ' . $stableKey . ' = ' . $key . '; '
+            . 'return ' . $presence . '; })(' . $container . ')';
+        return $containerPresence === null
+            ? $probe
+            : '(' . $containerPresence . ' && ' . $probe . ')';
+    }
+
+    /**
+     * Write a stabilized array-dimension target without treating offsetGet()
+     * as an lvalue. The key expression, offsetExists(), or RHS may replace the
+     * source container through an alias, so dispatch using the value that is
+     * current at the write phase. item(..., true) retains reference-bucket
+     * semantics for the runtime array case.
+     */
+    private function parseArrayAccessCoalesceStore(Expr\ArrayDimFetch $target, string $value): string
+    {
+        $container = $this->parseWritableIdentifier($target->var);
+        $key = $this->parseIdentifier($target->dim);
+        $stableContainer = $this->genTmpVarName();
+
+        $arrayWrite = 'static_cast<void>(' . $stableContainer . '.item('
+            . $key . ', true) = ' . $value . ')';
+        $objectWrite = $stableContainer . '.offsetSet(' . $key . ', ' . $value . ')';
+        $store = '(' . $stableContainer . '.isArray() ? '
+            . $arrayWrite . ' : ' . $objectWrite . ')';
+
+        return '[&](auto &&' . $stableContainer . ') { ' . $store . '; }('
+            . $container . ')';
     }
 
     /**

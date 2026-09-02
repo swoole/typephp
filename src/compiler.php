@@ -13,7 +13,7 @@ function main(int $argc, array $argv): void
     ini_set('memory_limit', '-1');
 
     if (!defined('TYPEPHP_ROOT_PATH')) {
-        define('TYPEPHP_ROOT_PATH', getcwd());
+        define('TYPEPHP_ROOT_PATH', getenv("TYPEPHP_HOME") ?: getcwd());
     }
     if (!defined('TYPEPHP_DEBUG')) {
         define('TYPEPHP_DEBUG', true);

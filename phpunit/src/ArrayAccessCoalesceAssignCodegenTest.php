@@ -1,8 +1,18 @@
 <?php
+/**
+ * This file is part of TypePHP(AOT).
+ *
+ * @link     https://www.swoole.com/aot/
+ * @contact  service@swoole.com
+ */
 
 use TypePhp\CompilerTest;
 
-final class ArrayAccessCoalesceAssignCodegenTest extends \BaseTest
+/**
+ * @internal
+ * @coversNothing
+ */
+final class ArrayAccessCoalesceAssignCodegenTest extends BaseTest
 {
     public function testObjectTargetSeparatesPresenceReadAndWrite(): void
     {
@@ -13,7 +23,7 @@ final class ArrayAccessCoalesceAssignCodegenTest extends \BaseTest
         self::assertSame(1, substr_count($body, '.offsetGet('));
         self::assertSame(1, substr_count($body, '.offsetSet(key,'));
         self::assertStringContainsString('.isObject()', $body);
-        self::assertStringContainsString('.isArray()', $body);
+        self::assertStringContainsString('.assignKeyedDimension(key,', $body);
     }
 
     public function testMixedTargetRetainsArrayAndObjectDispatch(): void
@@ -23,8 +33,8 @@ final class ArrayAccessCoalesceAssignCodegenTest extends \BaseTest
 
         self::assertStringContainsString('.isObject()', $body);
         self::assertStringContainsString('php::exists(', $body);
-        self::assertStringContainsString('.isArray()', $body);
         self::assertStringContainsString('.offsetSet(key,', $body);
+        self::assertStringContainsString('.assignKeyedDimension(key,', $body);
     }
 
     public function testMagicContainerIsEvaluatedOncePerReadAndWritePhase(): void
@@ -52,8 +62,8 @@ final class ArrayAccessCoalesceAssignCodegenTest extends \BaseTest
         $body = $this->extractFunctionBody($code, 'php::Var php_coalescemutablefixedarray(');
 
         self::assertStringContainsString('.isObject()', $body);
-        self::assertStringContainsString('.isArray()', $body);
         self::assertStringContainsString('.offsetSet(key,', $body);
+        self::assertStringContainsString('.assignKeyedDimension(key,', $body);
     }
 
     private function extractFunctionBody(string $code, string $signature): string

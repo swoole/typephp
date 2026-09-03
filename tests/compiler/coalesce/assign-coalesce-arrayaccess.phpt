@@ -55,6 +55,32 @@ final class IndirectCoalesceHolder
     }
 }
 
+final class NullKeyCoalesceBag implements ArrayAccess
+{
+    public array $calls = [];
+
+    public function offsetExists(mixed $offset): bool
+    {
+        $this->calls[] = ['exists', $offset];
+        return false;
+    }
+
+    public function offsetGet(mixed $offset): mixed
+    {
+        $this->calls[] = ['get', $offset];
+        return null;
+    }
+
+    public function offsetSet(mixed $offset, mixed $value): void
+    {
+        $this->calls[] = ['set', $offset, $value];
+    }
+
+    public function offsetUnset(mixed $offset): void
+    {
+    }
+}
+
 function rebindCoalesceToArray(mixed &$container, string &$key): int
 {
     $container = [];
@@ -87,6 +113,31 @@ function inspectNestedCoalesceRhs(array $container): int
 function showIndirectCoalesce(string $label, mixed $value): void
 {
     echo $label, ':', json_encode($value), "\n";
+}
+
+function dynamicCoalesceWrite(mixed $container, mixed $key, mixed $rhs): mixed
+{
+    return [$container[$key] ??= $rhs, $container];
+}
+
+function referencedCoalesceWrite(mixed &$container, mixed $key, mixed $rhs): mixed
+{
+    return $container[$key] ??= $rhs;
+}
+
+function showDynamicCoalesce(string $label, mixed $container, mixed $key, mixed $rhs): void
+{
+    set_error_handler(static function (int $level, string $message, string $file, int $line): bool {
+        echo 'warning:', $message, "\n";
+        return true;
+    });
+    try {
+        showIndirectCoalesce($label, dynamicCoalesceWrite($container, $key, $rhs));
+    } catch (Throwable $error) {
+        showIndirectCoalesce($label, [$error::class, $error->getMessage(), $container]);
+    } finally {
+        restore_error_handler();
+    }
 }
 
 function main(): void
@@ -169,6 +220,31 @@ function main(): void
     $keyReplacement = new IndirectCoalesceBag();
     $result = ($keyRebound[rebindCoalesceKeyToObject($keyRebound, $keyReplacement)] ??= 83);
     showIndirectCoalesce('key-object', [$result, $keyReplacement->data, $keyReplacement->calls]);
+
+    showDynamicCoalesce('dynamic-null', null, 'key', 91);
+    showDynamicCoalesce('dynamic-false', false, 'key', 92);
+    showDynamicCoalesce('dynamic-true', true, 'key', 93);
+    showDynamicCoalesce('dynamic-int', 1, 'key', 94);
+    showDynamicCoalesce('dynamic-float', 1.5, 'key', 95);
+    showDynamicCoalesce('dynamic-array-string', [], 'key', 96);
+    showDynamicCoalesce('dynamic-array-offset', [], 3, 97);
+    showDynamicCoalesce('dynamic-array-null-key', [], null, 100);
+    showDynamicCoalesce('dynamic-string-hit', 'abc', 1, 'XY');
+    showDynamicCoalesce('dynamic-string-write', 'abc', 5, 'XY');
+    showDynamicCoalesce('dynamic-string-key', 'abc', 'key', 'Z');
+
+    $referenced = [];
+    $alias =& $referenced;
+    $result = referencedCoalesceWrite($alias, 'key', 98);
+    showIndirectCoalesce('dynamic-reference', [$result, $referenced, $alias]);
+
+    $dynamicObject = new IndirectCoalesceBag();
+    $result = referencedCoalesceWrite($dynamicObject, 'key', 99);
+    showIndirectCoalesce('dynamic-object', [$result, $dynamicObject->data, $dynamicObject->calls]);
+
+    $nullKeyObject = new NullKeyCoalesceBag();
+    $result = referencedCoalesceWrite($nullKeyObject, null, 101);
+    showIndirectCoalesce('dynamic-object-null-key', [$result, $nullKeyObject->calls]);
 }
 ?>
 --EXPECT--
@@ -183,3 +259,20 @@ phase-miss:[74,"new",[],["exists:old"],{"new":74},["set:new"]]
 object-array:[81,"array-key",{"array-key":81},["exists:old"]]
 array-object:[82,"object-key",{"object-key":82},["set:object-key"]]
 key-object:[83,{"key":83},["exists:key","set:key"]]
+dynamic-null:[91,{"key":91}]
+warning:Automatic conversion of false to array is deprecated
+dynamic-false:[92,{"key":92}]
+dynamic-true:["Error","Cannot use a scalar value as an array",true]
+dynamic-int:["Error","Cannot use a scalar value as an array",1]
+dynamic-float:["Error","Cannot use a scalar value as an array",1.5]
+dynamic-array-string:[96,{"key":96}]
+dynamic-array-offset:[97,{"3":97}]
+warning:Using null as an array offset is deprecated, use an empty string instead
+dynamic-array-null-key:[100,{"":100}]
+dynamic-string-hit:["b","abc"]
+warning:Only the first byte will be assigned to the string offset
+dynamic-string-write:["X","abc  X"]
+dynamic-string-key:["TypeError","Cannot access offset of type string on string","abc"]
+dynamic-reference:[98,{"key":98},{"key":98}]
+dynamic-object:[99,{"key":99},["exists:key","set:key"]]
+dynamic-object-null-key:[101,[["exists",null],["set",null,101]]]

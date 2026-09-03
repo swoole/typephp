@@ -1013,10 +1013,17 @@ trait FuncCallOptimizer
                 return false;
             }
         }
+        $args = count($e->args);
+        if ($args >= 3) {
+            // Neither optimized implementation preserves the full contract of
+            // an explicit mode. The PHPX wrapper bypasses Zend's validation,
+            // while Decimal::round() has no mode parameter at all.
+            return false;
+        }
         $type = $this->detectTypeOfExpr($e->args[0]->value);
         if ($type === Type::DECIMAL) {
             $a0 = $this->parseExpr($e->args[0]->value);
-            if (count($e->args) >= 2) {
+            if ($args >= 2) {
                 return 'php::Decimal::round(' . $a0 . ', ' . $this->parseExpr($e->args[1]->value) . ')';
             }
             return 'php::Decimal::round(' . $a0 . ')';
@@ -1028,25 +1035,7 @@ trait FuncCallOptimizer
         if (!in_array($type, [Type::INT, Type::FLOAT], true)) {
             return false;
         }
-        // PHP 8.4+ also declares $mode as int|RoundingMode. The direct PHPX
-        // wrapper takes an integer; enum objects must remain on Zend dispatch.
-        if (count($e->args) >= 3
-            && $this->detectTypeOfExpr($e->args[2]->value) !== Type::INT
-        ) {
-            return false;
-        }
         if (!$this->hasOptimizerSafeReflectedArguments($n, $e, $c)) {
-            return false;
-        }
-        $args = count($e->args);
-        if ($args >= 3) {
-            // php::fn::round() models the mode as an Int and calls
-            // _php_math_round() directly, bypassing Zend's validation of the
-            // parameter. A RoundingMode enum lowered to an int selects a
-            // different mode, and an out-of-range int aborts the process in
-            // php_round_helper instead of raising ValueError. A static int
-            // type does not prove the runtime value is one of the eight valid
-            // modes, so every explicit mode goes to the dynamic Zend path.
             return false;
         }
         if ($args >= 2) {

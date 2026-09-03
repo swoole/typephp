@@ -56,6 +56,16 @@ class RoundModeTest extends TestCase
         self::assertSame(2, substr_count($cpp, 'php::fn::round('));
     }
 
+    public function testDecimalWithAnExplicitModeReachesTheRuntime(): void
+    {
+        $cpp = $this->compileToCpp('round-with-decimal-mode.php');
+
+        self::assertSame(2, substr_count($cpp, 'php::Decimal::round('));
+        // Three calls wrap the results in var_dump(); the fourth is round()
+        // itself after the explicit mode disqualifies the Decimal fast path.
+        self::assertSame(4, substr_count($cpp, 'php::call('));
+    }
+
     private function compileToCpp(string $file): string
     {
         global $translator;

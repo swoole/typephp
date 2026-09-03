@@ -7,6 +7,17 @@ function main()
     // A valid legacy mode still produces PHP's result.
     var_dump(round(2.5, 0, PHP_ROUND_HALF_DOWN));
     var_dump(round(3.5, 0, PHP_ROUND_HALF_ODD));
+    var_dump(round(2.5, 0, RoundingMode::HalfEven));
+
+    // TypePHP extends one- and two-argument round() to Decimal, but Decimal's
+    // native helper has no mode parameter. An explicit mode must not be
+    // silently discarded by that fast path.
+    try {
+        var_dump(round(std::decimal('2.5'), 0, PHP_ROUND_HALF_DOWN));
+        echo "decimal-type-error-not-thrown\n";
+    } catch (TypeError $e) {
+        echo "caught=decimal-mode-type-error\n";
+    }
 
     // An out-of-range integer mode must raise ValueError. The Native wrapper
     // calls _php_math_round() directly, where the same value aborts the
@@ -47,6 +58,8 @@ function main()
 --EXPECT--
 float(2)
 float(3)
+float(2)
+caught=decimal-mode-type-error
 caught=round(): Argument #3 ($mode) must be a valid rounding mode (RoundingMode::*)
 caught=round(): Argument #3 ($mode) must be a valid rounding mode (RoundingMode::*)
 caught=round(): Argument #3 ($mode) must be a valid rounding mode (RoundingMode::*)

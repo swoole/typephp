@@ -85,6 +85,14 @@ trait LoopControlTrait
 
         $list_loop = [];
         foreach ($loop as $expr) {
+            // Convert post-increment/decrement to prefix in for-loop post-expressions.
+            // Return value is always discarded, so $i++ ≡ ++$i in this context.
+            // Prefix avoids zval copy + destructor from operator++(int) return value.
+            if ($expr instanceof Node\Expr\PostInc) {
+                $expr = new Node\Expr\PreInc($expr->var, $expr->getAttributes());
+            } elseif ($expr instanceof Node\Expr\PostDec) {
+                $expr = new Node\Expr\PreDec($expr->var, $expr->getAttributes());
+            }
             [$loopExpr, $beforeStmts, $afterStmts] = $this->parseExprWithCapturedStmts($expr);
             $loopExpr = $this->stringifyParsedExpr($loopExpr);
             if ($beforeStmts || $afterStmts) {

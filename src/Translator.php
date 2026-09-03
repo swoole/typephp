@@ -5708,6 +5708,10 @@ CODE;
             if ($current->hasMethod($methodName)) {
                 return $current->getMethod($methodName);
             }
+            $traitMethod = $this->findComposedTraitMethod($current, $methodName);
+            if ($traitMethod !== null) {
+                return $traitMethod;
+            }
             if ($includeAbstract && $current->hasAbstractMethod($methodName) && isset($current->abstractMethodDefs[strtolower($methodName)])) {
                 return $current->getAbstractMethod($methodName);
             }

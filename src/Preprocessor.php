@@ -1147,6 +1147,7 @@ class Preprocessor extends CompilerBase
         $this->resetFunction();
         $this->function = $this->parseIdentifier($v->name);
         $name = $this->getFunctionName($v);
+        unset($this->traitMethodFunctions[$name], $this->traitMethodFunctions[$this->escapeFunction($name)]);
         if ($this->hasFunction($name)) {
             $existing = $this->getFunction($name);
             $currentIsMethod = $this->methodDef !== null;

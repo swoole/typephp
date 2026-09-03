@@ -341,6 +341,8 @@ class CompilerBase implements PropertyAccessContext
     protected array $preparedFileAsts = [];
     protected bool $declarationExpressionsFinalized = false;
     protected bool $methodOverrideFlagsFinalized = false;
+    /** @var array<string, ?FunctionDef> */
+    protected array $traitMethodFunctions = [];
     protected const array PHP_RUNTIME_TYPE_MAP = [
         'integer' => Type::INT,
         'double' => Type::FLOAT,
@@ -2773,6 +2775,13 @@ class CompilerBase implements PropertyAccessContext
         // try to find it in the parent class.
         while (true) {
             if (!$classDef->hasMethod($method)) {
+                $traitMethod = $this->findComposedTraitMethod($classDef, $method);
+                if ($traitMethod !== null) {
+                    $methodDef = $traitMethod;
+                    $nativeName = $this->getNativeName($method, $classDef->namespace, $classDef->name);
+                    $this->traitMethodFunctions[$nativeName] = $traitMethod->functionDef;
+                    break;
+                }
                 if (!$classDef->extends) {
                     return false;
                 }
@@ -2806,6 +2815,50 @@ class CompilerBase implements PropertyAccessContext
             $this->checkNativeCallArgs($expr, $methodDef->functionDef, $expr->args, $classDef->getNamespacedName() . '::' . $method);
         }
         return $this->getNativeName($method, $classDef->namespace, $classDef->name);
+    }
+
+    /**
+     * @param array<string, true> $visitedTraits
+     */
+    protected function findComposedTraitMethod(
+        ClassDef $owner,
+        string $methodName,
+        array &$visitedTraits = [],
+    ): ?MethodDef {
+        $methodLower = strtolower($methodName);
+        foreach ($owner->usedTraits as $traitName) {
+            $traitKey = strtolower($traitName);
+            if (isset($visitedTraits[$traitKey]) || !$this->hasClass($traitName)) {
+                continue;
+            }
+            $visitedTraits[$traitKey] = true;
+            $traitDef = $this->getClass($traitName);
+            if ($traitDef->trait === null) {
+                continue;
+            }
+            if (isset($owner->traitIgnored[$this->getFullMethodName($traitName, $methodName)])) {
+                continue;
+            }
+            if ($traitDef->hasMethod($methodLower)) {
+                return $traitDef->getMethod($methodLower);
+            }
+            foreach ($owner->traitAliases as $fullMethodName => $aliases) {
+                foreach ($aliases as $alias) {
+                    if (strtolower($alias['newName']) === $methodLower) {
+                        $parts = explode('::', $fullMethodName);
+                        $origNameLower = strtolower(end($parts));
+                        if ($traitDef->hasMethod($origNameLower)) {
+                            return $traitDef->getMethod($origNameLower);
+                        }
+                    }
+                }
+            }
+            $nested = $this->findComposedTraitMethod($traitDef, $methodName, $visitedTraits);
+            if ($nested !== null) {
+                return $nested;
+            }
+        }
+        return null;
     }
 
     protected function findNativeClassConst(

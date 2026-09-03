@@ -161,7 +161,9 @@ trait CompilationStateTrait
 
     protected function addFunction(string $name, FunctionDef $functionDef): void
     {
-        $this->symbols->putFunction($this->escapeFunction($name), $functionDef);
+        $escaped = $this->escapeFunction($name);
+        unset($this->traitMethodFunctions[$escaped], $this->traitMethodFunctions[$name]);
+        $this->symbols->putFunction($escaped, $functionDef);
     }
 
     /**
@@ -169,12 +171,25 @@ trait CompilationStateTrait
      */
     protected function hasFunction(string $name): bool
     {
-        return $this->symbols->hasFunction($this->escapeFunction($name));
+        $escaped = $this->escapeFunction($name);
+        return $this->symbols->hasFunction($escaped)
+            || isset($this->traitMethodFunctions[$escaped])
+            || isset($this->traitMethodFunctions[$name]);
     }
 
     protected function getFunction(string $name): FunctionDef
     {
-        return $this->symbols->function($this->escapeFunction($name));
+        $escaped = $this->escapeFunction($name);
+        if ($this->symbols->hasFunction($escaped)) {
+            return $this->symbols->function($escaped);
+        }
+        if (isset($this->traitMethodFunctions[$escaped])) {
+            return $this->traitMethodFunctions[$escaped];
+        }
+        if (isset($this->traitMethodFunctions[$name])) {
+            return $this->traitMethodFunctions[$name];
+        }
+        return $this->symbols->function($escaped);
     }
 
     protected function addClass(string $name, ClassDef $classDef): void

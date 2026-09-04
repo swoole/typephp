@@ -48,5 +48,17 @@ class LoopControlTest extends \BaseTest
 
         // while/do-while body $i++ should NOT be converted — still i++
         $this->assertStringContainsString("\ti++;\n", $cpp);
+
+        // property postfix must NOT be rewritten — still postfix
+        $this->assertMatchesRegularExpression('/\.attr\([^)]+\)[^;]*\+\+/', $cpp);
+        $this->assertMatchesRegularExpression('/\.attr\([^)]+\)[^;]*--/', $cpp);
+
+        // static-property postfix must NOT be rewritten
+        $this->assertMatchesRegularExpression('/getStaticProperty\([^)]+\)[^;]*\+\+/', $cpp);
+        $this->assertMatchesRegularExpression('/getStaticProperty\([^)]+\)[^;]*--/', $cpp);
+
+        // array-element postfix must NOT be rewritten
+        $this->assertMatchesRegularExpression('/\.item\([^)]+\)[^;]*\+\+/', $cpp);
+        $this->assertMatchesRegularExpression('/\.item\([^)]+\)[^;]*--/', $cpp);
     }
 }

@@ -85,12 +85,12 @@ trait LoopControlTrait
 
         $list_loop = [];
         foreach ($loop as $expr) {
-            // Convert post-increment/decrement to prefix in for-loop post-expressions.
-            // Return value is always discarded, so $i++ ≡ ++$i in this context.
-            // Prefix avoids zval copy + destructor from operator++(int) return value.
-            if ($expr instanceof Node\Expr\PostInc) {
+            // for-loop post-expressions discard return value, so $i++ ≡ ++$i.
+            // Only rewrite simple variables; TypePHP lowers prefix and postfix
+            // differently for compound lvalues (e.g. static-property write-back).
+            if ($expr instanceof Node\Expr\PostInc && $this->isVarExpr($expr->var)) {
                 $expr = new Node\Expr\PreInc($expr->var, $expr->getAttributes());
-            } elseif ($expr instanceof Node\Expr\PostDec) {
+            } elseif ($expr instanceof Node\Expr\PostDec && $this->isVarExpr($expr->var)) {
                 $expr = new Node\Expr\PreDec($expr->var, $expr->getAttributes());
             }
             [$loopExpr, $beforeStmts, $afterStmts] = $this->parseExprWithCapturedStmts($expr);

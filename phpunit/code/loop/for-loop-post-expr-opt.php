@@ -45,3 +45,53 @@ function test_do_while_not_affected(): void {
         $i++;
     } while ($i < 10);
 }
+
+// --- Cases that must NOT be rewritten (property/static-property/array-element) ---
+
+class Counter {
+    public int $value = 0;
+}
+
+class StaticCounter {
+    public static int $count = 0;
+}
+
+function test_property_post_inc_not_rewritten(): void {
+    $obj = new Counter();
+    for ($i = 0; $i < 10; $i++) {
+        $obj->value++;
+    }
+}
+
+function test_property_post_dec_not_rewritten(): void {
+    $obj = new Counter();
+    for ($i = 0; $i < 10; $i++) {
+        $obj->value--;
+    }
+}
+
+function test_static_property_post_inc_not_rewritten(): void {
+    for ($i = 0; $i < 10; $i++) {
+        StaticCounter::$count++;
+    }
+}
+
+function test_static_property_post_dec_not_rewritten(): void {
+    for ($i = 0; $i < 10; $i++) {
+        StaticCounter::$count--;
+    }
+}
+
+function test_array_element_post_inc_not_rewritten(): void {
+    $arr = [0, 0, 0];
+    for ($i = 0; $i < 10; $i++) {
+        $arr[$i % 3]++;
+    }
+}
+
+function test_array_element_post_dec_not_rewritten(): void {
+    $arr = [10, 10, 10];
+    for ($i = 0; $i < 10; $i++) {
+        $arr[$i % 3]--;
+    }
+}

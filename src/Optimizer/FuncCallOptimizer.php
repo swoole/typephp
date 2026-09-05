@@ -324,7 +324,7 @@ trait FuncCallOptimizer
         }
 
         if (isset($config['constFold'])) {
-            $folded = $this->tryConstFold($config['constFold'], $config['constFoldExtra'] ?? null, $expr);
+            $folded = $this->tryConstFold($name, $config['constFold'], $config['constFoldExtra'] ?? null, $expr);
             if ($folded !== false) {
                 return $folded;
             }
@@ -715,13 +715,13 @@ trait FuncCallOptimizer
     // Constant folding
     // =========================================================================
 
-    protected function tryConstFold(int $rule, mixed $extra, Node\Expr\FuncCall $expr): string|false
+    protected function tryConstFold(string $name, int $rule, mixed $extra, Node\Expr\FuncCall $expr): string|false
     {
         return match ($rule) {
             self::FOLD_STRING_LEN => $this->doFoldStringLen($expr),
-            self::FOLD_STRING_CASE => $this->doFoldStringCase($expr),
-            self::FOLD_CMP2 => $this->doFoldCmp2($expr),
-            self::FOLD_CMP3 => $this->doFoldCmp3($expr),
+            self::FOLD_STRING_CASE => $this->doFoldStringCase($name, $expr),
+            self::FOLD_CMP2 => $this->doFoldCmp2($name, $expr),
+            self::FOLD_CMP3 => $this->doFoldCmp3($name, $expr),
             self::FOLD_COUNT_LITERAL => $this->doFoldCountLiteral($expr),
             self::FOLD_KNOWN_CLASS => $this->doFoldKnownClass($expr),
             self::FOLD_KNOWN_CONSTANT => $this->doFoldKnownConstant($expr),
@@ -738,32 +738,30 @@ trait FuncCallOptimizer
             : false;
     }
 
-    protected function doFoldStringCase(Node\Expr\FuncCall $expr): string|false
+    protected function doFoldStringCase(string $name, Node\Expr\FuncCall $expr): string|false
     {
         $arg = $expr->args[0]->value;
         if (!$this->isScalarString($arg)) {
             return false;
         }
-        $func = $expr->name instanceof Node\Name ? $expr->name->toLowerString() : '';
-        $val = $func === 'strtoupper' ? strtoupper($arg->value) : strtolower($arg->value);
+        $val = $name === 'strtoupper' ? strtoupper($arg->value) : strtolower($arg->value);
         return $this->getLiteralString($val);
     }
 
-    protected function doFoldCmp2(Node\Expr\FuncCall $expr): string|false
+    protected function doFoldCmp2(string $name, Node\Expr\FuncCall $expr): string|false
     {
         $a0 = $expr->args[0]->value;
         $a1 = $expr->args[1]->value;
         if (!$this->isScalarString($a0) || !$this->isScalarString($a1)) {
             return false;
         }
-        $func = $expr->name instanceof Node\Name ? $expr->name->toLowerString() : '';
-        $result = $func === 'strcasecmp'
+        $result = $name === 'strcasecmp'
             ? strcasecmp($a0->value, $a1->value)
             : strcmp($a0->value, $a1->value);
         return $result . $this->getPlatform()->getIntegerLiteralSuffix();
     }
 
-    protected function doFoldCmp3(Node\Expr\FuncCall $expr): string|false
+    protected function doFoldCmp3(string $name, Node\Expr\FuncCall $expr): string|false
     {
         $a0 = $expr->args[0]->value;
         $a1 = $expr->args[1]->value;
@@ -771,8 +769,7 @@ trait FuncCallOptimizer
         if (!$this->isScalarString($a0) || !$this->isScalarString($a1) || !$this->isScalarInt($a2)) {
             return false;
         }
-        $func = $expr->name instanceof Node\Name ? $expr->name->toLowerString() : '';
-        $result = $func === 'strncasecmp'
+        $result = $name === 'strncasecmp'
             ? strncasecmp($a0->value, $a1->value, (int) $a2->value)
             : strncmp($a0->value, $a1->value, (int) $a2->value);
         return $result . $this->getPlatform()->getIntegerLiteralSuffix();

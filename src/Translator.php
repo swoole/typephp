@@ -1200,7 +1200,10 @@ CODE;
                 && !$classDef->trait
                 && !$classDef->enum
             ) {
-                $code .= 'static zend_object* (*create_object_' . $classDef->getNamespacedName() . ")(zend_class_entry *class_type);\n";
+                if ($classDef->requireCtor) {
+                    $code .= 'static zend_object* (*create_object_' . $classDef->getNamespacedName()
+                        . ")(zend_class_entry *class_type);\n";
+                }
                 $code .= 'static zend_object_handlers property_handlers_' . $classDef->getNamespacedName() . ";\n";
             }
             foreach ($classDef->constants as $constant) {

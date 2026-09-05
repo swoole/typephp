@@ -70,6 +70,20 @@ final class NewObjectCodegenTest extends \BaseTest
         );
     }
 
+    public function testCreateObjectFunctionStorageIsOnlyDeclaredForClassesThatUseIt(): void
+    {
+        [, $extension] = $this->compileFixtureAndExtension();
+
+        self::assertStringNotContainsString(
+            'static zend_object* (*create_object_KnownNewObjectCodegen)',
+            $extension,
+        );
+        self::assertStringContainsString(
+            'static zend_object* (*create_object_RuntimeArrayDefaultCodegen)',
+            $extension,
+        );
+    }
+
     public function testRuntimeArrayDefaultsUseLazyRequestTemplates(): void
     {
         [, $extension] = $this->compileFixtureAndExtension();

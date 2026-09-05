@@ -67,6 +67,11 @@ final class DynamicCallTarget
         return $value + 1;
     }
 
+    public static function addTwoStatic(int $value): int
+    {
+        return $value + 2;
+    }
+
     public function addTwo(int $value): int
     {
         return $value + 2;
@@ -95,6 +100,16 @@ final class DynamicCallTarget
 
 final class DynamicCallAlternateTarget
 {
+    public static function addOne(int $value): int
+    {
+        return $value + 1;
+    }
+
+    public static function addTwoStatic(int $value): int
+    {
+        return $value + 2;
+    }
+
     public function hitOne(int $value): int
     {
         return $value + 1;
@@ -290,6 +305,37 @@ function runDynamicStaticClassAndMethodCall(int $iterations): int
     return $sum;
 }
 
+function runAlternatingDynamicStaticClassCall(int $iterations): int
+{
+    $sum = 0;
+    for ($i = 0; $i < $iterations; $i++) {
+        $class = ($i & 1) === 0 ? DynamicCallTarget::class : DynamicCallAlternateTarget::class;
+        $sum += $class::addOne($i);
+    }
+    return $sum;
+}
+
+function runAlternatingDynamicStaticMethodCall(int $iterations): int
+{
+    $sum = 0;
+    for ($i = 0; $i < $iterations; $i++) {
+        $method = ($i & 1) === 0 ? 'addOne' : 'addTwoStatic';
+        $sum += DynamicCallTarget::$method($i);
+    }
+    return $sum;
+}
+
+function runAlternatingDynamicStaticClassAndMethodCall(int $iterations): int
+{
+    $sum = 0;
+    for ($i = 0; $i < $iterations; $i++) {
+        $class = ($i & 1) === 0 ? DynamicCallTarget::class : DynamicCallAlternateTarget::class;
+        $method = ($i & 1) === 0 ? 'addOne' : 'addTwoStatic';
+        $sum += $class::$method($i);
+    }
+    return $sum;
+}
+
 function runObjectMethodArrayCall(int $iterations): int
 {
     $target = new DynamicCallTarget();
@@ -412,6 +458,9 @@ function runDynamicCallCase(string $case, int $iterations): int
         'static_class_dynamic' => runDynamicStaticClassCall($iterations),
         'static_method_dynamic' => runDynamicStaticMethodCall($iterations),
         'static_class_method_dynamic' => runDynamicStaticClassAndMethodCall($iterations),
+        'static_class_alternating' => runAlternatingDynamicStaticClassCall($iterations),
+        'static_method_alternating' => runAlternatingDynamicStaticMethodCall($iterations),
+        'static_class_method_alternating' => runAlternatingDynamicStaticClassAndMethodCall($iterations),
         'object_method_array' => runObjectMethodArrayCall($iterations),
         'invokable_object' => runInvokableObjectCall($iterations),
         'method_name_monomorphic' => runMonomorphicMethodNameCall($iterations),
@@ -465,6 +514,9 @@ function main(): void
         'static_class_dynamic',
         'static_method_dynamic',
         'static_class_method_dynamic',
+        'static_class_alternating',
+        'static_method_alternating',
+        'static_class_method_alternating',
         'object_method_array',
         'invokable_object',
         'method_name_monomorphic',

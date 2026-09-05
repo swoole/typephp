@@ -413,6 +413,10 @@ trait PropertyAccessTrait
 
         if ($resolution !== null) {
             $property = $this->propertyNameToStr($expr->name, literal: true);
+            // Reference acquisition must run getStaticPropertyRef(): it
+            // converts the live slot to IS_REFERENCE and attaches a typed
+            // property's zend_property_info as a reference type source. The
+            // ordinary value-slot cache deliberately does neither operation.
             if ($resolution->class !== null) {
                 $classPtr = $this->getClassEntryPtr($resolution->class);
                 return Symbol::getStaticPropertyRef() . '(' . $classPtr . ', ' . $property . ')';

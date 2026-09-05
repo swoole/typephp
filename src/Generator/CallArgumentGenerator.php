@@ -20,6 +20,9 @@ use TypePhp\Generator\Symbol;
 
 trait CallArgumentGenerator
 {
+    /** Guard against a broken lowering path producing an unbounded call. */
+    private const CALL_ARGUMENT_LIMIT = 65_536;
+
     protected function parseNativeCallArgs(
         array $callArgs,
         string $nativeFunc,
@@ -27,6 +30,7 @@ trait CallArgumentGenerator
         bool $deferTrailingDefaults = false,
     ): string
     {
+        $this->assertCallArgumentLimit($callArgs);
         $functionDef = $this->getFunction($nativeFunc);
         $providedArgs = [];
         $defaultArgs = [];
@@ -414,6 +418,7 @@ trait CallArgumentGenerator
         bool $preserveExistingReferences = false
     ): string
     {
+        $this->assertCallArgumentLimit($args);
         $list_args = [];
         $arrayArgsVar = null;
         $argsVar = null;
@@ -580,7 +585,12 @@ trait CallArgumentGenerator
         if ($arrayArgsVar !== null) {
             return $namedArgsVar !== null ? $arrayArgsVar . ', ' . $namedArgsVar . '.array()' : $arrayArgsVar;
         }
-        $callArgs = Symbol::argList() . '{' . implode(', ', $list_args) . '}';
+        // VarList deduces the fixed argument count and owns contiguous
+        // Variant storage, which PHPX passes directly to Zend without a
+        // dynamic php::Args allocation. materializeCallArgValue() above
+        // ensures that ordinary values do not leave INDIRECT borrows in the
+        // list; explicit reference arguments remain references.
+        $callArgs = Symbol::varList() . '{' . implode(', ', $list_args) . '}';
         return $namedArgsVar !== null ? $callArgs . ', ' . $namedArgsVar . '.array()' : $callArgs;
     }
 
@@ -667,7 +677,7 @@ trait CallArgumentGenerator
                 'Native objects cannot cross a dynamic PHP/ZendVM call boundary'
             );
         }
-        // C++17 evaluates php::ArgList{...} elements from left to right, but a
+        // C++17 evaluates fixed argument array elements from left to right, but a
         // later argument may emit captured beforeStmtLines while being lowered.
         // Those statements are placed before the whole outer call and would
         // overtake an earlier Call left inside the initializer list. Complete
@@ -692,9 +702,9 @@ trait CallArgumentGenerator
         // A call that returns by reference yields a live php::Ref aliasing the
         // callee's storage. When such a call feeds a by-value argument, PHP takes
         // a value snapshot at evaluation time (left to right), so later mutations
-        // to the aliased storage must not be observable. The dynamic ArgList keeps
-        // references verbatim (Ctor::CopyRef), so we dereference into a temporary
-        // value at the point of the call.
+        // to the aliased storage must not be observable. PHPX argument container
+        // constructors preserve explicit references, so dereference into a
+        // temporary value at the point of an ordinary by-value call.
         $expr = $this->materializeRefReturnAsValue($value, $expr);
         if (!$this->shouldMaterializeCallArg($value)) {
             return $expr;
@@ -709,6 +719,17 @@ trait CallArgumentGenerator
         }
 
         return $value instanceof Expr\PropertyFetch;
+    }
+
+    protected function assertCallArgumentLimit(array $args): void
+    {
+        if (count($args) <= self::CALL_ARGUMENT_LIMIT) {
+            return;
+        }
+        $this->fatalError(
+            $args[self::CALL_ARGUMENT_LIMIT],
+            'A function call cannot contain more than 65536 arguments',
+        );
     }
 
     protected function parseReferenceCallArgValue(Node\Arg $arg): string

@@ -65,6 +65,11 @@ class Symbol
         return 'php::ArgList';
     }
 
+    public static function varList(): string
+    {
+        return 'php::VarList';
+    }
+
     public static function safeIndex(string $index, int|string $size): string
     {
         return "php::safeIndex({$index}, {$size})";

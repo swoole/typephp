@@ -20,14 +20,20 @@ The `scoped_*` cases exercise private/protected dynamic calls that must resolve
 with the compiled method's lexical scope. They are kept separate because a
 scoped cache must guard both the target callable and its calling scope.
 
-The `static_*_dynamic` cases exercise direct `$class::method()`,
-`Class::$method()`, and `$class::$method()` syntax. These sites still construct
-their callable string dynamically, but now reuse the request-local resolution
-slot instead of repeating `zend_is_callable_ex()` on every iteration.
+The `static_*_dynamic` cases exercise direct `$class::fixedMethod()`,
+`Class::$method()`, and `$class::$method()` syntax. PHPX resolves the class and
+method independently through Zend's public class handlers, avoiding a
+temporary `"Class::method"` callable string. Dynamic static dispatch is not
+cached: only a source-level fixed class is lowered to a reusable class entry.
+The corresponding `*_alternating` cases model route-like inputs where the
+class or method changes at the same call site.
 
 The monomorphic string-call cases cover zero, one, two, and four positional
 arguments. This separates callable-cache lookup cost from argument
-materialization cost and protects the small stack-argument fast path.
+materialization cost. Fixed positional arguments are emitted as a contiguous
+`std::array<php::Variant, N>` and passed through PHPX without constructing the
+dynamic `php::Args` vector. Calls containing argument unpacking continue to
+use `php::Args`/`php::Array` because their final size is only known at runtime.
 
 Run it from the repository root against a release PHP/PHPX build:
 

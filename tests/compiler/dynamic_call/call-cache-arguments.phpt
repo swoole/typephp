@@ -1,5 +1,5 @@
 --TEST--
-Dynamic call cache preserves small, large, named, unpacked, reference, and exception arguments
+Dynamic call cache preserves fixed, named, unpacked, reference, and exception arguments
 --FILE--
 <?php
 
@@ -18,12 +18,21 @@ function cached_throw(string $message): never
     throw new RuntimeException($message);
 }
 
+class CachedArgumentHolder
+{
+    public int $value = 6;
+}
+
 function main(): void
 {
     $sum = 'cached_sum';
     var_dump($sum(1, 2, 3, 4));
     var_dump($sum(1, 2, 3, 4, 5));
     var_dump($sum(d: 4, c: 3, b: 2, a: 1));
+
+    $holder = new CachedArgumentHolder();
+    $values = [7];
+    var_dump($sum($holder->value, $values[0], 3, 4, 5));
 
     $arguments = [1, 2, 3, 4, 5];
     var_dump($sum(...$arguments));
@@ -45,6 +54,7 @@ function main(): void
 int(10)
 int(15)
 int(10)
+int(25)
 int(15)
 int(11)
 int(11)

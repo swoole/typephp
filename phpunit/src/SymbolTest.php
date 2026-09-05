@@ -47,6 +47,11 @@ class SymbolTest extends TestCase
         $this->assertEquals('php::ArgList', Symbol::argList());
     }
 
+    public function testVarList(): void
+    {
+        $this->assertEquals('php::VarList', Symbol::varList());
+    }
+
     public function testGetCalledCe(): void
     {
         $this->assertSame('typephp_get_called_ce(this_)', Symbol::getCalledCe());

@@ -103,6 +103,10 @@ php::CallableScope tmp_var_1 = php::getCallableScope(
 
 ### 3.5 使用入口
 
+#### `typephp_call_cached()` / `typephp_call_method_cached()`
+
+TypePHP 为每个未解析的函数或对象方法调用点分配一个 request 级 slot。字符串 callable 缓存解析后的 `zend_function`；方法调用还会校验 receiver class。非字符串 callable、临时 magic trampoline，以及相对的 `self::` / `parent::` / `static::` 字符串仍走 Zend 完整解析路径。
+
 #### `typephp_call_method_scoped_cached()`
 
 用于动态对象方法调用。它使用 `CallableScope::resolve()` 获取 `zend_fcall_info_cache`，将允许缓存的结果保存在 request 级调用点 slot 中，然后执行 `zend_call_function()`。
@@ -339,13 +343,17 @@ save EG(fake_scope)
 7. 新增会同步调用 callback 的 PHP 内置函数时，需要更新 callback 参数描述表，注明位置、参数名以及是否为 callback map。
 8. 保存 callback 但不立即调用的函数不能仅因接收 callable 就标记 scope fallback，例如 `spl_autoload_register()`。
 9. 新增跨 Zend bailout 的 `FakeScopeGuard` 用法时，代码审查必须检查 `zend_catch` 是否显式恢复。
+10. request 级调用 slot 必须先于项目 request 符号清理而析构；slot 不得持有 Closure 对象、receiver 对象或 trampoline。
 
 ## 8. 性能模型
 
 | 路径 | 主要成本 | 优化策略 |
 | --- | --- | --- |
 | `CallableScope` | 初始化一个 synthetic frame | 每个 AOT 方法最多一次，循环复用 |
+| `typephp_call_cached()` | 解析动态字符串 callable | 每个调用点一个 request 级 slot；非字符串及相对 callable 仍保持动态解析 |
+| `typephp_call_method_cached()` | 根据运行时对象解析方法名 | 只缓存带 class/name guard 的单态目标；调用点发生变化后禁用 slot |
 | `typephp_call_method_scoped_cached()` | 带 guard 的缓存查找；未命中时执行 `zend_is_callable_at_frame()` | 每个动态调用点一个 request 级 slot；可解析的 Native Call 不进入此路径 |
+| 稳定静态属性 | 解析类/属性元数据及 Zend slot | 仅在生成的 C++ 函数内惰性缓存最终 `zval*`；每次访问重新构造轻量 `Variant` view |
 | `prepareScopedCallback()` | 一次 callable 解析 | public 绝对 callback 不创建 Closure |
 | `makeScopedCallable()` | callable 解析及 Closure 分配 | 仅 first-class callable 使用 |
 | `UserCodeScopeGuard` | 方法入口一次指针查找、写入和退出恢复 | 只为 `call_user_func*`、callback map 或未解析的 unpack callback 生成 |

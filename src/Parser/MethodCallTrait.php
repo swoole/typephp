@@ -1057,7 +1057,10 @@ trait MethodCallTrait
         }
 
         if (!$this->isNameExpr($expr->class)) {
-            if ($this->isVarExpr($expr->class) && $this->isStableObject($class)) {
+            if ($this->isVarExpr($expr->class)
+                && $this->isStableObject($class)
+                && $this->isIdExpr($expr->name)
+            ) {
                 $class = $this->getObjectType($class);
                 goto _do_call;
             }

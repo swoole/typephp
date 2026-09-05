@@ -38,11 +38,22 @@ trait SwitchTrait
         $var_def .= $type . ' ' . $tmp_var . ' = ' . $condExpr . ';' . PHP_EOL;
         $var_def .= $this->formatCapturedStmtLines($condAfterStmts);
 
-        // Save the scope; switch parsing may fail partway and add variables in the process, so it must be reset
-        $localVars = $this->context->localVars;
-        $code      = $this->parseBeforeStmtLines() . PHP_EOL;
+        $code = $this->parseBeforeStmtLines() . PHP_EOL;
 
         if ($type === Type::INT or $type === Type::BOOL) {
+            // Check all labels before lowering any bodies. C++ requires integer
+            // labels; for bool subjects, only 0 and 1 preserve PHP comparison.
+            foreach ($v->cases as $case) {
+                $caseCond = $case->cond;
+                if ($caseCond === null) {
+                    continue;
+                }
+                if (!$caseCond instanceof Node\Scalar\Int_
+                    || ($type === Type::BOOL && $caseCond->value !== 0 && $caseCond->value !== 1)
+                ) {
+                    goto _fail;
+                }
+            }
             $code .= 'do {' . PHP_EOL;
             $this->indentLevel++;
             $code .= $this->getIndent() . 'switch (' . $tmp_var . ') {' . PHP_EOL;
@@ -51,12 +62,6 @@ trait SwitchTrait
                 if (empty($case->cond)) {
                     $code .= $this->getIndent() . 'default: {' . PHP_EOL;
                 } else {
-                    $condType = $case->cond->getType();
-                    if ($condType !== 'Scalar_Int' and $condType !== 'Scalar_Float') {
-                        $this->context->localVars = $localVars;
-                        $this->indentLevel -= 2;
-                        goto _fail;
-                    }
                     $code .= $this->getIndent() . 'case ' . $this->parseScalar($case->cond) . ': {' . PHP_EOL;
                 }
                 $code .= $this->parseBlockStmts($case->stmts);
@@ -134,6 +139,9 @@ trait SwitchTrait
                         $code .= $this->getIndent() . $caseTmpVar . ' = ' . $caseCondExpr . ';' . PHP_EOL;
                         $code .= $this->formatCapturedStmtLines($caseAfterStmts);
                         $caseCondExpr = $caseTmpVar;
+                    }
+                    if ($type === Type::BOOL) {
+                        $caseCondExpr = 'php::toBool(' . $caseCondExpr . ')';
                     }
                     $code .= $this->getIndent() . $groupMatched . ' = php::equals(' . $tmp_var . ', ' . $caseCondExpr . ');' . PHP_EOL;
                     $code .= $this->getIndent() . '}' . PHP_EOL;

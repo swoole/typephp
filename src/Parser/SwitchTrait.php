@@ -112,6 +112,13 @@ trait SwitchTrait
             $caseConds = [];
             $hasDefault = false;
         }
+        if (!empty($caseConds) || $hasDefault) {
+            $target = count($caseGroups);
+            if ($hasDefault) {
+                $defaultTarget = $target;
+            }
+            $caseGroups[] = [$caseConds, $hasDefault, []];
+        }
 
         foreach ($caseGroups as $target => [$conds]) {
             if (!empty($conds)) {
@@ -156,14 +163,6 @@ trait SwitchTrait
             $code .= $this->parseStmts($stmts);
             $this->indentLevel--;
             $code .= $this->getIndent() . '}' . PHP_EOL;
-        }
-        if (!empty($caseConds) || $hasDefault) {
-            // PHP allows a trailing label without statements; it has no code to execute.
-            if ($hasDefault && $defaultTarget === null) {
-                $code .= $this->getIndent() . 'if (!' . $switchMatched . ') {' . PHP_EOL;
-                $code .= $this->getIndent() . $switchTarget . ' = -1;' . PHP_EOL;
-                $code .= $this->getIndent() . '}' . PHP_EOL;
-            }
         }
         $this->indentLevel--;
         $code .= $this->getIndent() . '} while (0);';

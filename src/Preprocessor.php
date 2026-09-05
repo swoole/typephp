@@ -340,7 +340,25 @@ class Preprocessor extends CompilerBase
             return $objectDir . $separator . $info['filename'] . $ext;
         }
 
-        return $info['dirname'] . $this->getPlatform()->getPathSeparator() . $info['filename'] . $ext;
+        $filename = $info['filename'];
+        if (!$this->isGeneratedCppFile($cppFile)) {
+            // Native sources keep their original paths, so their extensions
+            // distinguish files such as foo.c and foo.cpp in one directory.
+            $filename .= '.' . $info['extension'];
+        }
+
+        return $info['dirname'] . $this->getPlatform()->getPathSeparator() . $filename . $ext;
+    }
+
+    private function isGeneratedCppFile(string $file): bool
+    {
+        if (pathinfo($file, PATHINFO_EXTENSION) !== 'cc') {
+            return false;
+        }
+
+        $normalizedFile = str_replace('\\', '/', $file);
+        $normalizedBuildDir = rtrim(str_replace('\\', '/', $this->buildDir), '/') . '/';
+        return str_starts_with($normalizedFile, $normalizedBuildDir);
     }
 
     protected function isProjectRuntimeEntryFile(string $file): bool

@@ -286,7 +286,7 @@ PHP);
     public function testMiscObjectCacheIsInvalidatedWhenCompileOptionsChange(): void
     {
         $source = $this->testDir . '/typephp_runtime.cc';
-        $object = $this->testDir . '/typephp_runtime.o';
+        $object = $this->compiler->getObjectFile($source);
         file_put_contents($source, "int typephp_runtime_test = 1;\n");
         file_put_contents($object, 'object');
         touch($source, time() - 10);

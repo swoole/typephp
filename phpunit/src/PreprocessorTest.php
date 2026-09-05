@@ -187,8 +187,7 @@ class PreprocessorTest extends TestCase
         $cppFile = $this->compiler->getBuildDir() . '/include/test.cc';
         $result = $this->compiler->getObjectFile($cppFile);
 
-        $this->assertStringEndsWith('.o', $result);
-        $this->assertStringContainsString('test', $result);
+        $this->assertSame($this->compiler->getBuildDir() . '/include/test.o', $result);
     }
 
     public function testGetObjectFileDifferentObjectExtension(): void
@@ -196,7 +195,18 @@ class PreprocessorTest extends TestCase
         // On Linux the object extension is .o
         $path = '/some/path/file.cc';
         $result = $this->compiler->getObjectFile($path);
-        $this->assertStringEndsWith('file.o', $result);
+        $this->assertStringEndsWith('file.cc.o', $result);
+    }
+
+    public function testGetObjectFileKeepsNativeSourceExtensionsDistinct(): void
+    {
+        $cObject = $this->compiler->getObjectFile('/some/path/foo.c');
+        $cppObject = $this->compiler->getObjectFile('/some/path/foo.cpp');
+        $ccObject = $this->compiler->getObjectFile('/some/path/foo.cc');
+
+        $this->assertSame('/some/path/foo.c.o', $cObject);
+        $this->assertSame('/some/path/foo.cpp.o', $cppObject);
+        $this->assertSame('/some/path/foo.cc.o', $ccObject);
     }
 
     // ========================================================================

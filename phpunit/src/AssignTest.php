@@ -9,6 +9,11 @@ class AssignTest extends \BaseTest
         $this->exec('Cannot re-assign `$obj` from `php::Str` to `php::Object`', 're-assign.php');
     }
 
+    public function testReAssignNumericValueWithoutUsingNativeTypes()
+    {
+        $this->exec('Cannot re-assign `$x` from `php::Array` to `php::Int', "re-assign-numeric-without-using-native-types.php");
+    }
+
     public function testAssignClass()
     {
         $this->exec('Cannot re-assign typed object `$obj1` from `stdClass` to `ArrayObject`', 're-assign-2.php');

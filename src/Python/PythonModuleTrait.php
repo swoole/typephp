@@ -122,9 +122,11 @@ trait PythonModuleTrait
 
     protected function parsePythonObjectPropertyFetch(Expr\PropertyFetch $expr): ?string
     {
-        if ($this->isPropertyFetchUpdate($expr)
+        if (
+            $this->isPropertyFetchUpdate($expr)
             || !$this->isIdExpr($expr->name)
-            || !$this->isPythonObjectExpr($expr->var)) {
+            || !$this->isPythonObjectExpr($expr->var)
+        ) {
             return null;
         }
 
@@ -402,7 +404,6 @@ trait PythonModuleTrait
             return;
         }
         $this->pythonRuntimeUsed = true;
-
     }
 
     protected function withPythonRuntimeConfigured(string $expression): string
@@ -461,7 +462,6 @@ trait PythonModuleTrait
             if ($expr->isFirstClassCallable()) {
                 $this->fatalError($expr, 'Python module callables do not support first-class callable syntax yet');
             }
-
             $target = $this->getPythonModuleExpression($moduleMember['module']);
             $member = $this->getLiteralString($moduleMember['member']);
             if ($expr->args === []) {
@@ -493,7 +493,7 @@ trait PythonModuleTrait
             $call = $expr->args === []
                 ? 'php::python::construct(' . $constructor . ')'
                 : 'php::python::construct(' . $constructor . ', '
-                    . $this->parseCallArgValue($expr->args[0]) . ')';
+                . $this->parseCallArgValue($expr->args[0]) . ')';
             return $this->withPythonRuntimeConfigured($call);
         }
 
@@ -507,7 +507,7 @@ trait PythonModuleTrait
             }
             return $this->withPythonRuntimeConfigured(
                 'php::newObject(' . $classEntry . ', '
-                . $this->parseCallArgs($expr->args, '__construct', $constructorClass) . ')'
+                    . $this->parseCallArgs($expr->args, '__construct', $constructorClass) . ')'
             );
         }
 
@@ -523,7 +523,6 @@ trait PythonModuleTrait
                 $this->genRuntimeFunctionCall($callable, $expr->args, $builtin, 'PyCore')
             );
         }
-
         $target = $this->getPythonModuleExpression('builtins');
         $name = $this->getLiteralString($builtin);
         if ($expr->args === []) {
@@ -571,7 +570,8 @@ trait PythonModuleTrait
             return Type::OBJECT;
         }
         if ($expr instanceof Expr\MethodCall && $this->isPythonObjectExpr($expr->var)) {
-            if (!$this->isIdExpr($expr->name)
+            if (
+                !$this->isIdExpr($expr->name)
                 || $this->isPythonDynamicMethodCall($expr->var, $this->parseIdentifier($expr->name))
             ) {
                 return Type::OBJECT;
@@ -584,7 +584,8 @@ trait PythonModuleTrait
         if ($expr instanceof Expr\ArrayDimFetch && $this->isPythonObjectExpr($expr->var)) {
             return Type::OBJECT;
         }
-        if ($expr instanceof Expr\FuncCall
+        if (
+            $expr instanceof Expr\FuncCall
             && $expr->name instanceof NodeAbstract
             && !$this->isNameExpr($expr->name)
             && $this->isPythonObjectExpr($expr->name)
@@ -613,7 +614,8 @@ trait PythonModuleTrait
             return 'PyObject';
         }
         if ($expr instanceof Expr\MethodCall && $this->isPythonObjectExpr($expr->var)) {
-            if (!$this->isIdExpr($expr->name)
+            if (
+                !$this->isIdExpr($expr->name)
                 || $this->isPythonDynamicMethodCall($expr->var, $this->parseIdentifier($expr->name))
             ) {
                 return 'PyObject';
@@ -626,7 +628,8 @@ trait PythonModuleTrait
         if ($expr instanceof Expr\ArrayDimFetch && $this->isPythonObjectExpr($expr->var)) {
             return 'PyObject';
         }
-        if ($expr instanceof Expr\FuncCall
+        if (
+            $expr instanceof Expr\FuncCall
             && $expr->name instanceof NodeAbstract
             && !$this->isNameExpr($expr->name)
             && $this->isPythonObjectExpr($expr->name)

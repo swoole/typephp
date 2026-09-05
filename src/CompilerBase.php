@@ -1,4 +1,5 @@
 <?php
+
 /**
  * This file is part of TypePHP.
  *
@@ -512,7 +513,7 @@ class CompilerBase implements PropertyAccessContext
     // Windows platform: store the detected PHP lib file paths.
     protected string $windowsPhpEmbedLib = '';  // Path to php8embed.lib
     protected string $windowsPhpCoreLib = '';   // Path to php8ts.lib or php8.lib
-    
+
     // New platform and compiler abstraction layers (optional to use).
     protected ?PlatformBase $platform = null;
     protected ?CompilerBackend $compilerBackend = null;
@@ -1616,7 +1617,8 @@ class CompilerBase implements PropertyAccessContext
         if ($expr instanceof Node\Name || $expr instanceof Node\VarLikeIdentifier || $expr instanceof Node\Identifier) {
             return $expr->toString();
         }
-        if ($expr instanceof Node\Scalar\Int_
+        if (
+            $expr instanceof Node\Scalar\Int_
             || $expr instanceof Node\Scalar\Float_
             || $expr instanceof Node\Scalar\String_
         ) {
@@ -1976,8 +1978,10 @@ class CompilerBase implements PropertyAccessContext
             }
             return $class === '' ? null : $this->findAotMethodFunctionDef($class, $expr->name->toString());
         }
-        if ($expr instanceof Expr\StaticCall && $expr->class instanceof Node\Name
-            && $expr->name instanceof Node\Identifier) {
+        if (
+            $expr instanceof Expr\StaticCall && $expr->class instanceof Node\Name
+            && $expr->name instanceof Node\Identifier
+        ) {
             $class = $this->parseIdentifier($expr->class);
             if ($class === 'self' || $class === 'static') {
                 $class = $this->getFullClassName();
@@ -2059,7 +2063,7 @@ class CompilerBase implements PropertyAccessContext
         }
         if ($expr instanceof Expr\Match_) {
             return $this->getCommonNativeObjectExpressionClass(array_map(
-                static fn (Node\MatchArm $arm): Expr => $arm->body,
+                static fn(Node\MatchArm $arm): Expr => $arm->body,
                 $expr->arms,
             ));
         }
@@ -2113,7 +2117,8 @@ class CompilerBase implements PropertyAccessContext
             $receiverClass = $this->detectClassOfExpr($expr->var);
             if ($this->isNativeObjectClass($receiverClass)) {
                 $property = $this->findNativeObjectProperty($receiverClass, $expr->name->toString());
-                if ($property !== null
+                if (
+                    $property !== null
                     && $property->type === Type::OBJECT
                     && $this->isNativeObjectClass($property->class)
                 ) {
@@ -2230,7 +2235,8 @@ class CompilerBase implements PropertyAccessContext
             return true;
         }
 
-        if (!$this->hasClass($class)
+        if (
+            !$this->hasClass($class)
             && !$this->hasInterface($class)
             && !$this->isInternalClass($class)
             && !$this->isInternalInterface($class)
@@ -2382,10 +2388,12 @@ class CompilerBase implements PropertyAccessContext
                     return 'return php::toReferenceExact(' . $this->parseExpr($v->expr) . ');';
                 }
             }
-            if (!$this->isVarExpr($v->expr)
+            if (
+                !$this->isVarExpr($v->expr)
                 && !$this->isPropertyFetch($v->expr)
                 && !$this->isStaticPropertyFetch($v->expr)
-                && !$this->isArrayDimFetch($v->expr)) {
+                && !$this->isArrayDimFetch($v->expr)
+            ) {
                 $this->fatalError($v, 'A function returning by reference must return a variable');
             }
             if ($this->isVarExpr($v->expr)) {
@@ -2419,7 +2427,8 @@ class CompilerBase implements PropertyAccessContext
             return 'return ' . $this->parseChainedExpr($v->expr, self::OP_REFVAL) . ';';
         }
         if ($v->expr === null) {
-            if (!$this->context->inClosure
+            if (
+                !$this->context->inClosure
                 && $this->getNativeObjectReturnType($this->functionDef) !== null
             ) {
                 $this->fatalError(
@@ -2540,7 +2549,8 @@ class CompilerBase implements PropertyAccessContext
                 'return value'
             );
         }
-        if (!$this->context->inClosure
+        if (
+            !$this->context->inClosure
             && ($nativeReturnClass = $this->getReturnClass()) !== ''
             && $this->isNativeObjectClass($nativeReturnClass)
         ) {
@@ -2551,7 +2561,8 @@ class CompilerBase implements PropertyAccessContext
                 return 'return nullptr;';
             }
             $objectClass = $this->detectClassOfExpr($v->expr);
-            if ($objectClass === '' || !$this->isNativeObjectClass($objectClass)
+            if (
+                $objectClass === '' || !$this->isNativeObjectClass($objectClass)
                 || !$this->isObjectClassStaticallyAssignableTo($objectClass, $nativeReturnClass)
             ) {
                 $this->fatalError(
@@ -2564,7 +2575,7 @@ class CompilerBase implements PropertyAccessContext
             $returnCode = $this->functionDef->returnNullable
                 ? $returnExpr
                 : 'php::nativeRequireObject(' . $returnExpr . ', "'
-                    . addslashes($nativeReturnClass) . '")';
+                . addslashes($nativeReturnClass) . '")';
 
             if (count($this->context->afterStmtLines) === $afterStmtCount) {
                 return 'return ' . $returnCode . ';';
@@ -2581,7 +2592,7 @@ class CompilerBase implements PropertyAccessContext
             $finalReturn = $this->functionDef->returnNullable
                 ? $tmpVar
                 : 'php::nativeRequireObject(' . $tmpVar . ', "'
-                    . addslashes($nativeReturnClass) . '")';
+                . addslashes($nativeReturnClass) . '")';
             $this->context->afterStmtLines[] = $this->getIndent() . 'return ' . $finalReturn . ';';
             return $tmpVar . ' = ' . $returnExpr . ';';
         }
@@ -2597,9 +2608,11 @@ class CompilerBase implements PropertyAccessContext
             $returnType = Type::VAR;
         }
 
-        if (!$this->context->inClosure
+        if (
+            !$this->context->inClosure
             && ($type === Type::VAR || $type === Type::REF)
-            && $this->isStrictScalarType($returnType)) {
+            && $this->isStrictScalarType($returnType)
+        ) {
             // Keep the zval type until the declared return boundary has been
             // checked. Converting first would silently coerce invalid values.
             $tmpVar = $this->addTmpVar(Type::VAR);
@@ -2863,8 +2876,7 @@ class CompilerBase implements PropertyAccessContext
         string $class,
         string $const,
         ?string $accessingClass = null
-    ): string|false
-    {
+    ): string|false {
         if (!$this->hasClass($class)) {
             return false;
         }
@@ -2911,12 +2923,14 @@ class CompilerBase implements PropertyAccessContext
         if ($constDef === null) {
             return false;
         }
-        if ($classDef instanceof ClassDef
+        if (
+            $classDef instanceof ClassDef
             && !$this->checkAccessibleByClassName(
                 $classDef->getNamespacedName(false),
                 $constDef->flags,
                 $accessingClass,
-            )) {
+            )
+        ) {
             $this->fatalError($expr, 'Constant `' . $classDef->getNamespacedName() . '::' . $const . '` is not accessible');
         }
         if ($constDef->type === Type::ARRAY) {
@@ -3279,7 +3293,8 @@ class CompilerBase implements PropertyAccessContext
                 }
                 break;
             case 'Expr_ClassConstFetch':
-                if ($this->isIdExpr($expr->name)
+                if (
+                    $this->isIdExpr($expr->name)
                     && strtolower($this->parseIdentifier($expr->name)) === 'class'
                 ) {
                     return Type::STR;
@@ -3947,12 +3962,14 @@ class CompilerBase implements PropertyAccessContext
                         $this->fatalError($expr, "abstract class `{$className}` cannot be instantiated");
                     }
                     $constructor = $this->findConstructor($className);
-                    if ($constructor !== null
-                        && !$this->checkAccessibleByClassName($constructor['className'], $constructor['flags'])) {
+                    if (
+                        $constructor !== null
+                        && !$this->checkAccessibleByClassName($constructor['className'], $constructor['flags'])
+                    ) {
                         $this->fatalError(
                             $expr,
                             'Cannot call ' . $this->visibilityLabel($constructor['flags']) . ' '
-                            . $constructor['className'] . '::__construct()'
+                                . $constructor['className'] . '::__construct()'
                         );
                     }
                     if ($this->isNativeObjectClass($className)) {
@@ -4060,7 +4077,8 @@ class CompilerBase implements PropertyAccessContext
             $result = $valueIsNative
                 && ($targetIsNative || $targetIsInterface)
                 && $this->isObjectClassStaticallyAssignableTo($valueClass, $targetClass);
-            if (!$result
+            if (
+                !$result
                 && $valueIsNative
                 && $targetIsNative
                 && $this->isObjectClassStaticallyAssignableTo($targetClass, $valueClass)
@@ -4393,7 +4411,8 @@ class CompilerBase implements PropertyAccessContext
             $this->assertNativeArrayAccessReferenceForbidden($node);
             $this->assertNativeObjectReferenceForbidden($node, $node);
         }
-        if ($node instanceof Expr\ArrayDimFetch
+        if (
+            $node instanceof Expr\ArrayDimFetch
             && $this->isNativeObjectClass($this->detectClassOfExpr($node->var))
         ) {
             return $this->parseNativeArrayAccessPresence($node, $op, $getValue);
@@ -4404,7 +4423,8 @@ class CompilerBase implements PropertyAccessContext
                 return $nativePresence;
             }
         }
-        if ($op === self::OP_ISSET
+        if (
+            $op === self::OP_ISSET
             && $node instanceof Expr\ArrayDimFetch
             && $node->dim !== null
             && $node->var instanceof Expr\StaticPropertyFetch
@@ -5040,8 +5060,7 @@ class CompilerBase implements PropertyAccessContext
         string $declaringClass,
         int $flags,
         ?string $accessingClass = null
-    ): bool
-    {
+    ): bool {
         if ($accessingClass !== null) {
             $accessingClass = ltrim($accessingClass, '\\');
             $scopeClassDef = $this->hasClass($accessingClass)
@@ -5049,9 +5068,11 @@ class CompilerBase implements PropertyAccessContext
                 : null;
         } else {
             $scopeClassDef = $this->classDef;
-            if ($this->functionDef !== null
+            if (
+                $this->functionDef !== null
                 && $this->functionDef->attributeFactoryScope !== ''
-                && $this->hasClass($this->functionDef->attributeFactoryScope)) {
+                && $this->hasClass($this->functionDef->attributeFactoryScope)
+            ) {
                 $scopeClassDef = $this->getClass($this->functionDef->attributeFactoryScope);
             }
         }
@@ -5180,8 +5201,10 @@ class CompilerBase implements PropertyAccessContext
                     $code .= 'php::Var ' . $name . ' = php::Var(' . $boxCtor . ');' . PHP_EOL;
                     $code .= $this->getIndent() . 'auto &' . $name . '_ref = ' . $name . '.toBox<' . $containerType . '>()->container;';
                 }
-                if (!isset($info['boxExpr']) && $info['size'] !== null
-                    && ($defaultValue = $this->getStdContainerDefaultValueExpr($info['type'])) !== null) {
+                if (
+                    !isset($info['boxExpr']) && $info['size'] !== null
+                    && ($defaultValue = $this->getStdContainerDefaultValueExpr($info['type'])) !== null
+                ) {
                     $code .= PHP_EOL . $this->getIndent() . 'php::initializeStdContainer(' . $name . '_ref, ' . $defaultValue . ');';
                 }
             } elseif ($type === Type::STD_MAP || $type === Type::STD_ORDERED_MAP) {
@@ -5208,7 +5231,8 @@ class CompilerBase implements PropertyAccessContext
                 $code .= ';';
             }
             $code .= PHP_EOL;
-            if ($stdContainerInfo !== null
+            if (
+                $stdContainerInfo !== null
                 && isset($stdContainerInfo['class'])
                 && $this->isNativeObjectClass($stdContainerInfo['class'])
             ) {
@@ -5321,9 +5345,11 @@ class CompilerBase implements PropertyAccessContext
         if ($this->functionDef->returnTypeCheck && !$this->context->inClosure) {
             return $this->genUnionCheckedReturn(self::VALUE_NULL);
         }
-        if ($this->functionDef->returnType === Type::INT
+        if (
+            $this->functionDef->returnType === Type::INT
             or $this->functionDef->returnType === Type::FLOAT
-            or $this->functionDef->returnType === Type::BOOL) {
+            or $this->functionDef->returnType === Type::BOOL
+        ) {
             return $this->getIndent() . 'return 0;';
         } else {
             return $this->getIndent() . 'return ' . self::VALUE_NULL . ';';

@@ -226,7 +226,7 @@ trait TypeConversionTrait
         if ($type === Type::FLOAT && $this->decimalTypes) {
             return Type::DECIMAL;
         }
-        return $this->nativeTypes ? $type : Type::VAR;
+        return $type;
     }
 
     protected function convertExprFromType(string $type, string $expr): string

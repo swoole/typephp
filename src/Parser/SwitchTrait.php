@@ -104,9 +104,9 @@ trait SwitchTrait
             ) {
                 $this->fatalError($case, 'switch case must end with return/break/continue/exit/throw, ' . $lastExpr->getType() . ' given');
             }
-            $target = count($caseGroups);
+            $count = count($caseGroups);
             if ($hasDefault) {
-                $defaultTarget = $target;
+                $defaultTarget = $count;
             }
             $caseGroups[] = [$caseConds, $hasDefault, $stmts];
             $caseConds = [];

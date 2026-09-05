@@ -222,7 +222,6 @@ trait AssignOpTrait
             || ($expr instanceof Expr\ClassConstFetch && $this->isHoistSafeClassConstFetch($expr))
             || (($expr instanceof Expr\UnaryPlus || $expr instanceof Expr\UnaryMinus)
                 && ($expr->expr instanceof Node\Scalar\Int_ || $expr->expr instanceof Node\Scalar\Float_));
-
         return $literal && in_array(
             $this->detectTypeOfExpr($expr),
             [Type::INT, Type::FLOAT, Type::BOOL, Type::STR, Type::VAR],

@@ -860,6 +860,7 @@ class StubType {
         if ($a === null || $b === null) {
             return $a === $b;
         }
+   
 
         if ($a->isIntersection !== $b->isIntersection
             || ($a->dnfClauses === null) !== ($b->dnfClauses === null)
@@ -878,8 +879,8 @@ class StubType {
             if (count($a->dnfClauses) !== count($b->dnfClauses)) {
                 return false;
             }
-            foreach ($a->dnfClauses as $i => $clause) {
-                $otherClause = $b->dnfClauses[$i];
+            foreach ($a->dnfClauses as $in => $clause) {
+                $otherClause = $b->dnfClauses[$in];
                 if (count($clause) !== count($otherClause)) {
                     return false;
                 }

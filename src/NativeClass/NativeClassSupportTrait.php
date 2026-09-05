@@ -991,6 +991,7 @@ trait NativeClassSupportTrait
         }
 
         $target = $expr->args[0]->value;
+        
         $nativeClass = '';
         if ($this->isScalarString($target)) {
             // Reflection string arguments are runtime names, not names relative

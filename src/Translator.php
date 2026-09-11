@@ -5092,9 +5092,6 @@ CODE;
         if ($v->stmts && !$this->class && $this->methodDef === null) {
             $analyzer = new LocalClosureAnalyzer();
             $this->context->localClosureCandidates = $analyzer->analyze($v->stmts);
-            foreach ($this->context->localClosureCandidates as $closureName => &$candidate) {
-                $candidate['inferredParamTypes'] = $analyzer->inferParamTypes($candidate);
-            }
         }
 
         $stmts = '';

@@ -130,8 +130,8 @@ trait ClosureGenerator
         $entryIndent = $this->indentLevel;
         $entryInGeneratorBody = $this->inGeneratorBody;
 
-        // Get inferred types from call sites
-        $inferredTypes = $candidate['inferredParamTypes'] ?? array_fill(0, count($expr->params), Type::VAR);
+        // Infer parameter types from call sites using compiler's type analysis
+        $inferredTypes = $this->inferParamTypesFromCallSites($candidate);
 
         $parameters = [];
         foreach ($expr->params as $i => $param) {
@@ -284,9 +284,7 @@ trait ClosureGenerator
             return '';
         }
 
-        // Skip type check if call-site inference already narrowed to a native
-        // type — the lambda signature uses the native C++ type directly and the
-        // check code (e.g. value.isInt()) only works on php::Var.
+        // Native-typed lambda uses C++ type directly; skip runtime check.
         if (in_array($inferredType, [Type::INT, Type::FLOAT, Type::BOOL, Type::STR, Type::ARRAY], true)) {
             return '';
         }
@@ -309,16 +307,90 @@ trait ClosureGenerator
     }
 
     /**
-     * Return the inferred type for a closure parameter.
-     *
-     * When call-site inference returns a native type (e.g. Type::INT from a
-     * literal argument), use it directly. When it returns VAR, keep the
-     * parameter as php::Var — the lambda will perform a runtime type check
-     * internally instead of an expensive call-site conversion.
+     * Resolve the effective C++ type for a closure parameter.
+     * Type declaration takes priority over call-site inference.
+     * Call-site inference is used only when no type declaration exists.
+     * Nullable/Union/Intersection declarations always resolve to VAR — the
+     * runtime typeCheck must enforce the composite constraint.
      */
     private function resolveEffectiveClosureParamType(Node\Param $param, string $inferredType): string
     {
-        return $inferredType;
+        if ($param->type !== null) {
+            // Composite type declarations (?int, int|string, int&string) are
+            // uniformly treated as VAR at the static stage; the runtime
+            // typeCheck enforces the constraint.
+            if ($param->type instanceof NullableType || $param->type instanceof UnionType || $param->type instanceof IntersectionType) {
+                return Type::VAR;
+            }
+            [$declaredType,] = $this->resolveTypeDecl($param->type, self::DECL_TYPE_OF_PARAM);
+            if ($declaredType !== Type::VAR) {
+                return $declaredType;
+            }
+        }
+        if ($inferredType !== Type::VAR) {
+            return $inferredType;
+        }
+        return Type::VAR;
+    }
+
+    /**
+     * Infer parameter types from call sites using the compiler's canonical
+     * type detection. Returns Type::VAR for a parameter position when call
+     * sites disagree or no call sites exist.
+     */
+    private function inferParamTypesFromCallSites(array $candidate): array
+    {
+        $closure = $candidate['closure'];
+        $paramCount = count($closure->params);
+        $callSites = $candidate['callSites'] ?? [];
+
+        if (count($callSites) === 0) {
+            return array_fill(0, $paramCount, Type::VAR);
+        }
+
+        // Collect detected types per parameter position across all call sites
+        $allTypes = [];
+        foreach ($callSites as $callSite) {
+            $siteTypes = [];
+            foreach ($callSite->args as $i => $arg) {
+                $siteTypes[$i] = $this->inferCallSiteArgType($arg->value);
+            }
+            $allTypes[] = $siteTypes;
+        }
+
+        // Narrow only when every call site agrees on the same type
+        $result = [];
+        for ($i = 0; $i < $paramCount; $i++) {
+            $firstType = $allTypes[0][$i] ?? Type::VAR;
+            $agree = true;
+            foreach ($allTypes as $siteTypes) {
+                if (($siteTypes[$i] ?? Type::VAR) !== $firstType) {
+                    $agree = false;
+                    break;
+                }
+            }
+            $result[$i] = $agree ? $firstType : Type::VAR;
+        }
+        return $result;
+    }
+
+    /**
+     * Detect the native type for a call-site argument, handling edge cases
+     * that detectTypeOfExpr does not cover for closure narrowing purposes:
+     * - Unary +/- on bool: PHP coerces bool to int first, result is never bool.
+     */
+    private function inferCallSiteArgType(Expr $expr): string
+    {
+        $type = $this->detectTypeOfExpr($expr);
+
+        // -true / +false: PHP coerces bool to int before negation.
+        // detectTypeOfExpr returns BOOL (inherits operand type), but the
+        // actual runtime result is int, so we must not narrow to bool.
+        if ($type === Type::BOOL && ($expr instanceof Expr\UnaryMinus || $expr instanceof Expr\UnaryPlus)) {
+            return Type::VAR;
+        }
+
+        return $type;
     }
 
     protected function parseNativeLocalClosureCall(Expr\FuncCall $expr, string $name): ?string
@@ -333,7 +405,7 @@ trait ClosureGenerator
             return null;
         }
         $closure = $candidate['closure'] ?? null;
-        $inferredTypes = $candidate['inferredParamTypes'] ?? [];
+        $inferredTypes = $this->inferParamTypesFromCallSites($candidate);
 
         $arguments = [];
         $forceMaterialize = count($expr->args) > 1;
@@ -362,8 +434,8 @@ trait ClosureGenerator
             }
             $value = $this->materializeCallArgValue($argument->value, $value);
 
-            // Cast variable arguments at call site when effective type differs
-            // from inferred type (e.g. type declaration narrows to native type).
+            // Cast variable args when effective type is native but inferred type is VAR.
+            // e.g. fn(float $x)($var) → call site generates toFloatArgExact($var, ...)
             $inferredType = $inferredTypes[$i] ?? Type::VAR;
             $param = $closure->params[$i] ?? null;
             if ($param !== null) {

@@ -82,7 +82,6 @@ class FunctionContext
      *     closure: \PhpParser\Node\Expr\Closure|\PhpParser\Node\Expr\ArrowFunction,
      *     calls: int,
      *     callSites: list<\PhpParser\Node\Expr\FuncCall>,
-     *     inferredParamTypes: list<string>
      * }>
      */
     public array $localClosureCandidates = [];

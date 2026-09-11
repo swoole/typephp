@@ -363,8 +363,8 @@ trait ClosureGenerator
         for ($i = 0; $i < $paramCount; $i++) {
             $firstType = $allTypes[0][$i] ?? Type::VAR;
             $agree = true;
-            foreach ($allTypes as $siteTypes) {
-                if (($siteTypes[$i] ?? Type::VAR) !== $firstType) {
+            foreach ($allTypes as $perSite) {
+                if (($perSite[$i] ?? Type::VAR) !== $firstType) {
                     $agree = false;
                     break;
                 }

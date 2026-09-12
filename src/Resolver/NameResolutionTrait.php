@@ -146,8 +146,9 @@ trait NameResolutionTrait
         if ($funcName[0] == '\\') {
             return ltrim($funcName, '\\');
         }
-        if (isset($this->useFunctions[$funcName])) {
-            return $this->useFunctions[$funcName];
+        $alias = strtolower($funcName);
+        if (isset($this->useFunctions[$alias])) {
+            return $this->useFunctions[$alias];
         }
         return $funcName;
     }

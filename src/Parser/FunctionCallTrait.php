@@ -114,7 +114,7 @@ trait FunctionCallTrait
             $name = '';
         } elseif ($expr->name->getType() === 'Name' or $expr->name->getType() === 'Name_FullyQualified') {
             $name = $this->parseIdentifier($expr->name);
-            $globalName = ltrim($name, '\\');
+            $globalName = strtolower(ltrim($this->getNamespacedFuncName($name), '\\'));
             $this->compilationStatistics->record(
                 CompilationStatistics::FUNCTIONS,
                 strtolower($globalName),

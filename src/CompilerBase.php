@@ -3647,13 +3647,16 @@ class CompilerBase implements PropertyAccessContext
             $possibleFunctionNames = [
                 $this->escapeName($this->getNamespacedClassName($funcName)),
             ];
+        } elseif (isset($this->useFunctions[strtolower($funcName)])) {
+            // An explicit function import selects one target; it must not
+            // fall back to a same-named compiled global function.
+            $possibleFunctionNames = [
+                $this->escapeNamespace($this->useFunctions[strtolower($funcName)]),
+            ];
         } else {
             $possibleFunctionNames = [$this->escapeName($funcName)];
             if ($this->namespace) {
                 $possibleFunctionNames[] = $this->escapeNamespace($this->namespace) . self::NAMESPACE_SEPARATOR . $this->escapeName($funcName);
-            }
-            if (isset($this->useFunctions[$funcName])) {
-                $possibleFunctionNames[] = $this->escapeNamespace($this->useFunctions[$funcName]);
             }
         }
 

@@ -15,5 +15,6 @@ namespace AliasConsumer {
     }
 }
 namespace { function main(): void { \AliasConsumer\exercise(); } }
+?>
 --EXPECT--
 import:import:import:3:import:import:global

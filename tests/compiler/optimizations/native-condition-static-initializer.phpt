@@ -8,6 +8,7 @@ function conditionBeforeStatic(array $args): void {
     echo $table[0][0][1], "\n";
 }
 function main(): void { conditionBeforeStatic([1]); conditionBeforeStatic([2]); }
+?>
 --EXPECT--
 value
 value

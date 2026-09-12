@@ -546,6 +546,7 @@ trait MethodCallTrait
 
         $class = '';
         $materializedNativeReceiver = false;
+        $materializedTypedPropertyReceiver = false;
         // C++17 sequences a member-call receiver before its arguments, but
         // lowering an argument may hoist captured beforeStmtLines ahead of the
         // whole call. Materialize an effectful receiver before parsing args.
@@ -554,6 +555,32 @@ trait MethodCallTrait
             $object = $this->materializeNativeObjectReceiver($expr->var, $receiverClass);
             $class = $receiverClass;
             $materializedNativeReceiver = true;
+        } elseif ($expr->var instanceof Expr\PropertyFetch && $this->isIdExpr($expr->var->name)) {
+            // A non-nullable declared object property has a known class, but
+            // is not a variable receiver. Resolve it before parsing arguments
+            // and record the materialized Object under that declared class so
+            // the normal native-method path can retain its argument lowering.
+            $this->getPropertyIdentifier($expr->var, $expr->var->var, $expr->var->name);
+            $property = $this->getNativePropertyDef($expr->var);
+            if ($property !== null
+                && $property->type === Type::OBJECT
+                && !$property->nullable
+                && $property->class !== ''
+                && $this->hasClass($property->class)
+                && !$this->isNativeObjectClass($property->class)
+            ) {
+                $object = $this->parseOrderedOperand($expr->var, false, true);
+                $this->addObject($object, $property->class);
+                $class = $property->class;
+                $materializedTypedPropertyReceiver = true;
+            } else {
+                $object = empty($expr->args)
+                    ? $this->parseIdentifier($expr->var)
+                    : $this->parseOrderedOperand($expr->var, false);
+                if (empty($expr->args)) {
+                    $object = '(' . $object . ')';
+                }
+            }
         } else {
             $object = empty($expr->args)
                 ? $this->parseIdentifier($expr->var)
@@ -700,7 +727,8 @@ trait MethodCallTrait
         }
 
         // Method calls that can be lowered to a native call
-        if (($this->isVarExpr($expr->var) || $materializedNativeReceiver) and $this->isNamedMethod($expr->name)) {
+        if (($this->isVarExpr($expr->var) || $materializedNativeReceiver || $materializedTypedPropertyReceiver)
+            and $this->isNamedMethod($expr->name)) {
             $type = $this->getVarType($object);
             if ($class !== '' && $this->isNativeObjectClass($class)) {
                 // Native objects have their own C++ virtual thunk for an

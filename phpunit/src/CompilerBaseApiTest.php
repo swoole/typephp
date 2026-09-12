@@ -1499,7 +1499,7 @@ YAML);
         $this->assertStringContainsString('extern php::Var _const_var_EXPORTED_ABI_STRING;', $dataHeader);
         $this->assertStringContainsString('extern php::Var _const_var_EXPORTED_ABI_ARRAY;', $dataHeader);
         $this->assertStringContainsString(
-            'ZEND_ATTRIBUTE_CONST php::Str &get_str(uint32_t index);',
+            'ZEND_ATTRIBUTE_CONST php::Str &get_str(uint32_t index) noexcept;',
             $dataHeader,
         );
         $this->assertStringNotContainsString('_literal_strings', $dataHeader);
@@ -1510,6 +1510,7 @@ YAML);
         $extension = file_get_contents($extensionFile);
         $this->assertStringContainsString('php::Str php_exported_defaults_arg_0_default_value() {', $extension);
         $this->assertStringContainsString('static php::Str _literal_strings[]', $extension);
+        $this->assertStringContainsString('php::Str &get_str(uint32_t index) noexcept {', $extension);
         $this->assertStringContainsString('return get_str(', $extension);
         $this->assertStringContainsString('php::Array php_exported_variadic_arg_0_default_value() {', $extension);
     }

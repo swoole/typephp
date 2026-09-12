@@ -192,6 +192,17 @@ trait FunctionCallTrait
             // For dynamically dispatched functions, convert the function name to its fully qualified name including the namespace
             $name = $this->getNamespacedFuncName($name);
             $this->checkInternalFunctionArgCount($name, $expr);
+            $resolvedName = $expr->name->getAttribute('resolvedName');
+            $targetName = $resolvedName instanceof Node\Name ? $resolvedName->toString() : $name;
+            if (strcasecmp(ltrim($targetName, '\\'), 'get_called_class') === 0
+                && $expr->args === []
+                && $this->methodDef !== null
+                && !$this->classDef?->nativeObject
+            ) {
+                // Direct AOT calls have no Zend method frame for the builtin
+                // to inspect. Reuse the runtime scope used by static::class.
+                return $this->getCalledClassExpr();
+            }
             $code = $this->parseFuncCallWithOptimizer($name, $expr);
             if ($code !== false) {
                 // Constant folding and native container operations do not

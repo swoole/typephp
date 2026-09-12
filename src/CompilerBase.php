@@ -1984,7 +1984,13 @@ class CompilerBase implements PropertyAccessContext
         $code = '';
         $code .= $this->formatCapturedStmtLines($beforeStmts);
         if ($afterStmts) {
-            $tmpVar = $this->addTmpVar(Type::VAR);
+            // Boolean results own no zval resources and can survive operand
+            // cleanup in native storage without changing evaluation order.
+            $type = $this->detectTypeOfExpr($cond) === Type::BOOL ? Type::BOOL : Type::VAR;
+            $tmpVar = $this->addTmpVar($type);
+            if ($type === Type::BOOL) {
+                $condExpr = $this->convertBoolExpr($condExpr);
+            }
             $code .= $this->getIndent() . $tmpVar . ' = ' . $condExpr . ';' . PHP_EOL;
             $code .= $this->formatCapturedStmtLines($afterStmts);
             $condExpr = $tmpVar;
@@ -4501,6 +4507,9 @@ class CompilerBase implements PropertyAccessContext
 
         $this->context = new FunctionContext();
         $this->context->arguments = $oriCtx->localVars;
+        // Outer locals are captured arguments. New initializer temporaries
+        // must not reuse their names and inherit an incompatible scalar type.
+        $this->context->tmpVarIndex = $oriCtx->tmpVarIndex;
 
         $code = '([&](){' . PHP_EOL;
         $body = $this->getIndent() . $varName . ' = ' . $this->parseExpr($var->default) . ';';

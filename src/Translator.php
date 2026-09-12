@@ -975,7 +975,7 @@ class Translator extends Preprocessor
 
         if ($this->literalStrings) {
             $lines[] = 'ZEND_ATTRIBUTE_CONST ' . Type::STR . ' &'
-                . self::LITERAL_STRING_GETTER . '(uint32_t index);' . PHP_EOL;
+                . self::LITERAL_STRING_GETTER . '(uint32_t index) noexcept;' . PHP_EOL;
         }
 
         foreach ($this->constants as $name => $constant) {
@@ -1003,9 +1003,9 @@ class Translator extends Preprocessor
         $lines[] = 'zend_function *get_persistent_func(PersistentFuncId func_id, const php::Str &func_name);';
         $lines[] = 'zend_function *get_persistent_method(PersistentFuncId func_id, const php::Str &method_name, PersistentClassId class_id, const php::Str &class_name);';
         $lines[] = 'uint32_t get_persistent_prop(PersistentPropertyId prop_id, const php::Str &prop_name, const php::Str &class_name);' . PHP_EOL;
-        $lines[] = 'php::PropertyCacheSlot &get_property_cache(PropertyCacheId cache_id);' . PHP_EOL;
-        $lines[] = 'php::MethodCallCacheSlot &typephp_get_method_call_cache(MethodCallCacheId cache_id);' . PHP_EOL;
-        $lines[] = 'php::FunctionCallCacheSlot &typephp_get_function_call_cache(FunctionCallCacheId cache_id);' . PHP_EOL;
+        $lines[] = 'php::PropertyCacheSlot &get_property_cache(PropertyCacheId cache_id) noexcept;' . PHP_EOL;
+        $lines[] = 'php::MethodCallCacheSlot &typephp_get_method_call_cache(MethodCallCacheId cache_id) noexcept;' . PHP_EOL;
+        $lines[] = 'php::FunctionCallCacheSlot &typephp_get_function_call_cache(FunctionCallCacheId cache_id) noexcept;' . PHP_EOL;
 
         foreach ($this->getClassLikesWithConstants() as $classDef) {
             foreach ($classDef->constants as $constant) {
@@ -1275,15 +1275,15 @@ uint32_t get_persistent_prop(PersistentPropertyId prop_id, const php::Str &prop_
     return value - 1024;
 }
 
-php::PropertyCacheSlot &get_property_cache(PropertyCacheId cache_id) {
+php::PropertyCacheSlot &get_property_cache(PropertyCacheId cache_id) noexcept {
     return php_request_cache->property_cache_map[static_cast<uint32_t>(cache_id)];
 }
 
-php::MethodCallCacheSlot &typephp_get_method_call_cache(MethodCallCacheId cache_id) {
+php::MethodCallCacheSlot &typephp_get_method_call_cache(MethodCallCacheId cache_id) noexcept {
     return php_request_cache->method_call_cache_map[static_cast<uint32_t>(cache_id)];
 }
 
-php::FunctionCallCacheSlot &typephp_get_function_call_cache(FunctionCallCacheId cache_id) {
+php::FunctionCallCacheSlot &typephp_get_function_call_cache(FunctionCallCacheId cache_id) noexcept {
     return php_request_cache->function_call_cache_map[static_cast<uint32_t>(cache_id)];
 }
 CODE;
@@ -1302,7 +1302,7 @@ CODE;
             }
             $code .= '};' . PHP_EOL . PHP_EOL;
             $code .= 'ZEND_ATTRIBUTE_CONST ' . Type::STR . ' &'
-                . self::LITERAL_STRING_GETTER . '(uint32_t index) {' . PHP_EOL;
+                . self::LITERAL_STRING_GETTER . '(uint32_t index) noexcept {' . PHP_EOL;
             $code .= $this->getIndent() . 'return ' . self::LITERAL_STRINGS . '[index];' . PHP_EOL;
             $code .= '}' . PHP_EOL . PHP_EOL;
         } else {

@@ -43,6 +43,44 @@ final class CallCacheCodegenTest extends BaseTest
         self::assertStringContainsString('typephp_get_method_call_cache(MethodCallCacheId cache_id)', $extension);
     }
 
+    public function testSlotAccessorsDeclareNoexceptWithoutChangingResolvingLookups(): void
+    {
+        global $translator;
+        $compiler = CompilerTest::create(TYPEPHP_ROOT_PATH);
+        $translator = $compiler;
+        $compiler->setBuildMode(CompilerBase::BUILD_MODE_EXT);
+        $compiler->setTargetName('noexcept_cache_accessors');
+        $source = TYPEPHP_ROOT_PATH . '/phpunit/code/call-cache-sites.php';
+        $compiler->addFiles([$source]);
+        $compiler->prepareFile($source);
+        $compiler->convertFile($source);
+        $headerFile = tempnam(sys_get_temp_dir(), 'typephp-noexcept-');
+        try {
+            $compiler->genDataDeclarations($headerFile);
+            $header = file_get_contents($headerFile);
+            $extension = file_get_contents($compiler->genExtension());
+            foreach ([
+                'get_property_cache(PropertyCacheId cache_id)',
+                'typephp_get_method_call_cache(MethodCallCacheId cache_id)',
+                'typephp_get_function_call_cache(FunctionCallCacheId cache_id)',
+            ] as $signature) {
+                self::assertStringContainsString($signature . ' noexcept;', $header);
+                self::assertStringContainsString($signature . ' noexcept {', $extension);
+            }
+            // Resolving lookups may throw and must retain that contract.
+            self::assertStringContainsString(
+                'get_persistent_func(PersistentFuncId func_id, const php::Str &func_name);',
+                $header,
+            );
+            self::assertStringContainsString(
+                'get_persistent_func(PersistentFuncId func_id, const php::Str &func_name) {',
+                $extension,
+            );
+        } finally {
+            unlink($headerFile);
+        }
+    }
+
     public function testCallArgumentLimitRejectsBrokenUnboundedLowering(): void
     {
         $compiler = CompilerTest::create(TYPEPHP_ROOT_PATH);

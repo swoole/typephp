@@ -558,6 +558,38 @@ function binaryMulInt(): int
     return $fn(2 * 3);
 }
 
+// --- Type declaration scenarios: fallback to VAR + runtime check ---
+
+function arrayTypeDecl(): void
+{
+    $fn = fn(array $x) => count($x);
+    var_dump($fn([1, 2, 3]));
+}
+
+function objectTypeDecl(): void
+{
+    $fn = fn(object $x) => $x;
+    var_dump($fn(new \stdClass()));
+}
+
+function classTypeDecl(): void
+{
+    $fn = fn(\DateTime $x) => $x->format('Y');
+    var_dump($fn(new \DateTime()));
+}
+
+function intTypeDecl(): void
+{
+    $fn = fn(int $x) => $x + 1;
+    var_dump($fn(42));
+}
+
+function inferredArrayNoDecl(): int
+{
+    $fn = fn($x) => count($x);
+    return $fn([1, 2, 3]);
+}
+
 // --- Entry point ---
 function main(): void
 {
@@ -637,4 +669,9 @@ function main(): void
     constFetchInf();
     unionTypeDecl();
     binaryMulInt();
+    arrayTypeDecl();
+    objectTypeDecl();
+    classTypeDecl();
+    intTypeDecl();
+    inferredArrayNoDecl();
 }

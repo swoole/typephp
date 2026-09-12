@@ -322,8 +322,15 @@ trait ClosureGenerator
             if ($param->type instanceof NullableType || $param->type instanceof UnionType || $param->type instanceof IntersectionType) {
                 return Type::VAR;
             }
-            [$declaredType,] = $this->resolveTypeDecl($param->type, self::DECL_TYPE_OF_PARAM);
+            [$declaredType, $className] = $this->resolveTypeDecl($param->type, self::DECL_TYPE_OF_PARAM);
             if ($declaredType !== Type::VAR) {
+                // Array/Object/class parameters: the call boundary cannot safely
+                // convert from native scalars (zend_long, double) to these types.
+                // Keep as VAR so the runtime typeCheck inside the lambda enforces
+                // PHP semantics (TypeError on wrong argument type).
+                if ($declaredType === Type::ARRAY || $declaredType === Type::OBJECT || $className !== '') {
+                    return Type::VAR;
+                }
                 return $declaredType;
             }
         }
@@ -387,6 +394,18 @@ trait ClosureGenerator
         // detectTypeOfExpr returns BOOL (inherits operand type), but the
         // actual runtime result is int, so we must not narrow to bool.
         if ($type === Type::BOOL && ($expr instanceof Expr\UnaryMinus || $expr instanceof Expr\UnaryPlus)) {
+            return Type::VAR;
+        }
+
+        // DECIMAL/BIGINT/BIGFLOAT are Box subclasses stored in zend_resource.
+        // The C++ types php::Decimal/php::BigInt/php::BigFloat cannot be
+        // implicitly constructed from Variant, so we must not narrow to them.
+        if (in_array($type, [Type::DECIMAL, Type::BIGINT, Type::BIGFLOAT], true)) {
+            return Type::VAR;
+        }
+
+        // Pow generates php::fn::pow() which returns Variant, not a native type.
+        if ($expr instanceof Expr\BinaryOp\Pow) {
             return Type::VAR;
         }
 

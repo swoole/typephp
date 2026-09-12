@@ -99,7 +99,7 @@ final class ClosureParamTypeTest extends BaseTest
         self::assertMatchesRegularExpression('/php_binarysub\(.*?\n\tauto fn = \[\]\(php::Int bs1\)/s', $code);
         self::assertMatchesRegularExpression('/php_binarydivfloat\(.*?\n\tauto fn = \[\]\(php::Float bd1\)/s', $code);
         self::assertMatchesRegularExpression('/php_binarymod\(.*?\n\tauto fn = \[\]\(php::Int bm1\)/s', $code);
-        self::assertMatchesRegularExpression('/php_binarypow\(.*?\n\tauto fn = \[\]\(php::Int bp1\)/s', $code);
+        self::assertMatchesRegularExpression('/php_binarypow\(.*?\n\tauto fn = \[\]\(php::Var bp1\)/s', $code);
         self::assertMatchesRegularExpression('/php_binarymulint\(.*?\n\tauto fn = \[\]\(php::Int bmi1\)/s', $code);
         self::assertMatchesRegularExpression('/php_binaryshiftleft\(.*?\n\tauto fn = \[\]\(php::Int sl1\)/s', $code);
         self::assertMatchesRegularExpression('/php_binaryshiftright\(.*?\n\tauto fn = \[\]\(php::Int sr1\)/s', $code);
@@ -240,8 +240,8 @@ final class ClosureParamTypeTest extends BaseTest
     public function testDecimalLiteralInfersDecimalType(): void
     {
         $code = $this->compileFixture('closure-param-type.php');
-        self::assertMatchesRegularExpression('/php_decimalliteralinfersdecimal\(.*?\n\tauto fn = \[\]\(php::Decimal dl1\)/s', $code);
-        self::assertStringNotContainsString('(php::Float dl1)', $code);
+        self::assertMatchesRegularExpression('/php_decimalliteralinfersdecimal\(.*?\n\tauto fn = \[\]\(php::Var dl1\)/s', $code);
+        self::assertStringNotContainsString('(php::Decimal dl1)', $code);
     }
 
     // --- Multi-param type decl mismatch ---
@@ -286,5 +286,48 @@ final class ClosureParamTypeTest extends BaseTest
     {
         $code = $this->compileFixture('closure-param-type.php');
         self::assertMatchesRegularExpression('/php_uniontypedecl\(.*?\n\tauto fn = \[\]\(php::Var ut1\)/s', $code);
+    }
+
+    // --- Array/object/class type declarations: fallback to VAR ---
+
+    public function testArrayTypeDeclKeepsVarWithRuntimeCheck(): void
+    {
+        $code = $this->compileFixture('closure-param-type.php');
+        self::assertMatchesRegularExpression('/php_arraytypedecl\(.*?\n\tauto fn = \[\]\(php::Var x\)/s', $code);
+        self::assertStringContainsString('isArray', $code);
+    }
+
+    public function testObjectTypeDeclKeepsVarWithRuntimeCheck(): void
+    {
+        $code = $this->compileFixture('closure-param-type.php');
+        self::assertMatchesRegularExpression('/php_objecttypedecl\(.*?\n\tauto fn = \[\]\(php::Var x\)/s', $code);
+        self::assertStringContainsString('isObject', $code);
+    }
+
+    public function testClassTypeDeclKeepsVarWithRuntimeCheck(): void
+    {
+        $code = $this->compileFixture('closure-param-type.php');
+        self::assertMatchesRegularExpression('/php_classtypedecl\(.*?\n\tauto fn = \[\]\(php::Var x\)/s', $code);
+        self::assertStringContainsString('instanceOf', $code);
+    }
+
+    public function testIntTypeDeclKeepsNativeType(): void
+    {
+        $code = $this->compileFixture('closure-param-type.php');
+        self::assertMatchesRegularExpression('/php_inttypedecl\(.*?\n\tauto fn = \[\]\(php::Int x\)/s', $code);
+    }
+
+    public function testInferredArrayKeepsNativeType(): void
+    {
+        $code = $this->compileFixture('closure-param-type.php');
+        self::assertMatchesRegularExpression('/php_inferredarraynodecl\(.*?\n\tauto fn = \[\]\(php::Array x\)/s', $code);
+    }
+
+    public function testNoDecimalOrBigIntInLambdaParam(): void
+    {
+        $code = $this->compileFixture('closure-param-type.php');
+        self::assertStringNotContainsString('php::BigInt', $code);
+        self::assertStringNotContainsString('php::Decimal', $code);
+        self::assertStringNotContainsString('php::BigFloat', $code);
     }
 }

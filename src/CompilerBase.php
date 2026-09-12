@@ -4507,6 +4507,9 @@ class CompilerBase implements PropertyAccessContext
 
         $this->context = new FunctionContext();
         $this->context->arguments = $oriCtx->localVars;
+        // Outer locals are captured arguments. New initializer temporaries
+        // must not reuse their names and inherit an incompatible scalar type.
+        $this->context->tmpVarIndex = $oriCtx->tmpVarIndex;
 
         $code = '([&](){' . PHP_EOL;
         $body = $this->getIndent() . $varName . ' = ' . $this->parseExpr($var->default) . ';';

@@ -14,6 +14,7 @@ function main(): void {
     $head = 1;
     echo json_encode(changedFixed($head,2,3)), ':', $head, "\n";
 }
+?>
 --EXPECT--
 [1,2,3]
 [1]

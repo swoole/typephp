@@ -49,6 +49,34 @@ final class NanoCapabilityPolicyCompiler extends CompilerTest
 
 final class NanoCapabilityPolicyTest extends BaseTest
 {
+    public function testFunctionImportCannotBypassNanoPolicy(): void
+    {
+        $this->assertImportedFunctionRejected(false);
+    }
+
+    public function testFunctionImportCannotBypassWasiPolicy(): void
+    {
+        $this->assertImportedFunctionRejected(true);
+    }
+
+    private function assertImportedFunctionRejected(bool $wasi): void
+    {
+        global $translator;
+        $compiler = new NanoCapabilityPolicyCompiler(TYPEPHP_ROOT_PATH);
+        if ($wasi) {
+            $compiler->enableWasiForTest();
+        } else {
+            $compiler->enableNanoForTest();
+        }
+        $translator = $compiler;
+        $source = __DIR__ . '/../code/function-import-policy.php';
+        $compiler->addFiles([$source]);
+        $compiler->prepareFile($source);
+        $this->expectException(TestError::class);
+        $this->expectExceptionMessage('Function `exec` is not supported');
+        $compiler->convertFile($source);
+    }
+
     public function testRejectsForbiddenDirectCallMissingFromBuildTimePhp(): void
     {
         global $translator;

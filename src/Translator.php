@@ -5458,7 +5458,8 @@ CODE;
         }
 
         if ($v->stmts && !$this->class && $this->methodDef === null) {
-            $this->context->localClosureCandidates = (new LocalClosureAnalyzer())->analyze($v->stmts);
+            $analyzer = new LocalClosureAnalyzer();
+            $this->context->localClosureCandidates = $analyzer->analyze($v->stmts);
         }
 
         $stmts = '';

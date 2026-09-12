@@ -28,7 +28,7 @@ final class LocalClosureCodegenTest extends BaseTest
 
         self::assertIsString($code);
         self::assertStringContainsString(
-            'auto direct = [base = base](php::Var value) mutable -> php::Var {',
+            'auto direct = [base = base](php::Int value) mutable -> php::Var {',
             $code,
         );
         self::assertStringContainsString('direct(2L)', $code);

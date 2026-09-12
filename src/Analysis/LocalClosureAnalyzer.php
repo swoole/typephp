@@ -20,7 +20,7 @@ use PhpParser\Node\Stmt;
  */
 final class LocalClosureAnalyzer
 {
-    /** @var array<string, array{assignment: Expr\Assign, closure: Expr\Closure|Expr\ArrowFunction, calls: int}> */
+    /** @var array<string, array{assignment: Expr\Assign, closure: Expr\Closure|Expr\ArrowFunction, calls: int, callSites: list<Expr\FuncCall>}> */
     private array $candidates = [];
 
     /** @var array<string, true> */
@@ -31,7 +31,7 @@ final class LocalClosureAnalyzer
 
     /**
      * @param list<Stmt> $statements
-     * @return array<string, array{assignment: Expr\Assign, closure: Expr\Closure|Expr\ArrowFunction, calls: int}>
+     * @return array<string, array{assignment: Expr\Assign, closure: Expr\Closure|Expr\ArrowFunction, calls: int, callSites: list<Expr\FuncCall>}>
      */
     public function analyze(array $statements): array
     {
@@ -63,6 +63,7 @@ final class LocalClosureAnalyzer
                 'assignment' => $statement->expr,
                 'closure' => $statement->expr->expr,
                 'calls' => 0,
+                'callSites' => [],
             ];
         }
 
@@ -104,7 +105,7 @@ final class LocalClosureAnalyzer
         return !$this->containsUnsupportedClosureNode($body, false);
     }
 
-    private function containsUnsupportedClosureNode(mixed $value, bool $root = true): bool
+    private function containsUnsupportedClosureNode(mixed $value, bool $root): bool
     {
         foreach (is_array($value) ? $value : [$value] as $node) {
             if (!$node instanceof Node) {
@@ -150,6 +151,11 @@ final class LocalClosureAnalyzer
         foreach (is_array($value) ? $value : [$value] as $node) {
             if (!$node instanceof Node) {
                 continue;
+            }
+
+            // All candidates invalidated — nothing left to scan
+            if ($this->candidates === []) {
+                return;
             }
 
             // Textual order is not a dominance proof in the presence of goto:
@@ -205,6 +211,7 @@ final class LocalClosureAnalyzer
         }
 
         $this->candidates[$name]['calls']++;
+        $this->candidates[$name]['callSites'][] = $parent;
     }
 
     private function isSupportedDirectCall(Expr\FuncCall $call, int $parameterCount): bool
@@ -219,4 +226,5 @@ final class LocalClosureAnalyzer
         }
         return true;
     }
+
 }

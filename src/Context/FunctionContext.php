@@ -79,7 +79,12 @@ class FunctionContext
      * plans only; the generator moves a successfully lowered entry into
      * nativeLocalClosures when it emits the concrete C++ lambda.
      *
-     * @var array<string, array{assignment: \PhpParser\Node\Expr\Assign, closure: \PhpParser\Node\Expr\Closure|\PhpParser\Node\Expr\ArrowFunction, calls: int}>
+     * @var array<string, array{
+     *     assignment: \PhpParser\Node\Expr\Assign,
+     *     closure: \PhpParser\Node\Expr\Closure|\PhpParser\Node\Expr\ArrowFunction,
+     *     calls: int,
+     *     callSites: list<\PhpParser\Node\Expr\FuncCall>,
+     * }>
      */
     public array $localClosureCandidates = [];
     /** @var array<string, true> Local variables already emitted as concrete C++ lambdas. */

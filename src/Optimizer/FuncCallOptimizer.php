@@ -1367,7 +1367,7 @@ trait FuncCallOptimizer
         foreach ($funcDef->argInfoList as $i => $argInfo) {
             if ($argInfo->variadic) {
                 $tmpVar = $this->addTmpVar(Type::ARRAY);
-                $this->context->beforeStmtLines[] = $this->genArray($list) . ';';
+                $this->context->beforeStmtLines[] = $tmpVar . ' = ' . $this->genArray($list) . ';';
                 $this->context->beforeStmtLines[] = $tmpVar . '.merge(' . $argInfo->name . ');';
                 return $tmpVar;
             }

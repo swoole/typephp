@@ -1,0 +1,5 @@
+name: property_method_call
+build-mode: bin
+optimize: 2
+sources:
+  - main.php

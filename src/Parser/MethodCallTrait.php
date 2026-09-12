@@ -1103,10 +1103,10 @@ trait MethodCallTrait
 
         if (!$this->isNameExpr($expr->class)) {
             if ($this->isVarExpr($expr->class)
-                && $this->isStableObject($class)
+                && isset($this->context->exactObjects[$class])
                 && $this->isIdExpr($expr->name)
             ) {
-                $class = $this->getObjectType($class);
+                $class = $this->context->exactObjects[$class];
                 goto _do_call;
             }
             $classTarget = $this->materializeDynamicStaticCallTarget($expr->class);

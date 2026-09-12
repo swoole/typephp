@@ -1275,7 +1275,11 @@ trait BinaryOpTrait
         $this->indentLevel++;
         $code .= $this->formatCapturedStmtLines($rightBeforeStmts);
         if ($rightAfterStmts) {
-            $rightTmpVar = $this->addTmpVar(Type::VAR);
+            $type = $this->detectTypeOfExpr($right) === Type::BOOL ? Type::BOOL : Type::VAR;
+            $rightTmpVar = $this->addTmpVar($type);
+            if ($type === Type::BOOL) {
+                $rightExpr = $this->convertBoolExpr($rightExpr);
+            }
             $code .= $this->getIndent() . $rightTmpVar . ' = ' . $rightExpr . ';' . PHP_EOL;
             $code .= $this->formatCapturedStmtLines($rightAfterStmts);
             $rightExpr = $rightTmpVar;

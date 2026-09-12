@@ -382,30 +382,35 @@ trait ClosureGenerator
     }
 
     /**
-     * Detect the native type for a call-site argument, handling edge cases
-     * that detectTypeOfExpr does not cover for closure narrowing purposes:
-     * - Unary +/- on bool: PHP coerces bool to int first, result is never bool.
+     * Detect native type for call-site arguments, with edge-case overrides
+     * that detectTypeOfExpr does not cover for closure narrowing.
      */
     private function inferCallSiteArgType(Expr $expr): string
     {
         $type = $this->detectTypeOfExpr($expr);
 
-        // -true / +false: PHP coerces bool to int before negation.
-        // detectTypeOfExpr returns BOOL (inherits operand type), but the
-        // actual runtime result is int, so we must not narrow to bool.
+        // -true / +false: PHP coerces bool to int first, not bool.
         if ($type === Type::BOOL && ($expr instanceof Expr\UnaryMinus || $expr instanceof Expr\UnaryPlus)) {
             return Type::VAR;
         }
 
-        // DECIMAL/BIGINT/BIGFLOAT are Box subclasses stored in zend_resource.
-        // The C++ types php::Decimal/php::BigInt/php::BigFloat cannot be
-        // implicitly constructed from Variant, so we must not narrow to them.
+        // Box subclasses (Decimal/BigInt/BigFloat) cannot be constructed from Variant.
         if (in_array($type, [Type::DECIMAL, Type::BIGINT, Type::BIGFLOAT], true)) {
             return Type::VAR;
         }
 
-        // Pow generates php::fn::pow() which returns Variant, not a native type.
+        // php::fn::pow() returns Variant.
         if ($expr instanceof Expr\BinaryOp\Pow) {
+            return Type::VAR;
+        }
+
+        // php::fn::mod() returns Variant (non-INT operands).
+        if ($expr instanceof Expr\BinaryOp\Mod && $type === Type::FLOAT) {
+            return Type::VAR;
+        }
+
+        // varint_types: all inferred locals and non-constant ops use php::Var.
+        if ($this->varIntTypes && in_array($type, [Type::INT, Type::FLOAT], true)) {
             return Type::VAR;
         }
 

@@ -330,4 +330,64 @@ final class ClosureParamTypeTest extends BaseTest
         self::assertStringNotContainsString('php::Decimal', $code);
         self::assertStringNotContainsString('php::BigFloat', $code);
     }
+
+    // --- varint_types mode: closure params use php::Var for inferred ints ---
+
+    public function testVarintModeTypeDeclStillUsesNativeType(): void
+    {
+        $code = $this->compileFixture('closure-param-type-varint.php');
+        self::assertMatchesRegularExpression('/php_varinttypedeclint\(.*?\n\tauto fn = \[\]\(php::Int p\)/s', $code);
+        self::assertMatchesRegularExpression('/php_varinttypedeclfloat\(.*?\n\tauto fn = \[\]\(php::Float p\)/s', $code);
+    }
+
+    public function testVarintModeInferredIntUsesVar(): void
+    {
+        $code = $this->compileFixture('closure-param-type-varint.php');
+        // Lambda parameter is php::Int (type declaration), call site uses toIntArgExact
+        self::assertMatchesRegularExpression('/php_varintinferredint\(.*?\n\tauto fn = \[\]\(php::Int vi1\)/s', $code);
+        self::assertStringContainsString('php::toIntArgExact(((a) + (b)), "{closure}", 1, "vi1")', $code);
+        self::assertMatchesRegularExpression('/php_varintinferredintsub\(.*?\n\tauto fn = \[\]\(php::Int vis1\)/s', $code);
+        self::assertStringContainsString('php::toIntArgExact(((a) - (b)), "{closure}", 1, "vis1")', $code);
+        self::assertMatchesRegularExpression('/php_varintinferredintmul\(.*?\n\tauto fn = \[\]\(php::Int vim1\)/s', $code);
+        self::assertStringContainsString('php::toIntArgExact(((a) * (b)), "{closure}", 1, "vim1")', $code);
+    }
+
+    public function testVarintModeModUsesVar(): void
+    {
+        $code = $this->compileFixture('closure-param-type-varint.php');
+        self::assertMatchesRegularExpression('/php_varintinferredintmod\(.*?\n\tauto fn = \[\]\(php::Int vimod1\)/s', $code);
+        self::assertStringContainsString('php::toIntArgExact(php::fn::mod(a, b), "{closure}", 1, "vimod1")', $code);
+    }
+
+    public function testVarintModeShiftUsesVar(): void
+    {
+        $code = $this->compileFixture('closure-param-type-varint.php');
+        self::assertMatchesRegularExpression('/php_varintinferredintshiftleft\(.*?\n\tauto fn = \[\]\(php::Int visl1\)/s', $code);
+        self::assertStringContainsString('php::toIntArgExact(((a) << (b)), "{closure}", 1, "visl1")', $code);
+        self::assertMatchesRegularExpression('/php_varintinferredintshiftright\(.*?\n\tauto fn = \[\]\(php::Int visr1\)/s', $code);
+        self::assertStringContainsString('php::toIntArgExact(((a) >> (b)), "{closure}", 1, "visr1")', $code);
+    }
+
+    public function testVarintModePowUsesVar(): void
+    {
+        $code = $this->compileFixture('closure-param-type-varint.php');
+        self::assertMatchesRegularExpression('/php_varintbinarypow\(.*?\n\tauto fn = \[\]\(php::Int vbp1\)/s', $code);
+        self::assertStringContainsString('php::toIntArgExact(php::fn::pow(a, b), "{closure}", 1, "vbp1")', $code);
+    }
+
+    // --- Modulo with float operands → php::fn::mod() → VAR ---
+
+    public function testBinaryModFloatInfersVar(): void
+    {
+        $code = $this->compileFixture('closure-param-type.php');
+        self::assertMatchesRegularExpression('/php_binarymodfloat\(.*?\n\tauto fn = \[\]\(php::Var bmf1\)/s', $code);
+    }
+
+    // --- varint_types mode: float division → Variant ---
+
+    public function testVarintModeFloatDivUsesVar(): void
+    {
+        $code = $this->compileFixture('closure-param-type-varint.php');
+        self::assertMatchesRegularExpression('/php_varintfloatdiv\(.*?\n\tauto fn = \[\]\(php::Var vfdiv1\)/s', $code);
+    }
 }

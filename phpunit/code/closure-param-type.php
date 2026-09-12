@@ -590,6 +590,14 @@ function inferredArrayNoDecl(): int
     return $fn([1, 2, 3]);
 }
 
+// --- Modulo with float operands (php::fn::mod → Variant) ---
+
+function binaryModFloat(): void
+{
+    $fn = fn($bmf1) => $bmf1;
+    var_dump($fn(3.14 % 2));
+}
+
 // --- Entry point ---
 function main(): void
 {
@@ -674,4 +682,5 @@ function main(): void
     classTypeDecl();
     intTypeDecl();
     inferredArrayNoDecl();
+    binaryModFloat();
 }

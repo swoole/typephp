@@ -296,8 +296,10 @@ trait FunctionCallTrait
                     $this->namespace . '\\' . ltrim($functionTarget['source'], '\\'),
                 );
             }
-            $code = $functionTarget['definitelyGlobal']
-                ? $this->parseFuncCallWithOptimizer($name, $expr)
+            $canOptimizeBuiltinFallback = $functionTarget['definitelyGlobal']
+                || ($functionTarget['namespacedFallback'] && $globalName !== 'get_called_class');
+            $code = $canOptimizeBuiltinFallback
+                ? $this->parseFuncCallWithOptimizer($globalName, $expr)
                 : false;
             if ($code !== false) {
                 // Constant folding and native container operations do not

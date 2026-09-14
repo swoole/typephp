@@ -36,4 +36,24 @@ final class FuncCallOptimizerTest extends BaseTest
         self::assertStringContainsString('php::fn::floor(1.5)', $code);
         self::assertStringContainsString('php::fn::round(1.25)', $code);
     }
+
+    public function testNamespacedBuiltinFallbackUsesDirectOptimizerPaths(): void
+    {
+        global $translator;
+
+        $compiler = CompilerTest::create(TYPEPHP_ROOT_PATH);
+        $translator = $compiler;
+        $source = TYPEPHP_ROOT_PATH . '/phpunit/code/namespaced-builtin-fallback-optimizer.php';
+        $compiler->addFiles([$source]);
+        $compiler->prepareFile($source);
+        $generated = $compiler->convertFile($source);
+        $code = file_get_contents($generated);
+
+        self::assertIsString($code);
+        self::assertSame(1, substr_count($code, 'php::fn::count('));
+        self::assertSame(1, substr_count($code, 'php::fn::in_array('));
+        self::assertSame(1, substr_count($code, 'php::fn::str_contains('));
+        self::assertStringContainsString('php_namespacedbuiltinfallback__strlen(', $code);
+        self::assertStringNotContainsString('php::call(', $code);
+    }
 }

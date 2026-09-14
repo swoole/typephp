@@ -284,6 +284,11 @@ final class NanoExtensionSelector
             }
         }
         foreach (array_keys($statistics->get(CompilationStatistics::DIRECT_FUNCTIONS)) as $function) {
+            $feature = $this->standardFeature($function);
+            if ($feature !== null) {
+                $features[$feature] = true;
+                continue;
+            }
             $owner = $this->functionExtension($function);
             if ($owner === 'date') {
                 // Common date helpers are coupled to timelib and the DateTime
@@ -292,12 +297,7 @@ final class NanoExtensionSelector
                 continue;
             }
             if ($owner === 'standard') {
-                $feature = $this->standardFeature($function);
-                if ($feature === null) {
-                    $selected['standard'] = true;
-                } else {
-                    $features[$feature] = true;
-                }
+                $selected['standard'] = true;
                 continue;
             }
             if ($owner !== null && isset($available[$owner])) {

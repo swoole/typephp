@@ -8,6 +8,26 @@ namespace CalledShadow {
         public function name(): string { return get_called_class(); }
     }
 }
+namespace CalledAliasTarget {
+    function get_called_class(): string { return 'alias'; }
+}
+namespace CalledAlias {
+    use function CalledAliasTarget\get_called_class as CALLED_ALIAS;
+    class Probe {
+        public function name(): string { return cAlLeD_aLiAs(); }
+    }
+}
+namespace CalledDynamicShadow {
+    class Probe {
+        public function name(): string { return get_called_class(); }
+    }
+}
+namespace CalledDynamicFrozen {
+    class Probe {
+        public function name(): string { return get_called_class(); }
+    }
+    class Child extends Probe {}
+}
 namespace {
     use function get_called_class as calledName;
 
@@ -37,6 +57,12 @@ namespace {
         $runtime = eval('return new RuntimeCalledScope();');
         printCalledNames($runtime);
         echo (new \CalledShadow\Probe())->name(), "\n";
+        echo (new \CalledAlias\Probe())->name(), "\n";
+        eval('namespace CalledDynamicShadow { function get_called_class(): string { return "shadow-first"; } }');
+        echo (new \CalledDynamicShadow\Probe())->name(), "\n";
+        echo (new \CalledDynamicFrozen\Probe())->name(), "\n";
+        eval('namespace CalledDynamicFrozen { function get_called_class(): string { return "shadow-late"; } }');
+        echo (new \CalledDynamicFrozen\Child())->name(), "\n";
         try {
             get_called_class();
         } catch (\Error $error) {
@@ -51,4 +77,8 @@ CalledScopeChild:CalledScopeChild:CalledScopeChild:CalledScopeChild
 CalledScopeBase:CalledScopeChild
 RuntimeCalledScope:RuntimeCalledScope:RuntimeCalledScope:RuntimeCalledScope
 shadow
+alias
+shadow-first
+CalledDynamicFrozen\Probe
+CalledDynamicFrozen\Child
 get_called_class() must be called from within a class

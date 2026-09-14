@@ -929,11 +929,38 @@ final class NativeClassValidationTest extends \BaseTest
         $this->compile('native-class-get-called-class.php');
     }
 
+    public function testRejectsQualifiedGetCalledClassInNativeClass(): void
+    {
+        $this->expectException(TestError::class);
+        $this->expectExceptionMessage('Native classes do not support late static binding');
+        $this->compile('native-class-get-called-class-qualified.php');
+    }
+
+    public function testRejectsNamespacedGetCalledClassInNativeClass(): void
+    {
+        $this->expectException(TestError::class);
+        $this->expectExceptionMessage('Native classes do not support late static binding');
+        $this->compile('native-class-get-called-class-namespaced.php');
+    }
+
+    public function testAllowsCompiledNamespacedGetCalledClassShadowInNativeClass(): void
+    {
+        $this->compile('native-class-get-called-class-shadow.php');
+        $this->addToAssertionCount(1);
+    }
+
     public function testRejectsGetClassForNativeObject(): void
     {
         $this->expectException(TestError::class);
         $this->expectExceptionMessage('Native classes do not support runtime class introspection');
         $this->compile('native-class-get-class.php');
+    }
+
+    public function testRejectsNamespacedGetClassForNativeObject(): void
+    {
+        $this->expectException(TestError::class);
+        $this->expectExceptionMessage('Native classes do not support runtime class introspection');
+        $this->compile('native-class-get-class-namespaced.php');
     }
 
     public function testRejectsImplicitGetClassInNativeMethod(): void
@@ -948,6 +975,19 @@ final class NativeClassValidationTest extends \BaseTest
         $this->expectException(TestError::class);
         $this->expectExceptionMessage('Native classes do not support runtime class introspection');
         $this->compile('native-class-get-parent-class.php');
+    }
+
+    public function testRejectsNamespacedGetParentClassForNativeObject(): void
+    {
+        $this->expectException(TestError::class);
+        $this->expectExceptionMessage('Native classes do not support runtime class introspection');
+        $this->compile('native-class-get-parent-class-namespaced.php');
+    }
+
+    public function testAllowsCompiledNamespacedGetClassShadowsInNativeClass(): void
+    {
+        $this->compile('native-class-get-class-shadow.php');
+        $this->addToAssertionCount(1);
     }
 
     public function testRejectsChangingAnInferredNativeGlobalType(): void

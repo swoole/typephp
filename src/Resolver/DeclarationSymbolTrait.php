@@ -78,7 +78,7 @@ trait DeclarationSymbolTrait
             $type = $use->type !== Node\Stmt\Use_::TYPE_UNKNOWN ? $use->type : $v2->type;
             $alias = $this->registerUseImportAlias($use, $type, $id);
             if ($type === Node\Stmt\Use_::TYPE_FUNCTION) {
-                $this->useFunctions[$alias] = $id;
+                $this->useFunctions[strtolower($alias)] = $id;
             } elseif ($type === Node\Stmt\Use_::TYPE_CONSTANT) {
                 // $id is already the fully qualified constant name. Splitting
                 // and re-joining it on `\` corrupted single-segment imports:

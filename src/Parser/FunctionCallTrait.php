@@ -20,6 +20,66 @@ use TypePhp\Exception\PlaceHolder;
 
 trait FunctionCallTrait
 {
+    /**
+     * Resolve the one static function name used by every call path. Function
+     * imports and function names are case-insensitive, unlike constant names.
+     *
+     * @return array{source: string, target: string, nativeLookup: string, lower: string, definitelyGlobal: bool, namespacedFallback: bool}
+     */
+    protected function resolveStaticFunctionCallTarget(Node\Name $name): array
+    {
+        $source = $this->parseIdentifier($name);
+        $bare = ltrim($source, '\\');
+        $unqualified = !str_contains($bare, '\\');
+        $fullyQualified = $name instanceof Node\Name\FullyQualified;
+        $import = $unqualified && !$fullyQualified ? strtolower($bare) : '';
+        $imported = $import !== '' && isset($this->useFunctions[$import]);
+        $resolved = $name->getAttribute('resolvedName');
+        $target = $resolved instanceof Node\Name
+            ? ltrim($resolved->toString(), '\\')
+            : ($imported ? $this->useFunctions[$import] : $bare);
+        $lower = strtolower($target);
+        $namespacedFallback = !$fullyQualified
+            && !$imported
+            && $unqualified
+            && $this->namespace !== '';
+
+        return [
+            'source' => $source,
+            'target' => $target,
+            // The raw short name is the only form that retains PHP's
+            // namespace-to-global lookup fallback. All resolved/imported/
+            // qualified names must not be interpreted through imports again.
+            'nativeLookup' => !$fullyQualified && !$imported && $unqualified
+                ? $source
+                : '\\' . $target,
+            'lower' => $lower,
+            // A namespaced short name can be shadowed at runtime, so only
+            // these forms are known to name a global builtin directly.
+            'definitelyGlobal' => $fullyQualified
+                || ($imported && !str_contains($target, '\\'))
+                || ($this->namespace === '' && $unqualified),
+            'namespacedFallback' => $namespacedFallback,
+        ];
+    }
+
+    /**
+     * PHP resolves an unqualified namespaced function dynamically before
+     * falling back to its global builtin. Resolve on the first execution and
+     * cache that target choice for the rest of the request.
+     */
+    protected function parseNamespacedGetCalledClassFallback(string $function): string
+    {
+        $function = $this->getLiteralString($function);
+        $resolution = $this->getFunctionResolutionCache();
+        $this->compilationStatistics->record(CompilationStatistics::DIRECT_FUNCTIONS, 'function_exists');
+        return '([&]() -> php::Var { auto &resolution = ' . $resolution
+            . '; if (resolution == 0) { resolution = php::fn::function_exists(' . $function
+            . ') ? 1 : 2; } return resolution == 1 ? typephp_call_cached('
+            . $function . ', ' . $this->getFunctionCallCache() . ') : php::Var('
+            . $this->getCalledClassExpr() . '); })()';
+    }
+
     protected function parsePipeOperator(Expr\BinaryOp\Pipe $expr): string
     {
         $this->assertExprCanBeUsedAsValue($expr->left, 'pipe left operand');
@@ -112,18 +172,25 @@ trait FunctionCallTrait
             $fn   = $this->parseIdentifier($expr->name);
             $placeHolder = $fn;
             $name = '';
-        } elseif ($expr->name->getType() === 'Name' or $expr->name->getType() === 'Name_FullyQualified') {
-            $name = $this->parseIdentifier($expr->name);
-            $globalName = ltrim($name, '\\');
+        } elseif ($expr->name instanceof Node\Name) {
+            $functionTarget = $this->resolveStaticFunctionCallTarget($expr->name);
+            $name = $functionTarget['target'];
+            $globalName = $functionTarget['lower'];
             $this->compilationStatistics->record(
                 CompilationStatistics::FUNCTIONS,
-                strtolower($globalName),
+                $globalName,
             );
-            $namedExit = $this->parseNamedExitMessageCall($globalName, $expr);
+            $namedExit = $functionTarget['definitelyGlobal']
+                ? $this->parseNamedExitMessageCall($globalName, $expr)
+                : null;
             if ($namedExit !== null) {
                 return $namedExit;
             }
-            if ($globalName === 'clone' && !$expr->isFirstClassCallable() && $this->class) {
+            if ($functionTarget['definitelyGlobal']
+                && $globalName === 'clone'
+                && !$expr->isFirstClassCallable()
+                && $this->class
+            ) {
                 // PHP 8.5 clone-with applies property updates in the lexical
                 // scope of the call site. Direct AOT method calls do not leave
                 // a Zend execute frame on top, so preserve that scope while
@@ -132,13 +199,54 @@ trait FunctionCallTrait
                     ? 'php::FakeScopeGuard::current()'
                     : $this->getClassEntryPtr($this->getFullClassName());
             }
-            if ($globalName === 'get_called_class' && $this->classDef?->nativeObject) {
-                $this->fatalError(
-                    $expr,
-                    'Native classes do not support late static binding; use `self::class` or a concrete class name',
-                );
+            $nativeFn = $this->findNativeFunction($functionTarget['nativeLookup']);
+            if ($nativeFn) {
+                $functionDef = $this->getFunction($nativeFn);
+                $resolvedTarget = $functionDef->getNamespacedName();
+                $expr->setAttribute('nativeCall', $nativeFn);
+                if ($expr->isFirstClassCallable()
+                    && $this->functionUsesNativeObject($functionDef)
+                ) {
+                    $this->fatalError($expr, 'Native ABI functions cannot be converted to Zend closures');
+                }
+                // Function call placeholder, not a real function call
+                if (count($expr->args) === 1 and $this->isPlaceholderExpr($expr->args[0])) {
+                    return $this->genPlaceHolder($this->getLiteralString($resolvedTarget));
+                }
+                $this->checkNativeCallArgs($expr, $functionDef, $expr->args, $resolvedTarget);
+                if ($this->shouldUseDynamicCallForNativeArgs($nativeFn, $expr->args)) {
+                    return $this->genRuntimeFunctionCall($this->getFuncPtr($resolvedTarget), $expr->args, $resolvedTarget);
+                }
+                try {
+                    $callee = $expr->getAttribute(self::ATTR_MULTI_RETURN_IMPL, false)
+                        ? $this->getMultiReturnImplName($nativeFn)
+                        : self::PREFIX . $nativeFn;
+                    return $callee . '(' . $this->parseNativeCallArgs($expr->args, $nativeFn) . ')';
+                } catch (PlaceHolder) {
+                    return $this->genPlaceHolder($this->getLiteralString($resolvedTarget));
+                }
             }
-            if (($globalName === 'get_class' || $globalName === 'get_parent_class')
+            $mayCallGlobalBuiltin = $functionTarget['definitelyGlobal'] || $functionTarget['namespacedFallback'];
+            $isNamespacedGetCalledClassFallback = $functionTarget['namespacedFallback']
+                && $globalName === 'get_called_class'
+                && $expr->args === []
+                && $this->methodDef !== null
+                && !$this->classDef?->nativeObject;
+            // Policy applies only after compiled namespace shadows/imported
+            // user functions have had a chance to resolve. A missing
+            // namespaced short name can still fall back to a global builtin.
+            if ($mayCallGlobalBuiltin) {
+                $this->assertWasiFunctionSupported($expr, $globalName);
+                $this->assertNanoFunctionSupported($expr, $globalName);
+                if (!$isNamespacedGetCalledClassFallback && $this->isInternalFunction($globalName)) {
+                    $this->markInternalFunctionCallbackCall($globalName, $expr->args);
+                }
+                if (in_array($globalName, Constants::UNSUPPORTED_FUNCTIONS, true)) {
+                    $this->fatalError($expr, 'Unsupported function: `' . $globalName . '`');
+                }
+            }
+            if ($mayCallGlobalBuiltin
+                && ($globalName === 'get_class' || $globalName === 'get_parent_class')
                 && (($expr->args === [] && $this->classDef?->nativeObject)
                     || ($expr->args !== []
                         && $this->isNativeObjectClass($this->detectClassOfExpr($expr->args[0]->value))))
@@ -151,50 +259,25 @@ trait FunctionCallTrait
                     "Native classes do not support runtime class introspection; use {$replacement}",
                 );
             }
-            // Capability policy is determined by the target, not by the
-            // extensions loaded into the build-time PHP process. Otherwise a
-            // forbidden direct call could bypass validation merely because
-            // that host PHP does not expose the function.
-            $this->assertWasiFunctionSupported($expr, $globalName);
-            $this->assertNanoFunctionSupported($expr, $globalName);
-            if ($this->isInternalFunction($globalName)) {
-                $this->markInternalFunctionCallbackCall($globalName, $expr->args);
-            }
-            if (in_array($globalName, Constants::UNSUPPORTED_FUNCTIONS, true)) {
-                $this->fatalError($expr, 'Unsupported function: `' . $globalName . '`');
-            }
-            $nativeFn = $this->findNativeFunction($name);
-            if ($nativeFn) {
-                $expr->setAttribute('nativeCall', $nativeFn);
-                if ($expr->isFirstClassCallable()
-                    && $this->functionUsesNativeObject($this->getFunction($nativeFn))
-                ) {
-                    $this->fatalError($expr, 'Native ABI functions cannot be converted to Zend closures');
-                }
-                // Function call placeholder, not a real function call
-                if (count($expr->args) === 1 and $this->isPlaceholderExpr($expr->args[0])) {
-                    return $this->genPlaceHolder($this->identifierToStr($expr->name));
-                }
-                $this->checkNativeCallArgs($expr, $this->getFunction($nativeFn), $expr->args, $name);
-                if ($this->shouldUseDynamicCallForNativeArgs($nativeFn, $expr->args)) {
-                    $functionDef = $this->getFunction($nativeFn);
-                    return $this->genRuntimeFunctionCall($this->getFuncPtr($functionDef->getNamespacedName()), $expr->args, $name);
-                }
-                try {
-                    $callee = $expr->getAttribute(self::ATTR_MULTI_RETURN_IMPL, false)
-                        ? $this->getMultiReturnImplName($nativeFn)
-                        : self::PREFIX . $nativeFn;
-                    return $callee . '(' . $this->parseNativeCallArgs($expr->args, $nativeFn) . ')';
-                } catch (PlaceHolder) {
-                    return $this->genPlaceHolder($this->identifierToStr($expr->name));
-                }
+            if ($mayCallGlobalBuiltin
+                && $globalName === 'get_called_class'
+                && $this->classDef?->nativeObject
+            ) {
+                $this->fatalError(
+                    $expr,
+                    'Native classes do not support late static binding; use `self::class` or a concrete class name',
+                );
             }
             // For dynamically dispatched functions, convert the function name to its fully qualified name including the namespace
-            $name = $this->getNamespacedFuncName($name);
-            $this->checkInternalFunctionArgCount($name, $expr);
-            $resolvedName = $expr->name->getAttribute('resolvedName');
-            $targetName = $resolvedName instanceof Node\Name ? $resolvedName->toString() : $name;
-            if (strcasecmp(ltrim($targetName, '\\'), 'get_called_class') === 0
+            $name = $functionTarget['target'];
+            if ($functionTarget['definitelyGlobal']) {
+                $name = strtolower($name);
+            }
+            if ($mayCallGlobalBuiltin && !$isNamespacedGetCalledClassFallback) {
+                $this->checkInternalFunctionArgCount($name, $expr);
+            }
+            if ($functionTarget['definitelyGlobal']
+                && $globalName === 'get_called_class'
                 && $expr->args === []
                 && $this->methodDef !== null
                 && !$this->classDef?->nativeObject
@@ -203,7 +286,19 @@ trait FunctionCallTrait
                 // to inspect. Reuse the runtime scope used by static::class.
                 return $this->getCalledClassExpr();
             }
-            $code = $this->parseFuncCallWithOptimizer($name, $expr);
+            if ($functionTarget['namespacedFallback']
+                && $globalName === 'get_called_class'
+                && $expr->args === []
+                && $this->methodDef !== null
+                && !$this->classDef?->nativeObject
+            ) {
+                return $this->parseNamespacedGetCalledClassFallback(
+                    $this->namespace . '\\' . ltrim($functionTarget['source'], '\\'),
+                );
+            }
+            $code = $functionTarget['definitelyGlobal']
+                ? $this->parseFuncCallWithOptimizer($name, $expr)
+                : false;
             if ($code !== false) {
                 // Constant folding and native container operations do not
                 // retain the PHP function. Record only emitted stdlib calls.
@@ -219,7 +314,7 @@ trait FunctionCallTrait
                 CompilationStatistics::RUNTIME_FUNCTIONS,
                 strtolower($globalName),
             );
-            $placeHolder = $this->identifierToStr($expr->name);
+            $placeHolder = $this->getLiteralString($functionTarget['target']);
             $fn = $this->getFuncPtr($name);
             if ($this->debug) {
                 $this->context->beforeStmtLines[] = $this->formatCppLineComment('Func Call: ', $name . '()');

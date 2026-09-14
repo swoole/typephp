@@ -200,6 +200,36 @@ final class NanoCapabilityPolicyTest extends BaseTest
         $compiler->convertFile($source);
     }
 
+    public function testNanoRejectsNamespacedRestrictedBuiltinFallback(): void
+    {
+        global $translator;
+        $compiler = new NanoCapabilityPolicyCompiler(TYPEPHP_ROOT_PATH);
+        $compiler->enableNanoForTest();
+        $translator = $compiler;
+        $source = __DIR__ . '/../code/namespaced-restricted-functions.php';
+        $compiler->addFiles([$source]);
+        $compiler->prepareFile($source);
+
+        $this->expectException(TestError::class);
+        $this->expectExceptionMessage('Function `shell_exec` is not supported in nano mode');
+        $compiler->convertFile($source);
+    }
+
+    public function testWasiRejectsNamespacedRestrictedBuiltinFallback(): void
+    {
+        global $translator;
+        $compiler = new NanoCapabilityPolicyCompiler(TYPEPHP_ROOT_PATH);
+        $compiler->enableWasiForTest();
+        $translator = $compiler;
+        $source = __DIR__ . '/../code/namespaced-wasi-restricted-function.php';
+        $compiler->addFiles([$source]);
+        $compiler->prepareFile($source);
+
+        $this->expectException(TestError::class);
+        $this->expectExceptionMessage('Function `stream_socket_client` is not supported by the WASI target');
+        $compiler->convertFile($source);
+    }
+
     public function testNanoKeepsTypedFileStreamMethods(): void
     {
         global $translator;

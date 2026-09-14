@@ -1,5 +1,7 @@
 <?php
 
+namespace ScopedCallContext;
+
 class ScopedCallContextReuse
 {
     private function mapValue(int $value): int

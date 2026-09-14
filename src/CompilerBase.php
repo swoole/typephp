@@ -441,6 +441,7 @@ class CompilerBase implements PropertyAccessContext
     protected int $propertyAccessCacheIndex = 0;
     protected int $methodCallCacheIndex = 0;
     protected int $functionCallCacheIndex = 0;
+    protected int $functionResolutionCacheIndex = 0;
     /** @var array<string, array<Node\Stmt>> Prepared declaration ASTs keyed by real path. */
     protected array $preparedFileAsts = [];
     protected bool $traitDeclarationsComposed = false;
@@ -1555,6 +1556,14 @@ class CompilerBase implements PropertyAccessContext
         $this->assertCompilerPhase(self::PHASE_CONVERT, 'function call cache ID allocation');
         $id = $this->functionCallCacheIndex++;
         return 'typephp_get_function_call_cache(FunctionCallCacheId{' . $id . '})';
+    }
+
+    /** Reserve a request-local namespace-function resolution slot per call site. */
+    protected function getFunctionResolutionCache(): string
+    {
+        $this->assertCompilerPhase(self::PHASE_CONVERT, 'function resolution cache ID allocation');
+        $id = $this->functionResolutionCacheIndex++;
+        return 'typephp_get_function_resolution_cache(FunctionResolutionCacheId{' . $id . '})';
     }
 
     /** Return the function-local late-static-bound class entry. */
@@ -3653,12 +3662,16 @@ class CompilerBase implements PropertyAccessContext
                 $this->escapeName($this->getNamespacedClassName($funcName)),
             ];
         } else {
-            $possibleFunctionNames = [$this->escapeName($funcName)];
-            if ($this->namespace) {
-                $possibleFunctionNames[] = $this->escapeNamespace($this->namespace) . self::NAMESPACE_SEPARATOR . $this->escapeName($funcName);
-            }
-            if (isset($this->useFunctions[$funcName])) {
-                $possibleFunctionNames[] = $this->escapeNamespace($this->useFunctions[$funcName]);
+            $import = strtolower($funcName);
+            if (isset($this->useFunctions[$import])) {
+                $possibleFunctionNames = [$this->escapeNamespace($this->useFunctions[$import])];
+            } else {
+                $possibleFunctionNames = [];
+                if ($this->namespace) {
+                    $possibleFunctionNames[] = $this->escapeNamespace($this->namespace)
+                        . self::NAMESPACE_SEPARATOR . $this->escapeName($funcName);
+                }
+                $possibleFunctionNames[] = $this->escapeName($funcName);
             }
         }
 

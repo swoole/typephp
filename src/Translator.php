@@ -998,6 +998,7 @@ class Translator extends Preprocessor
         $lines[] = 'enum class PropertyCacheId : uint32_t {};' . PHP_EOL;
         $lines[] = 'enum class MethodCallCacheId : uint32_t {};' . PHP_EOL;
         $lines[] = 'enum class FunctionCallCacheId : uint32_t {};' . PHP_EOL;
+        $lines[] = 'enum class FunctionResolutionCacheId : uint32_t {};' . PHP_EOL;
 
         $lines[] = 'zend_class_entry *get_class(RequestClassId class_id, const php::Str &class_name);';
         $lines[] = 'zend_function *get_func(RequestFuncId func_id, const php::Str &func_name);';
@@ -1009,6 +1010,7 @@ class Translator extends Preprocessor
         $lines[] = 'php::PropertyCacheSlot &get_property_cache(PropertyCacheId cache_id) noexcept;' . PHP_EOL;
         $lines[] = 'php::MethodCallCacheSlot &typephp_get_method_call_cache(MethodCallCacheId cache_id) noexcept;' . PHP_EOL;
         $lines[] = 'php::FunctionCallCacheSlot &typephp_get_function_call_cache(FunctionCallCacheId cache_id) noexcept;' . PHP_EOL;
+        $lines[] = 'uint8_t &typephp_get_function_resolution_cache(FunctionResolutionCacheId cache_id) noexcept;' . PHP_EOL;
 
         foreach ($this->getClassLikesWithConstants() as $classDef) {
             foreach ($classDef->constants as $constant) {
@@ -1199,6 +1201,8 @@ class Translator extends Preprocessor
             . max(1, $this->methodCallCacheIndex) . ']{};' . PHP_EOL;
         $code .= $this->getIndent() . 'php::FunctionCallCacheSlot function_call_cache_map['
             . max(1, $this->functionCallCacheIndex) . ']{};' . PHP_EOL;
+        $code .= $this->getIndent() . 'uint8_t function_resolution_cache_map['
+            . max(1, $this->functionResolutionCacheIndex) . ']{};' . PHP_EOL;
         $code .= '};' . PHP_EOL;
         $code .= 'static THREAD_LOCAL php_request_cache_storage *php_request_cache = nullptr;' . PHP_EOL;
 
@@ -1288,6 +1292,10 @@ php::MethodCallCacheSlot &typephp_get_method_call_cache(MethodCallCacheId cache_
 
 php::FunctionCallCacheSlot &typephp_get_function_call_cache(FunctionCallCacheId cache_id) noexcept {
     return php_request_cache->function_call_cache_map[static_cast<uint32_t>(cache_id)];
+}
+
+uint8_t &typephp_get_function_resolution_cache(FunctionResolutionCacheId cache_id) noexcept {
+    return php_request_cache->function_resolution_cache_map[static_cast<uint32_t>(cache_id)];
 }
 CODE;
         $code .= "\n\n";

@@ -1,10 +1,14 @@
 <?php
 
-#[Native]
+namespace NativeCalledClass;
+
+use function \get_called_class as CALLED_CLASS;
+
+#[\Native]
 class NativeGetCalledClass
 {
     public function name(): string
     {
-        return get_called_class();
+        return cAlLeD_cLaSs();
     }
 }

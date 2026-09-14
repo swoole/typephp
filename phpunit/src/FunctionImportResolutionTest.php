@@ -17,6 +17,16 @@ final class FunctionImportResolutionTest extends BaseTest
         self::assertCount(2, $match);
         self::assertSame(5, substr_count($match[1], 'php_aliaslibrary__route('));
         self::assertSame(1, substr_count($match[1], 'php_route('));
-        self::assertStringNotContainsString('php::call(', $match[1]);
+        // The three first-class callables are materialized through
+        // Closure::fromCallable(); ordinary aliases above must stay direct.
+        self::assertSame(3, substr_count($match[1], 'php::call('));
+        self::assertStringNotContainsString('ZEND_STRL("sIzE")', $match[1]);
+        self::assertStringNotContainsString('ZEND_STRL("cAlLbAcK_tArGeT")', $match[1]);
+
+        $literalStrings = (new \ReflectionProperty($compiler, 'literalStrings'))->getValue($compiler);
+        self::assertArrayHasKey('strlen', $literalStrings);
+        self::assertArrayHasKey('AliasLibrary\\callback_target', $literalStrings);
+        self::assertArrayNotHasKey('sIzE', $literalStrings);
+        self::assertArrayNotHasKey('cAlLbAcK_tArGeT', $literalStrings);
     }
 }

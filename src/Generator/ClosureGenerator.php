@@ -24,6 +24,38 @@ use PhpParser\Node\Expr\Variable;
 
 trait ClosureGenerator
 {
+    /**
+     * C++ types a closure parameter may be narrowed to.
+     *
+     * Anything outside this closed set keeps the boxed php::Var parameter and is
+     * enforced by the runtime type check, because the call boundary cannot
+     * faithfully produce it.
+     */
+    private const array NARROWABLE_CLOSURE_PARAM_TYPES = [
+        Type::INT,
+        Type::FLOAT,
+        Type::BOOL,
+        Type::STR,
+        Type::ARRAY,
+    ];
+
+    /**
+     * Box subclasses, which a php::Var cannot convert to.
+     *
+     * php::Decimal / php::BigInt / php::BigFloat have no implicit conversion from
+     * php::Variant in either direction, so a Box-typed lambda parameter rejects
+     * every argument that is not already a native Box value — and the same gap
+     * breaks `return $x` against the lambda's php::Var return type. Both the
+     * declaration path and the call-site inference path must fall back to
+     * php::Var for these.
+     */
+    private const array BOX_CLOSURE_PARAM_TYPES = [
+        Type::DECIMAL,
+        Type::BIGINT,
+        Type::BIGFLOAT,
+        Type::BOX,
+    ];
+
     protected function genNewClosure(string $callback, string $uses, bool $hasThis, array $params = []): string
     {
         $thisArg = $hasThis ? 'this_' : '{}';
@@ -162,7 +194,6 @@ trait ClosureGenerator
                 }
             }
 
-            $parameterChecks = '';
             foreach ($expr->params as $index => $param) {
                 $paramName = $this->parseIdentifier($param->var);
                 $inferredType = $inferredTypes[$index] ?? Type::VAR;
@@ -184,7 +215,9 @@ trait ClosureGenerator
                         }
                     }
                 }
-                $parameterChecks .= $this->genNativeLocalClosureParamTypeCheck($param, $paramName, $index, $effectiveType);
+                // No per-parameter check here: parameter binding happens at the
+                // call site (parseNativeLocalClosureCall), because PHP checks
+                // parameters only after every argument has been evaluated.
             }
 
             foreach ($capturePlan['bindings'] as $binding) {
@@ -204,7 +237,7 @@ trait ClosureGenerator
             if ($this->context->needsUserCodeCallableScope) {
                 $body = $this->genUserCodeCallableScopeGuard() . $body;
             }
-            $code .= $this->genScopeVarDecl() . $parameterChecks . $body;
+            $code .= $this->genScopeVarDecl() . $body;
             if (!str_ends_with($code, PHP_EOL)) {
                 $code .= PHP_EOL;
             }
@@ -278,34 +311,6 @@ trait ClosureGenerator
         return ['cpp' => $cpp, 'bindings' => $bindings];
     }
 
-    private function genNativeLocalClosureParamTypeCheck(Node\Param $param, string $var, int $index, string $inferredType): string
-    {
-        if ($param->type === null) {
-            return '';
-        }
-
-        // Native-typed lambda uses C++ type directly; skip runtime check.
-        if (in_array($inferredType, [Type::INT, Type::FLOAT, Type::BOOL, Type::STR, Type::ARRAY], true)) {
-            return '';
-        }
-
-        $typeInfo = $this->buildTypeCheckFromNode($param->type, true);
-        if (empty($typeInfo['check'])) {
-            return '';
-        }
-
-        $argInfo = new ArgInfo();
-        $argInfo->name = $var;
-        $argInfo->phpName = is_string($param->var->name)
-            ? $param->var->name
-            : $this->unescapeVarName($var);
-        $argInfo->type = Type::VAR;
-        $argInfo->typeCheck = $typeInfo['check'];
-        $argInfo->typeStr = $typeInfo['typeStr'];
-        $argInfo->typeNode = $param->type;
-        return $this->genClosureParamCheck($argInfo, $index);
-    }
-
     /**
      * Resolve the effective C++ type for a closure parameter.
      * Type declaration takes priority over call-site inference.
@@ -328,13 +333,22 @@ trait ClosureGenerator
                 // convert from native scalars (zend_long, double) to these types.
                 // Keep as VAR so the runtime typeCheck inside the lambda enforces
                 // PHP semantics (TypeError on wrong argument type).
-                if ($declaredType === Type::ARRAY || $declaredType === Type::OBJECT || $className !== '') {
+                // Box types are refused for the same reason plus a second one:
+                // php::Var cannot convert to a Box in either direction, so the
+                // lambda's own php::Var return type would also fail to accept it.
+                if ($declaredType === Type::ARRAY
+                    || $declaredType === Type::OBJECT
+                    || $className !== ''
+                    || in_array($declaredType, self::BOX_CLOSURE_PARAM_TYPES, true)
+                ) {
                     return Type::VAR;
                 }
                 return $declaredType;
             }
         }
-        if ($inferredType !== Type::VAR) {
+        // Call-site inference may only pick a type the call boundary can really
+        // produce; anything else falls back to the boxed php::Var parameter.
+        if (in_array($inferredType, self::NARROWABLE_CLOSURE_PARAM_TYPES, true)) {
             return $inferredType;
         }
         return Type::VAR;
@@ -378,43 +392,163 @@ trait ClosureGenerator
             }
             $result[$i] = $agree ? $firstType : Type::VAR;
         }
+
+        // A narrowed parameter is emitted as a fixed-type C++ local, while PHP
+        // lets the body re-assign a parameter to any other type. Writing to a
+        // narrowed parameter either fails to compile (int <- string) or silently
+        // truncates the value (int <- float), so such a parameter keeps the
+        // boxed php::Var representation instead.
+        foreach ($closure->params as $i => $param) {
+            if (!is_string($param->var->name)) {
+                continue;
+            }
+            if ($this->closureParamIsWritten($closure, $param->var->name)) {
+                $result[$i] = Type::VAR;
+            }
+        }
         return $result;
     }
 
     /**
-     * Detect native type for call-site arguments, with edge-case overrides
-     * that detectTypeOfExpr does not cover for closure narrowing.
+     * Whether the Closure body writes to one of its own parameters.
+     *
+     * Anything that can replace the parameter's value or alias it disqualifies
+     * narrowing: a plain assignment, an in-place operator, an increment, an
+     * array-dimension write and a nested Closure capturing it by reference.
+     *
+     * Passing the parameter to a by-reference parameter is deliberately not
+     * listed: the emitted C++ binds the same local, so the callee's write is
+     * observed exactly as PHP observes it.
      */
-    private function inferCallSiteArgType(Expr $expr): string
+    private function closureParamIsWritten(Expr\ArrowFunction|Expr\Closure $closure, string $paramName): bool
     {
-        $type = $this->detectTypeOfExpr($expr);
+        $nodes = $closure instanceof Expr\ArrowFunction ? [$closure->expr] : $closure->stmts;
+        $finder = new NodeFinder();
 
-        // -true / +false: PHP coerces bool to int first, not bool.
-        if ($type === Type::BOOL && ($expr instanceof Expr\UnaryMinus || $expr instanceof Expr\UnaryPlus)) {
+        foreach ($finder->findInstanceOf($nodes, Node\Expr::class) as $node) {
+            if ($node instanceof Expr\Assign || $node instanceof Expr\AssignOp) {
+                if ($this->exprWritesVariable($node->var, $paramName)) {
+                    return true;
+                }
+            } elseif ($node instanceof Expr\AssignRef) {
+                // Both `$x = &$y` and `$y = &$x` make the parameter alias-able.
+                if ($this->exprWritesVariable($node->var, $paramName)
+                    || $this->isNamedVariable($node->expr, $paramName)
+                ) {
+                    return true;
+                }
+            } elseif ($node instanceof Expr\PreInc || $node instanceof Expr\PostInc
+                || $node instanceof Expr\PreDec || $node instanceof Expr\PostDec
+            ) {
+                if ($this->isNamedVariable($node->var, $paramName)) {
+                    return true;
+                }
+            }
+        }
+
+        // A nested Closure capturing the parameter by reference writes through it.
+        foreach ($finder->findInstanceOf($nodes, Expr\Closure::class) as $nested) {
+            foreach ($nested->uses as $use) {
+                if ($use->byRef && $this->isNamedVariable($use->var, $paramName)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    /** Whether writing through `$expr` also writes the named variable itself. */
+    private function exprWritesVariable(Node\Expr $expr, string $name): bool
+    {
+        if ($expr instanceof Expr\ArrayDimFetch) {
+            return $this->exprWritesVariable($expr->var, $name);
+        }
+        return $this->isNamedVariable($expr, $name);
+    }
+
+    private function isNamedVariable(Node\Expr $expr, string $name): bool
+    {
+        return $expr instanceof Variable && is_string($expr->name) && $expr->name === $name;
+    }
+
+    /**
+     * C++ ABI type an argument expression will actually have at the lambda call
+     * boundary.
+     *
+     * This is deliberately NOT the PHP semantic type. detectTypeOfExpr() answers
+     * "which type does PHP say this expression is", which differs from the
+     * emitted C++ whenever the value crosses a Zend read (boxed by
+     * php::deindirect()) or gets materialized into a php::Var temporary. Only a
+     * provably native result may narrow a lambda parameter; everything else stays
+     * php::Var and is enforced by the runtime type check instead.
+     */
+    private function detectCallArgCppType(Expr $expr): string
+    {
+        // A Zend-dispatched read is boxed into php::Var at the call boundary.
+        if ($this->shouldMaterializeCallArg($expr)) {
             return Type::VAR;
         }
 
-        // Box subclasses (Decimal/BigInt/BigFloat) cannot be constructed from Variant.
-        if (in_array($type, [Type::DECIMAL, Type::BIGINT, Type::BIGFLOAT], true)) {
-            return Type::VAR;
+        if ($this->shouldMaterializeOrderedOperand($expr)) {
+            // The argument becomes a temporary whose type is decided by
+            // getOrderedOperandTmpType(); that helper already defaults to
+            // php::Var for anything it cannot prove is native. The generated
+            // expression is not available this early, so pass an empty value and
+            // let the property/static-property paths stay conservative.
+            $type = $this->getOrderedOperandTmpType($expr, '');
+        } else {
+            // Leaf expressions (literals, variables, constants, and the unary /
+            // binary / cast wrappers directly over them) keep the type of the
+            // emitted C++ expression itself.
+            $type = $this->detectTypeOfExpr($expr);
         }
 
+        return $this->filterNarrowableCppType($expr, $type);
+    }
+
+    /**
+     * Closed, type- and operator-level filters applied to a candidate ABI type.
+     *
+     * These are intentionally not an expression denylist: each rule describes a
+     * fixed property of a type or of one operator, so the set cannot keep growing
+     * as new syntax is supported, and an unrecognised expression is never
+     * wrongly assumed to be native.
+     */
+    private function filterNarrowableCppType(Expr $expr, string $type): string
+    {
+        // Box subclasses cannot be constructed from a Variant.
+        if (in_array($type, self::BOX_CLOSURE_PARAM_TYPES, true)) {
+            return Type::VAR;
+        }
+        // varint mode: inferred int/float arithmetic stays boxed.
+        if ($this->varIntTypes && in_array($type, [Type::INT, Type::FLOAT], true)) {
+            return Type::VAR;
+        }
         // php::fn::pow() returns Variant.
         if ($expr instanceof Expr\BinaryOp\Pow) {
             return Type::VAR;
         }
-
-        // php::fn::mod() returns Variant (non-INT operands).
+        // php::fn::mod() returns Variant for non-int operands.
         if ($expr instanceof Expr\BinaryOp\Mod && $type === Type::FLOAT) {
             return Type::VAR;
         }
-
-        // varint_types: all inferred locals and non-constant ops use php::Var.
-        if ($this->varIntTypes && in_array($type, [Type::INT, Type::FLOAT], true)) {
+        // -true / +false: PHP coerces the bool to int first, so the ABI is int.
+        if ($type === Type::BOOL
+            && ($expr instanceof Expr\UnaryMinus || $expr instanceof Expr\UnaryPlus)
+        ) {
+            return Type::VAR;
+        }
+        // References and objects have no scalar ABI.
+        if ($type === Type::REF || $type === Type::OBJECT || Type::isAnyRefType($type)) {
             return Type::VAR;
         }
 
         return $type;
+    }
+
+    private function inferCallSiteArgType(Expr $expr): string
+    {
+        return $this->detectCallArgCppType($expr);
     }
 
     protected function parseNativeLocalClosureCall(Expr\FuncCall $expr, string $name): ?string
@@ -423,17 +557,76 @@ trait ClosureGenerator
             return null;
         }
 
+        // localClosureCandidates is keyed by the PHP source variable name, which
+        // differs from the emitted C++ identifier whenever the name had to be
+        // escaped (for example a C++ keyword such as `union`). Looking it up by
+        // the C++ name silently misses such a closure and falls back to a dynamic
+        // call, which cannot accept the native C++ lambda.
+        $sourceName = $this->isVarExpr($expr->name) && is_string($expr->name->name)
+            ? $expr->name->name
+            : $name;
         // Look up candidate for type information
-        $candidate = $this->context->localClosureCandidates[$name] ?? null;
+        $candidate = $this->context->localClosureCandidates[$sourceName] ?? null;
         if ($candidate === null) {
             return null;
         }
-        $closure = $candidate['closure'] ?? null;
+        $closure = $candidate['closure'];
         $inferredTypes = $this->inferParamTypesFromCallSites($candidate);
 
-        $arguments = [];
-        $forceMaterialize = count($expr->args) > 1;
-        foreach ($expr->args as $i => $argument) {
+        // LocalClosureAnalyzer::isSupportedDirectCall() guarantees that the
+        // argument count matches the parameter count. Bail out to the generic
+        // dynamic call rather than emitting a truncated one, should a future
+        // change ever relax that precondition.
+        if (count($closure->params) !== count($expr->args)) {
+            return null;
+        }
+
+        // PHP evaluates every argument expression left to right first, and only
+        // then binds the parameters, converting and checking them in declaration
+        // order. Plan both phases up front: a composite-typed parameter keeps its
+        // runtime check, so it has to be emitted at the call site too — left
+        // inside the lambda body it would run after every later parameter has
+        // already been converted, reporting a later argument's TypeError first.
+        $plan = [];
+        foreach ($closure->params as $i => $param) {
+            $inferred = $inferredTypes[$i] ?? Type::VAR;
+            $effective = $this->resolveEffectiveClosureParamType($param, $inferred);
+            $check = null;
+            if ($effective === Type::VAR
+                && $param->type !== null
+                && !$this->closureParamDeclIsBoxType($param)
+            ) {
+                $typeInfo = $this->buildTypeCheckFromNode($param->type, true);
+                if (!empty($typeInfo['check'])) {
+                    $check = $typeInfo;
+                }
+            }
+            $plan[$i] = [
+                'param' => $param,
+                'effective' => $effective,
+                // Convert only when the parameter is native but the argument is not.
+                'cast' => $effective !== $inferred && $effective !== Type::VAR
+                    ? $this->callSiteCastFunc($effective)
+                    : null,
+                'check' => $check,
+            ];
+        }
+
+        // A conversion or check can throw, and C++17 leaves function argument
+        // evaluation order unspecified. Materialize operands only once something
+        // can actually throw and another argument follows it.
+        $canThrow = false;
+        foreach ($plan as $item) {
+            if ($item['cast'] !== null || $item['check'] !== null) {
+                $canThrow = true;
+                break;
+            }
+        }
+        $forceMaterialize = $canThrow && count($expr->args) > 1;
+
+        // ---- Phase 1: evaluate every argument expression in PHP order ----
+        $values = [];
+        foreach ($expr->args as $argument) {
             $this->assertExprCanBeUsedAsValue($argument->value, 'function argument');
             if ($this->isVarExpr($argument->value)) {
                 $this->assertStdContainerDoesNotEscapeNativeObjects(
@@ -456,33 +649,82 @@ trait ClosureGenerator
             } else {
                 $value = $this->parseOrderedOperand($argument->value, false, $forceMaterialize);
             }
-            $value = $this->materializeCallArgValue($argument->value, $value);
+            $values[] = $this->materializeCallArgValue($argument->value, $value);
+        }
 
-            // Cast variable args when effective type is native but inferred type is VAR.
-            // e.g. fn(float $x)($var) → call site generates toFloatArgExact($var, ...)
-            $inferredType = $inferredTypes[$i] ?? Type::VAR;
-            $param = $closure->params[$i] ?? null;
-            if ($param !== null) {
-                $effectiveType = $this->resolveEffectiveClosureParamType($param, $inferredType);
-                if ($effectiveType !== $inferredType) {
-                    // effectiveType differs from inferred — need to cast at call site
-                    $castFunc = match ($effectiveType) {
-                        Type::INT => 'php::toIntArgExact',
-                        Type::FLOAT => 'php::toFloatArgExact',
-                        Type::BOOL => 'php::toBoolArgExact',
-                        Type::STR => 'php::toStringArgExact',
-                        default => null,
-                    };
-                    if ($castFunc !== null) {
-                        $paramName = is_string($param->var->name) ? $param->var->name : '?';
-                        $value = $castFunc . '(' . $value . ', "{closure}", ' . ($i + 1) . ', "' . $paramName . '")';
-                    }
-                }
+        // A runtime check references its value several times (condition, coercion
+        // and the thrown TypeError), so give it a single-evaluation temporary.
+        foreach ($plan as $i => $item) {
+            if ($item['check'] !== null && isset($values[$i])) {
+                $tmpVar = $this->addTmpVar(Type::VAR);
+                $this->context->beforeStmtLines[] = $tmpVar . ' = ' . $values[$i] . ';';
+                $values[$i] = $tmpVar;
             }
+        }
 
+        // ---- Phase 2: bind — convert and check in declaration order ----
+        $arguments = [];
+        foreach ($plan as $i => $item) {
+            $value = $values[$i];
+            $paramName = is_string($item['param']->var->name) ? $item['param']->var->name : '?';
+            if ($item['cast'] !== null) {
+                $castExpr = $item['cast'] . '(' . $value . ', "{closure}", '
+                    . ($i + 1) . ', "' . $paramName . '")';
+                // addTmpVar() registers the temporary so genScopeVarDecl() emits
+                // its declaration once; only the assignment belongs here.
+                $tmpVar = $this->addTmpVar($item['effective']);
+                $this->context->beforeStmtLines[] = $tmpVar . ' = ' . $castExpr . ';';
+                $value = $tmpVar;
+            } elseif ($item['check'] !== null) {
+                $this->context->beforeStmtLines[] = $this->genCallSiteParamTypeCheck(
+                    $item['check'],
+                    $value,
+                    $i,
+                    $paramName,
+                    $item['param']->type,
+                );
+            }
             $arguments[] = $value;
         }
+
         return $name . '(' . implode(', ', $arguments) . ')';
+    }
+
+    /**
+     * Whether the parameter declares a Box type (decimal / bigint / bigfloat).
+     *
+     * A Box value has no faithful runtime representation yet — it is a resource,
+     * so the generated type check rejects even a valid argument. The Zend
+     * Closure path performs no such check either, so skip it rather than
+     * changing observable behavior depending on whether narrowing applied.
+     */
+    private function closureParamDeclIsBoxType(Node\Param $param): bool
+    {
+        $type = $param->type;
+        if ($type === null
+            || $type instanceof NullableType
+            || $type instanceof UnionType
+            || $type instanceof IntersectionType
+        ) {
+            return false;
+        }
+        [$declaredType] = $this->resolveTypeDecl($type, self::DECL_TYPE_OF_PARAM);
+        return in_array($declaredType, self::BOX_CLOSURE_PARAM_TYPES, true);
+    }
+
+    /**
+     * Strict conversion applied at a native local Closure call boundary.
+     * Returns null when the target type has no such helper.
+     */
+    private function callSiteCastFunc(string $type): ?string
+    {
+        return match ($type) {
+            Type::INT => 'php::toIntArgExact',
+            Type::FLOAT => 'php::toFloatArgExact',
+            Type::BOOL => 'php::toBoolArgExact',
+            Type::STR => 'php::toStringArgExact',
+            default => null,
+        };
     }
 
     protected function isReturnStmtInLastLine(array $stmts): bool

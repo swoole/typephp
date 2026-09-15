@@ -65,7 +65,10 @@ final class ClosureParamTypeTest extends BaseTest
         self::assertMatchesRegularExpression('/php_callsiteint\(.*?\n\tauto fn = \[\]\(php::Int s1\)/s', $code);
         self::assertMatchesRegularExpression('/php_callsitefloat\(.*?\n\tauto fn = \[\]\(php::Float s2\)/s', $code);
         self::assertMatchesRegularExpression('/php_callsitebool\(.*?\n\tauto fn = \[\]\(php::Bool s3\)/s', $code);
-        self::assertMatchesRegularExpression('/php_callsitearray\(.*?\n\tauto fn = \[\]\(php::Array s4\)/s', $code);
+        // An array literal is materialized into a php::Var temporary, so the
+        // parameter stays php::Var: narrowing it to php::Array would only add an
+        // implicit conversion at every call without changing the ABI.
+        self::assertMatchesRegularExpression('/php_callsitearray\(.*?\n\tauto fn = \[\]\(php::Var s4\)/s', $code);
         self::assertMatchesRegularExpression('/php_callsitestring\(.*?\n\tauto fn = \[\]\(php::Str cs1\)/s', $code);
     }
 
@@ -196,7 +199,7 @@ final class ClosureParamTypeTest extends BaseTest
     {
         $code = $this->compileFixture('closure-param-type.php');
         self::assertMatchesRegularExpression('/php_nullliteral\(.*?\n\tauto fn = \[\]\(php::Var nl1\)/s', $code);
-        self::assertMatchesRegularExpression('/php_emptyarray\(.*?\n\tauto fn = \[\]\(php::Array ea3\)/s', $code);
+        self::assertMatchesRegularExpression('/php_emptyarray\(.*?\n\tauto fn = \[\]\(php::Var ea3\)/s', $code);
         self::assertMatchesRegularExpression('/php_nullcoalesce\(.*?\n\tauto fn = \[\]\(php::Var nc1\)/s', $code);
     }
 
@@ -205,7 +208,13 @@ final class ClosureParamTypeTest extends BaseTest
     public function testGotoInvalidatesAllCandidates(): void
     {
         $code = $this->compileFixture('closure-param-type.php');
-        self::assertStringContainsString('newClosureWithParameters', $code);
+        // Scoped to the goto function on purpose: a whole-file assertion passes
+        // even when the candidate is invalidated, because other closures in the
+        // same fixture already emit newClosureWithParameters.
+        $body = $this->extractFunction($code, 'php_gotoinvalidates');
+        self::assertNotSame('', $body, 'php_gotoinvalidates() not found in generated code');
+        self::assertStringContainsString('newClosureWithParameters', $body);
+        self::assertStringNotContainsString('auto fn = [](php::Int', $body);
     }
 
     public function testNestedFnStillNarrowed(): void
@@ -268,16 +277,23 @@ final class ClosureParamTypeTest extends BaseTest
     {
         $code = $this->compileFixture('closure-param-type.php');
         self::assertMatchesRegularExpression('/php_nullableinttypedecl\(.*?\n\tauto fn = \[\]\(php::Var ni1\)/s', $code);
-        self::assertStringContainsString('ni1.isNull() || ni1.isInt()', $code);
         self::assertStringNotContainsString('(php::Int ni1)', $code);
+        // The runtime check now runs at the call site so that parameters are
+        // validated in PHP's binding order, therefore it is emitted against the
+        // argument temporary rather than the lambda parameter name.
+        $body = $this->extractFunction($code, 'php_nullableinttypedecl');
+        self::assertStringContainsString('.isNull() || ', $body);
+        self::assertStringContainsString('.isInt()', $body);
     }
 
     public function testNullableIntWithNullBothCallSites(): void
     {
         $code = $this->compileFixture('closure-param-type.php');
         self::assertMatchesRegularExpression('/php_nullableintwithnull\(.*?\n\tauto fn = \[\]\(php::Var ni2\)/s', $code);
-        self::assertStringContainsString('ni2.isNull() || ni2.isInt()', $code);
         self::assertStringNotContainsString('(php::Int ni2)', $code);
+        $body = $this->extractFunction($code, 'php_nullableintwithnull');
+        self::assertStringContainsString('.isNull() || ', $body);
+        self::assertStringContainsString('.isInt()', $body);
     }
 
     // --- Union type declaration: always VAR ---
@@ -317,10 +333,12 @@ final class ClosureParamTypeTest extends BaseTest
         self::assertMatchesRegularExpression('/php_inttypedecl\(.*?\n\tauto fn = \[\]\(php::Int x\)/s', $code);
     }
 
-    public function testInferredArrayKeepsNativeType(): void
+    public function testInferredArrayLiteralStaysVar(): void
     {
         $code = $this->compileFixture('closure-param-type.php');
-        self::assertMatchesRegularExpression('/php_inferredarraynodecl\(.*?\n\tauto fn = \[\]\(php::Array x\)/s', $code);
+        // The array literal is materialized into a php::Var temporary, so php::Var
+        // is the C++ ABI type actually produced at the call boundary.
+        self::assertMatchesRegularExpression('/php_inferredarraynodecl\(.*?\n\tauto fn = \[\]\(php::Var x\)/s', $code);
     }
 
     public function testNoDecimalOrBigIntInLambdaParam(): void
@@ -389,5 +407,140 @@ final class ClosureParamTypeTest extends BaseTest
     {
         $code = $this->compileFixture('closure-param-type-varint.php');
         self::assertMatchesRegularExpression('/php_varintfloatdiv\(.*?\n\tauto fn = \[\]\(php::Var vfdiv1\)/s', $code);
+    }
+
+    // --- P1 fix: PropertyFetch always returns php::Var ---
+
+    public function testPropertyFetchIntNarrowsToVar(): void
+    {
+        $code = $this->compileFixture('closure-param-type.php');
+        // $box->value is PropertyFetch → php::Var. Lambda param is php::Int (from
+        // type declaration), call site must wrap in toIntArgExact for conversion.
+        self::assertMatchesRegularExpression('/php_propertyfetchinttypedecl\(.*?\n\tauto fn = \[\]\(php::Int p\)/s', $code);
+        self::assertStringContainsString('php::toIntArgExact(php::deindirect(', $code);
+    }
+
+    // --- PropertyFetch with untyped closure param → should NOT narrow ---
+
+    public function testPropertyFetchUntypedParamProducesVar(): void
+    {
+        $code = $this->compileFixture('closure-param-type.php');
+        // $box->value is PropertyFetch → php::Var. Closure param $x has NO type
+        // declaration, so lambda param should be php::Var (not narrowed to Int).
+        // No toIntArgExact wrapper needed at call site.
+        self::assertMatchesRegularExpression('/php_propertyfetchuntypedparam\(.*?\n\tauto fn = \[\]\(php::Var x\)/s', $code);
+        // No type cast wrapper for the untyped param
+        self::assertStringNotContainsString('toIntArgExact', $this->extractFunction($code, 'php_propertyfetchuntypedparam'));
+    }
+
+    private function extractFunction(string $code, string $funcName): string
+    {
+        $pattern = '/void ' . preg_quote($funcName) . '\(\)[^{]*\{(.*?)(?=\nvoid |\n[a-z]|\z)/s';
+        return preg_match($pattern, $code, $m) ? $m[1] : '';
+    }
+
+    // --- P1 fix: multi-arg cast materialized to temp vars ---
+
+    public function testMultiArgEvalOrderMaterializes(): void
+    {
+        $code = $this->compileFixture('closure-param-type.php');
+        // Two PropertyFetch args → both need toIntArgExact/toFloatArgExact.
+        // C++17 evaluation order: cast results materialized to temp vars.
+        self::assertMatchesRegularExpression('/php_multiargevalorder\(/s', $code);
+        self::assertStringContainsString('auto tmp_var_', $code);
+        self::assertStringContainsString('php::toIntArgExact(php::deindirect(', $code);
+        self::assertStringContainsString('php::toFloatArgExact(php::deindirect(', $code);
+    }
+
+    // --- StaticPropertyFetch → always php::Var ---
+
+    public function testStaticPropertyFetchNarrowsToVar(): void
+    {
+        $code = $this->compileFixture('closure-param-type.php');
+        // StaticBox::$value is StaticPropertyFetch → php::Var. Lambda param is
+        // php::Int (from type decl), call site must wrap in toIntArgExact.
+        self::assertMatchesRegularExpression('/php_staticpropertyfetch\(.*?\n\tauto fn = \[\]\(php::Int p\)/s', $code);
+        self::assertStringContainsString('php::toIntArgExact(', $this->extractFunction($code, 'php_staticpropertyfetch'));
+    }
+
+    // --- NullsafePropertyFetch → always php::Var ---
+
+    public function testNullsafePropertyFetchNarrowsToVar(): void
+    {
+        $code = $this->compileFixture('closure-param-type.php');
+        // $box?->value is NullsafePropertyFetch → php::Var. Lambda param is
+        // php::Int (from type decl), call site must wrap in toIntArgExact.
+        self::assertMatchesRegularExpression('/php_nullsafepropertyfetch\(.*?\n\tauto fn = \[\]\(php::Int p\)/s', $code);
+        self::assertStringContainsString('php::toIntArgExact(', $this->extractFunction($code, 'php_nullsafepropertyfetch'));
+    }
+
+    // --- use() capture: captured int ---
+
+    public function testUseCaptureInt(): void
+    {
+        $code = $this->compileFixture('closure-param-type.php');
+        // Captured $i should be accessible inside the closure body.
+        self::assertMatchesRegularExpression('/php_usecaptureint\(/s', $code);
+    }
+
+    // --- Property write as argument ---
+
+    public function testPropertyWriteAsArg(): void
+    {
+        $code = $this->compileFixture('closure-param-type.php');
+        // $box->value = 10 is an Assign wrapping PropertyFetch.
+        // Lambda param is php::Int (from type decl), call site must wrap.
+        self::assertMatchesRegularExpression('/php_propertywriteasarg\(.*?\n\tauto fn = \[\]\(php::Int v\)/s', $code);
+    }
+
+    // --- Box type declarations (decimal / bigint / bigfloat) ---
+
+    public function testBoxTypeDeclStaysVar(): void
+    {
+        $code = $this->compileFixture('closure-param-type.php');
+        // php::Var has no conversion to a Box in either direction, so a declared
+        // Box parameter must stay php::Var; narrowing it to php::Decimal and
+        // friends makes the call boundary reject every non-native argument and
+        // also breaks the lambda's own php::Var return type.
+        self::assertMatchesRegularExpression('/php_boxtypedecldecimal\(.*?\n\tauto fn = \[\]\(php::Var bd1\)/s', $code);
+        self::assertMatchesRegularExpression('/php_boxtypedeclbigint\(.*?\n\tauto fn = \[\]\(php::Var bb1\)/s', $code);
+        self::assertMatchesRegularExpression('/php_boxtypedeclbigfloat\(.*?\n\tauto fn = \[\]\(php::Var bf1\)/s', $code);
+    }
+
+    public function testBoxTypeDeclDoesNotNarrow(): void
+    {
+        $code = $this->compileFixture('closure-param-type.php');
+        self::assertStringNotContainsString('(php::Decimal bd1)', $code);
+        self::assertStringNotContainsString('(php::BigInt bb1)', $code);
+        self::assertStringNotContainsString('(php::BigFloat bf1)', $code);
+    }
+
+    // --- Match expression as argument ---
+
+    public function testMatchAsArg(): void
+    {
+        $code = $this->compileFixture('closure-param-type.php');
+        // match() produces php::Var. Lambda param is php::Int (from type decl).
+        self::assertMatchesRegularExpression('/php_matchasarg\(/s', $code);
+    }
+
+    // --- A parameter written by the body must not be narrowed ---
+
+    public function testReassignedParamStaysVar(): void
+    {
+        $code = $this->compileFixture('closure-param-reassign.php');
+        // PHP allows re-assigning a parameter to any other type, so a narrowed
+        // parameter would truncate the new value or fail to compile.
+        self::assertMatchesRegularExpression('/php_reassigntostring\(.*?\n\tauto fn = \[\]\(php::Var rwStr\)/s', $code);
+        self::assertMatchesRegularExpression('/php_reassigntofloat\(.*?\n\tauto fn = \[\]\(php::Var rwFloat\)/s', $code);
+        self::assertMatchesRegularExpression('/php_incrementparam\(.*?\n\tauto fn = \[\]\(php::Var rwInc\)/s', $code);
+        self::assertMatchesRegularExpression('/php_writethrougharraydim\(.*?\n\tauto fn = \[\]\(php::Var rwDim\)/s', $code);
+    }
+
+    public function testUntouchedParamStillNarrows(): void
+    {
+        $code = $this->compileFixture('closure-param-reassign.php');
+        // The write check must not disable narrowing for read-only parameters.
+        self::assertMatchesRegularExpression('/php_untouchedparamstillnarrows\(.*?\n\tauto fn = \[\]\(php::Int roKeep\)/s', $code);
     }
 }

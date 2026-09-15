@@ -598,6 +598,111 @@ function binaryModFloat(): void
     var_dump($fn(3.14 % 2));
 }
 
+// --- PropertyFetch: declared int property passed to closure → call site wraps in toIntArgExact ---
+
+class BoxWithInt {
+    public int $value = 42;
+}
+
+function propertyFetchIntTypeDecl(): void
+{
+    $box = new BoxWithInt();
+    $fn = fn(int $p) => $p + 1;
+    $fn($box->value);
+}
+
+// --- PropertyFetch with untyped closure param → lambda param should be php::Var ---
+
+function propertyFetchUntypedParam(): void
+{
+    $box = new BoxWithInt();
+    $fn = fn($x) => $x + 1;
+    $fn($box->value);
+}
+
+// --- StaticPropertyFetch → always php::Var ---
+
+class StaticBox {
+    public static int $value = 42;
+}
+
+function staticPropertyFetch(): void
+{
+    $fn = fn(int $p) => $p + 1;
+    $fn(StaticBox::$value);
+}
+
+// --- NullsafePropertyFetch → always php::Var ---
+
+function nullsafePropertyFetch(): void
+{
+    $box = new BoxWithInt();
+    $fn = fn(int $p) => $p + 1;
+    $fn($box?->value);
+}
+
+// --- use() capture: captured int stays as Var inside closure ---
+
+function useCaptureInt(): void
+{
+    $i = 42;
+    $fn = function() use($i) { return $i + 1; };
+    var_dump($fn());
+}
+
+// --- Property write as argument ---
+
+function propertyWriteAsArg(): void
+{
+    $box = new BoxWithInt();
+    $fn = fn(int $v) => $v + 1;
+    $fn($box->value = 10);
+}
+
+// --- Match expression as argument ---
+
+function matchAsArg(): void
+{
+    $fn = fn(int $x) => $x * 2;
+    $fn(match(1) { 1 => 42, default => 0 });
+}
+
+// --- Multi-arg evaluation order: cast expressions materialized to preserve PHP order ---
+
+class BoxWithFloat {
+    public float $val = 1.5;
+}
+
+function multiArgEvalOrder(): void
+{
+    $box1 = new BoxWithInt();
+    $box2 = new BoxWithFloat();
+    $fn = fn(int $a, float $b) => $a + $b;
+    $fn($box1->value, $box2->val);
+}
+
+// --- Box type declarations (decimal / bigint / bigfloat) ---
+// php::Var has no conversion to a Box in either direction, so a declared Box
+// parameter must stay php::Var instead of narrowing to php::Decimal & friends.
+
+function boxTypeDeclDecimal(): void
+{
+    $fn = fn(decimal $bd1) => $bd1;
+    $fn(std::decimal(12345));
+}
+
+function boxTypeDeclBigInt(): void
+{
+    $fn = fn(bigint $bb1) => $bb1;
+    $fn(std::bigInt(42));
+}
+
+function boxTypeDeclBigFloat(): void
+{
+    $fn = fn(bigfloat $bf1) => $bf1;
+    $fn(std::bigFloat(2.5));
+}
+
 // --- Entry point ---
 function main(): void
 {
@@ -683,4 +788,15 @@ function main(): void
     intTypeDecl();
     inferredArrayNoDecl();
     binaryModFloat();
+    propertyFetchIntTypeDecl();
+    propertyFetchUntypedParam();
+    staticPropertyFetch();
+    nullsafePropertyFetch();
+    useCaptureInt();
+    propertyWriteAsArg();
+    matchAsArg();
+    multiArgEvalOrder();
+    boxTypeDeclDecimal();
+    boxTypeDeclBigInt();
+    boxTypeDeclBigFloat();
 }

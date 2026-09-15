@@ -516,6 +516,54 @@ trait TypeCheckGenerator
         return $code;
     }
 
+    /**
+     * Emit a closure parameter type check at the call site.
+     *
+     * PHP evaluates all arguments first, then binds parameters in declaration
+     * order. A check inside the lambda body runs after conversions, so a later
+     * parameter's TypeError can be reported before an earlier one's.
+     */
+    protected function genCallSiteParamTypeCheck(
+        array $typeInfo,
+        string $valueVar,
+        int $argIndex,
+        string $phpName,
+        ?NodeAbstract $typeNode = null,
+    ): string {
+        if (empty($typeInfo['check'])) {
+            return '';
+        }
+
+        $argInfo = new ArgInfo();
+        $argInfo->name = $valueVar;
+        $argInfo->phpName = $phpName;
+        $argInfo->type = Type::VAR;
+        $argInfo->typeCheck = $typeInfo['check'];
+        $argInfo->typeStr = $typeInfo['typeStr'] ?? '';
+        $argInfo->typeNode = $typeNode;
+
+        $conditions = [];
+        foreach ($typeInfo['check'] as $entry) {
+            $cond = $this->genSingleTypeCondition($valueVar, $entry);
+            if ($cond !== '') {
+                $conditions[] = $cond;
+            }
+        }
+        if ($conditions === []) {
+            return '';
+        }
+
+        $code = $this->genCompositeIntToFloatCoercion($valueVar, $typeInfo['check']);
+        $code .= $this->getIndent() . 'if (UNEXPECTED(!(' . implode(' || ', $conditions) . '))) {' . PHP_EOL;
+        $this->indentLevel++;
+        $code .= $this->getIndent()
+            . $this->genClosureParamTypeErrorExpr($argInfo, $valueVar, (string) ($argIndex + 1)) . ';' . PHP_EOL;
+        $this->indentLevel--;
+        $code .= $this->getIndent() . '}' . PHP_EOL;
+
+        return $code;
+    }
+
     protected function genClosureVariadicParamCheck(ArgInfo $argInfo, int $argIndex): string
     {
         $valueVar = $this->genTmpVarName();

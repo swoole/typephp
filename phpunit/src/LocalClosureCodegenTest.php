@@ -28,10 +28,12 @@ final class LocalClosureCodegenTest extends BaseTest
 
         self::assertIsString($code);
         self::assertStringContainsString(
-            'auto direct = [base = base](php::Var value) mutable -> php::Var {',
+            'auto direct = [base = base](php::Int value) mutable -> php::Var {',
             $code,
         );
-        self::assertStringContainsString('direct(2L)', $code);
+        // Windows is LLP64, so a zend_long literal is emitted as `2LL`; Linux is
+        // LP64 and emits `2L`. Accept both so the suite runs on either platform.
+        self::assertMatchesRegularExpression('/direct\(2L{1,2}\)/', $code);
         self::assertStringNotContainsString('typephp_call_cached(direct', $code);
 
         // Only the escaping closure needs a real Zend Closure. The local reference

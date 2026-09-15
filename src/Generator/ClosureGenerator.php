@@ -1165,19 +1165,23 @@ trait ClosureGenerator
 
     private function genClosureParamTypeCheck(Node\Param $param, string $var, string $phpName, int $index, bool $variadic): string
     {
-        if (!$param->byRef
-            && !$param->type instanceof NullableType
-            && !$param->type instanceof UnionType
-            && !$param->type instanceof IntersectionType
-        ) {
-            return '';
-        }
-
         if ($param->type === null) {
             return '';
         }
 
-        $typeInfo = $this->buildTypeCheckFromNode($param->type, $param->byRef);
+        // A Box value is a resource at runtime, so a type check would reject
+        // even a valid argument and there is nothing to gain: the native path
+        // skips the same check, and skipping keeps both paths in agreement.
+        if ($this->closureParamDeclIsBoxType($param)) {
+            return '';
+        }
+
+        // phpx's ClosureParameter carries no type information, so a Zend
+        // Closure can only enforce its declared PHP signature from inside the
+        // ClosureFn. Simple types need that check just as much as nullable /
+        // union ones: without it `fn(int $r)` silently accepted any argument
+        // and produced a mistyped value instead of a TypeError.
+        $typeInfo = $this->buildTypeCheckFromNode($param->type, true);
         if (empty($typeInfo['check'])) {
             return '';
         }

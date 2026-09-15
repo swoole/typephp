@@ -40,14 +40,10 @@ trait ClosureGenerator
     ];
 
     /**
-     * Box subclasses, which a php::Var cannot convert to.
+     * Box subclasses that php::Var cannot convert to.
      *
-     * php::Decimal / php::BigInt / php::BigFloat have no implicit conversion from
-     * php::Variant in either direction, so a Box-typed lambda parameter rejects
-     * every argument that is not already a native Box value — and the same gap
-     * breaks `return $x` against the lambda's php::Var return type. Both the
-     * declaration path and the call-site inference path must fall back to
-     * php::Var for these.
+     * These have no implicit conversion from php::Variant in either direction,
+     * so both declaration and inference paths must fall back to php::Var.
      */
     private const array BOX_CLOSURE_PARAM_TYPES = [
         Type::DECIMAL,
@@ -314,9 +310,7 @@ trait ClosureGenerator
     /**
      * Resolve the effective C++ type for a closure parameter.
      * Type declaration takes priority over call-site inference.
-     * Call-site inference is used only when no type declaration exists.
-     * Nullable/Union/Intersection declarations always resolve to VAR — the
-     * runtime typeCheck must enforce the composite constraint.
+     * Nullable/Union/Intersection always resolve to VAR for runtime checks.
      */
     private function resolveEffectiveClosureParamType(Node\Param $param, string $inferredType): string
     {
@@ -330,12 +324,8 @@ trait ClosureGenerator
             [$declaredType, $className] = $this->resolveTypeDecl($param->type, self::DECL_TYPE_OF_PARAM);
             if ($declaredType !== Type::VAR) {
                 // Array/Object/class parameters: the call boundary cannot safely
-                // convert from native scalars (zend_long, double) to these types.
-                // Keep as VAR so the runtime typeCheck inside the lambda enforces
-                // PHP semantics (TypeError on wrong argument type).
-                // Box types are refused for the same reason plus a second one:
-                // php::Var cannot convert to a Box in either direction, so the
-                // lambda's own php::Var return type would also fail to accept it.
+                // convert from native scalars. Keep as VAR for runtime enforcement.
+                // Box types also stay VAR because php::Var cannot convert to them.
                 if ($declaredType === Type::ARRAY
                     || $declaredType === Type::OBJECT
                     || $className !== ''
@@ -393,11 +383,9 @@ trait ClosureGenerator
             $result[$i] = $agree ? $firstType : Type::VAR;
         }
 
-        // A narrowed parameter is emitted as a fixed-type C++ local, while PHP
-        // lets the body re-assign a parameter to any other type. Writing to a
-        // narrowed parameter either fails to compile (int <- string) or silently
-        // truncates the value (int <- float), so such a parameter keeps the
-        // boxed php::Var representation instead.
+        // A narrowed parameter is emitted as a fixed-type C++ local, but PHP
+        // allows re-assigning parameters. Writing to a narrowed param either
+        // fails to compile or silently truncates, so keep the boxed php::Var.
         foreach ($closure->params as $i => $param) {
             if (!is_string($param->var->name)) {
                 continue;
@@ -411,14 +399,10 @@ trait ClosureGenerator
 
     /**
      * Whether the Closure body writes to one of its own parameters.
-     *
-     * Anything that can replace the parameter's value or alias it disqualifies
-     * narrowing: a plain assignment, an in-place operator, an increment, an
-     * array-dimension write and a nested Closure capturing it by reference.
-     *
-     * Passing the parameter to a by-reference parameter is deliberately not
-     * listed: the emitted C++ binds the same local, so the callee's write is
-     * observed exactly as PHP observes it.
+     * Disqualifies narrowing: assignment, in-place ops, increment/decrement,
+     * array-dimension writes, and nested Closures capturing by reference.
+     * Passing by-reference to another function is not listed because the
+     * emitted C++ binds the same local.
      */
     private function closureParamIsWritten(Expr\ArrowFunction|Expr\Closure $closure, string $paramName): bool
     {
@@ -472,15 +456,9 @@ trait ClosureGenerator
     }
 
     /**
-     * C++ ABI type an argument expression will actually have at the lambda call
-     * boundary.
-     *
-     * This is deliberately NOT the PHP semantic type. detectTypeOfExpr() answers
-     * "which type does PHP say this expression is", which differs from the
-     * emitted C++ whenever the value crosses a Zend read (boxed by
-     * php::deindirect()) or gets materialized into a php::Var temporary. Only a
-     * provably native result may narrow a lambda parameter; everything else stays
-     * php::Var and is enforced by the runtime type check instead.
+     * C++ ABI type an argument expression will have at the lambda call boundary.
+     * Only provably native results may narrow a lambda parameter; everything
+     * else stays php::Var and is enforced by the runtime type check.
      */
     private function detectCallArgCppType(Expr $expr): string
     {
@@ -507,12 +485,9 @@ trait ClosureGenerator
     }
 
     /**
-     * Closed, type- and operator-level filters applied to a candidate ABI type.
-     *
-     * These are intentionally not an expression denylist: each rule describes a
-     * fixed property of a type or of one operator, so the set cannot keep growing
-     * as new syntax is supported, and an unrecognised expression is never
-     * wrongly assumed to be native.
+     * Closed, type- and operator-level filters for a candidate ABI type.
+     * Each rule describes a fixed property of a type or operator, so the set
+     * stays small and unrecognised expressions are never wrongly native.
      */
     private function filterNarrowableCppType(Expr $expr, string $type): string
     {
@@ -613,8 +588,7 @@ trait ClosureGenerator
         }
 
         // A conversion or check can throw, and C++17 leaves function argument
-        // evaluation order unspecified. Materialize operands only once something
-        // can actually throw and another argument follows it.
+        // evaluation order unspecified. Materialize only when something can throw.
         $canThrow = false;
         foreach ($plan as $item) {
             if ($item['cast'] !== null || $item['check'] !== null) {
@@ -692,11 +666,8 @@ trait ClosureGenerator
 
     /**
      * Whether the parameter declares a Box type (decimal / bigint / bigfloat).
-     *
-     * A Box value has no faithful runtime representation yet — it is a resource,
-     * so the generated type check rejects even a valid argument. The Zend
-     * Closure path performs no such check either, so skip it rather than
-     * changing observable behavior depending on whether narrowing applied.
+     * Box values are resources at runtime, so the native path skips type
+     * checks for them; the Zend path must do the same.
      */
     private function closureParamDeclIsBoxType(Node\Param $param): bool
     {
@@ -713,7 +684,7 @@ trait ClosureGenerator
     }
 
     /**
-     * Strict conversion applied at a native local Closure call boundary.
+     * Strict conversion at a native local Closure call boundary.
      * Returns null when the target type has no such helper.
      */
     private function callSiteCastFunc(string $type): ?string
@@ -758,12 +729,9 @@ trait ClosureGenerator
 
     private function doGenClosure(Expr\ArrowFunction|Expr\Closure $expr, array $params, array $uses = []): string
     {
-        // Closure signatures flow through the same declaration validation in
-        // parseTypeDecl() as named functions (e.g. callable inside an
-        // intersection or DNF member). Bare class names are skipped here: the
-        // native-object walk below already resolves each of them through
-        // parseTypeDecl() and owns the trait-context name rewrite, so
-        // resolving them twice would re-qualify an already qualified name.
+        // Closure signatures go through the same validation as named functions.
+        // Bare class names are skipped: the native-object walk below resolves
+        // each through parseTypeDecl() and owns the trait-context rewrite.
         foreach ($params as $param) {
             if (!$param->type instanceof Node\Name) {
                 $this->resolveTypeDecl($param->type, self::DECL_TYPE_OF_PARAM);
@@ -1169,18 +1137,14 @@ trait ClosureGenerator
             return '';
         }
 
-        // A Box value is a resource at runtime, so a type check would reject
-        // even a valid argument and there is nothing to gain: the native path
-        // skips the same check, and skipping keeps both paths in agreement.
+        // A Box value is a resource at runtime, so skip the check to stay
+        // consistent with the native path.
         if ($this->closureParamDeclIsBoxType($param)) {
             return '';
         }
 
-        // phpx's ClosureParameter carries no type information, so a Zend
-        // Closure can only enforce its declared PHP signature from inside the
-        // ClosureFn. Simple types need that check just as much as nullable /
-        // union ones: without it `fn(int $r)` silently accepted any argument
-        // and produced a mistyped value instead of a TypeError.
+        // phpx's ClosureParameter carries no type info, so the Zend Closure
+        // must enforce its declared signature from inside the ClosureFn.
         $typeInfo = $this->buildTypeCheckFromNode($param->type, true);
         if (empty($typeInfo['check'])) {
             return '';

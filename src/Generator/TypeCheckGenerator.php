@@ -517,15 +517,11 @@ trait TypeCheckGenerator
     }
 
     /**
-     * Emit a closure parameter type check at the call site rather than inside
-     * the lambda body.
+     * Emit a closure parameter type check at the call site.
      *
-     * PHP evaluates every argument expression first and only then binds the
-     * parameters, checking them in declaration order. A check left inside the
-     * lambda body runs after every call-site conversion has already happened,
-     * so a later parameter's TypeError can be reported before an earlier one's.
-     * This mirrors genClosureParamCheck() but omits the `return php::null`
-     * fallthrough, which is only meaningful inside the lambda.
+     * PHP evaluates all arguments first, then binds parameters in declaration
+     * order. A check inside the lambda body runs after conversions, so a later
+     * parameter's TypeError can be reported before an earlier one's.
      */
     protected function genCallSiteParamTypeCheck(
         array $typeInfo,

@@ -76,28 +76,4 @@ class Macos extends UnixPlatform
             self::HOMEBREW_LIBRARY_PATHS,
         )));
     }
-
-    /**
-     * 获取默认的 RPATH 路径列表（macOS 需要）
-     */
-    public function getDefaultRpaths(?string $phpxDir = null, ?string $phpDir = null): array
-    {
-        $rpaths = [];
-
-        if ($phpxDir !== null) {
-            $phpxLibDir = $phpxDir . '/lib';
-            if (is_dir($phpxLibDir)) {
-                $rpaths[] = $phpxLibDir;
-            }
-        }
-
-        if ($phpDir !== null) {
-            $phpLibDir = $this->resolvePhpLibDir($phpDir);
-            if ($phpLibDir !== null) {
-                $rpaths[] = $phpLibDir;
-            }
-        }
-
-        return $rpaths;
-    }
 }

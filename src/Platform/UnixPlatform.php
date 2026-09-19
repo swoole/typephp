@@ -167,6 +167,36 @@ abstract class UnixPlatform extends PlatformBase
     }
 
     /**
+     * libphpx and the embed libphp.so live where TypePHP put them: beside the
+     * phpx checkout, and under the PHP prefix the libphp installer chose.
+     * Neither is on the loader's search path, so a linked program only finds
+     * them again if their directories are recorded in the binary.
+     *
+     * Cross-compilation targets override this back to an empty list: a path on
+     * the build host means nothing on the device that runs the output.
+     */
+    public function getDefaultRpaths(?string $phpxDir = null, ?string $phpDir = null): array
+    {
+        $rpaths = [];
+
+        if ($phpxDir !== null) {
+            $phpxLibDir = $phpxDir . '/lib';
+            if (is_dir($phpxLibDir)) {
+                $rpaths[] = $phpxLibDir;
+            }
+        }
+
+        if ($phpDir !== null) {
+            $phpLibDir = $this->resolvePhpLibDir($phpDir);
+            if ($phpLibDir !== null) {
+                $rpaths[] = $phpLibDir;
+            }
+        }
+
+        return $rpaths;
+    }
+
+    /**
      * Get the RPATH options.
      */
     public function getRpathOptions(array $paths): string

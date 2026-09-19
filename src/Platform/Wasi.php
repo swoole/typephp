@@ -23,6 +23,15 @@ final class Wasi extends UnixPlatform
         return '.a';
     }
 
+    /**
+     * A WASI module resolves no shared libraries, and the build host's paths
+     * do not exist wherever it runs.
+     */
+    public function getDefaultRpaths(?string $phpxDir = null, ?string $phpDir = null): array
+    {
+        return [];
+    }
+
     public function getExecutableExtension(): string
     {
         return '.wasm';

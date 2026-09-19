@@ -25,27 +25,49 @@ final class LibPhpInstaller
         }
 
         $this->console->write("The current PHP installation does not provide libphp.so: {$currentPhpDir}");
+
+        $home = getenv('HOME') ?: (string) ($_SERVER['HOME'] ?? '');
+        $defaultPrefix = rtrim($home, '/') . '/.typephp';
+        $defaultVersion = PHP_VERSION;
+
+        // A build left by an earlier run answers every question below, so offer
+        // it before asking any of them. Both defaults are known without asking:
+        // the directory this installer always proposes, and the running PHP.
+        if ($this->offerInstalled($defaultPrefix, $defaultVersion)) {
+            return $this->activate($defaultPrefix);
+        }
+
         if (!$this->console->confirm('Build a private PHP embed library now?', true)) {
             return null;
         }
 
-        $defaultVersion = PHP_VERSION;
         $version = $this->console->ask("PHP version [{$defaultVersion}]: ", $defaultVersion);
         if (!preg_match('/^8\.[45]\.\d+$/', $version)) {
             throw new \RuntimeException('Only stable PHP 8.4.x and 8.5.x versions are supported by the automatic installer');
         }
-        $release = $this->release($version);
 
-        $home = getenv('HOME') ?: (string) ($_SERVER['HOME'] ?? '');
-        $defaultPrefix = rtrim($home, '/') . '/.typephp';
         $prefix = $this->expandHome($this->console->ask("Install directory [{$defaultPrefix}]: ", $defaultPrefix), $home);
-        if ($this->hasLibPhp($prefix) && $this->installedVersion($prefix) === $version
-            && $this->console->confirm("PHP {$version} with libphp.so already exists in {$prefix}; use it?", true)) {
-            putenv('PHP_HOME=' . $prefix);
-            $_ENV['PHP_HOME'] = $prefix;
-            return $prefix;
+        // The offer above covered only the default directory and the running
+        // PHP; the answers just given may name another build.
+        if (($prefix !== $defaultPrefix || $version !== $defaultVersion)
+            && $this->offerInstalled($prefix, $version)) {
+            return $this->activate($prefix);
         }
-        $this->install($release, $prefix);
+        // Reaching php.net is pointless until a build is known to be needed.
+        $this->install($this->release($version), $prefix);
+        return $this->activate($prefix);
+    }
+
+    private function offerInstalled(string $prefix, string $version): bool
+    {
+        return $this->hasLibPhp($prefix)
+            && $this->installedVersion($prefix) === $version
+            && $this->console->confirm("PHP {$version} with libphp.so already exists in {$prefix}; use it?", true);
+    }
+
+    /** Point this process, and the build it runs, at the selected installation. */
+    private function activate(string $prefix): string
+    {
         putenv('PHP_HOME=' . $prefix);
         $_ENV['PHP_HOME'] = $prefix;
         return $prefix;

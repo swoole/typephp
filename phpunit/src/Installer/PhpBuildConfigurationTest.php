@@ -57,7 +57,6 @@ final class PhpBuildConfigurationTest extends TestCase
             ['--includedir=/usr/include', '--disable-all', '--with-zlib=/usr'],
             $parsed
         );
-        self::assertContains('--includedir=/usr/include', $options);
         self::assertContains('--disable-all', $options);
         self::assertContains('--with-zlib=/usr', $options);
         self::assertNotContains('CFLAGS=-g', $options);
@@ -76,6 +75,50 @@ final class PhpBuildConfigurationTest extends TestCase
         self::assertNotContains('../configure', $options);
         self::assertNotContains('CFLAGS=-g -O2', $options);
         self::assertContains('--enable-cli', $options);
+    }
+
+    public function testDeriveKeepsInstallationDirectoriesInsideThePrefix(): void
+    {
+        // A Debian/Ubuntu build records absolute installation directories; reusing
+        // them makes `make install` write to /usr/share/man and /usr/include, which
+        // an unprivileged user cannot do.
+        $options = PhpBuildConfiguration::derive(
+            "'--prefix=/usr' '--exec-prefix=/usr' '--includedir=/usr/include' " .
+            "'--mandir=/usr/share/man' '--infodir=/usr/share/info' '--sysconfdir=/etc' " .
+            "'--localstatedir=/var' '--libdir=\${prefix}/lib/php' " .
+            "'--libexecdir=/usr/lib/x86_64-linux-gnu' '--datadir=\${prefix}/share/php/8.5' " .
+            "'--with-layout=GNU' '--with-openssl'",
+            '/home/test/.typephp'
+        );
+
+        foreach ($options as $option) {
+            self::assertStringNotContainsString('/usr/', $option);
+            self::assertStringNotContainsString('${prefix}', $option);
+        }
+        self::assertSame(['--prefix=/home/test/.typephp'], array_values(array_filter(
+            $options,
+            static fn(string $option): bool => str_starts_with($option, '--prefix=')
+        )));
+        self::assertContains('--with-layout=GNU', $options);
+        self::assertContains('--with-openssl', $options);
+    }
+
+    public function testDeriveDropsProgramNameTransformsAndStaleConfigureCaches(): void
+    {
+        // --program-suffix would install bin/php8.5 instead of bin/php, which the
+        // installer and the platform probes both look for by its plain name.
+        $options = PhpBuildConfiguration::derive(
+            "'--program-suffix=8.5' '--program-prefix=x' '--program-transform-name=s,x,x,' " .
+            "'--config-cache' '--cache-file=/tmp/buildd/nonexistent/config.cache' '--enable-pcntl'",
+            '/home/test/.typephp'
+        );
+
+        self::assertNotContains('--program-suffix=8.5', $options);
+        self::assertNotContains('--program-prefix=x', $options);
+        self::assertNotContains('--program-transform-name=s,x,x,', $options);
+        self::assertNotContains('--config-cache', $options);
+        self::assertNotContains('--cache-file=/tmp/buildd/nonexistent/config.cache', $options);
+        self::assertContains('--enable-pcntl', $options);
     }
 
     public function testParseShellWordsRejectsIncompleteInput(): void

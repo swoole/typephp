@@ -82,6 +82,34 @@ final class PhpBuildConfiguration
     }
 
     /**
+     * Autoconf installation directories, program name transforms and cache files.
+     *
+     * A distribution build points these outside its own --prefix (--mandir=/usr/share/man,
+     * --includedir=/usr/include) or renames the installed binaries (--program-suffix=8.3).
+     * Inheriting them makes `make install` write to system paths the user cannot own,
+     * and hides bin/php behind a versioned name. Autoconf derives every one of them
+     * from --prefix when it is absent, so dropping them keeps the private build
+     * entirely inside the requested prefix.
+     *
+     * The versioned name is the Debian and Ubuntu packaging scheme, not a PPA
+     * addition: php8.3-dev in noble-updates/main carries --program-suffix=8.3
+     * and --mandir=/usr/share/man, and ppa:ondrej/php repeats it per version.
+     *
+     * @var list<string>
+     */
+    private const array PREFIX_DERIVED = [
+        '--exec-prefix', '--bindir', '--sbindir', '--libexecdir', '--sysconfdir',
+        '--sharedstatedir', '--localstatedir', '--runstatedir', '--libdir',
+        '--includedir', '--oldincludedir', '--datarootdir', '--datadir',
+        '--infodir', '--localedir', '--mandir', '--docdir', '--htmldir',
+        '--dvidir', '--pdfdir', '--psdir',
+        '--program-prefix', '--program-suffix', '--program-transform-name',
+        // A cache recorded for the distribution prefix answers the wrong questions
+        // here, and its path may not even exist on this machine.
+        '--cache-file', '--config-cache',
+    ];
+
+    /**
      * @param string|list<string> $configureOptions
      * @return list<string>
      */
@@ -91,7 +119,10 @@ final class PhpBuildConfiguration
             '--prefix', '--with-config-file-path', '--with-config-file-scan-dir',
             '--enable-embed', '--enable-cli', '--disable-cli', '--with-libdir',
         ];
-        $drop = ['--with-apxs', '--with-apxs2', '--enable-fpm', '--with-fpm-systemd'];
+        $drop = [
+            '--with-apxs', '--with-apxs2', '--enable-fpm', '--with-fpm-systemd',
+            ...self::PREFIX_DERIVED,
+        ];
         $result = [];
         $options = is_string($configureOptions) ? self::parseShellWords($configureOptions) : $configureOptions;
         foreach ($options as $option) {

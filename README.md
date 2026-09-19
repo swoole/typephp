@@ -367,7 +367,10 @@ ext-deps:
 
 Paths are resolved relative to the YAML file. A source entry may be a file or
 directory; conditional entries support `PHP_VERSION`, `PHP_VERSION_ID`, and
-`PHP_OS_FAMILY`. CLI arguments override their YAML counterparts. Native linker
+`PHP_OS_FAMILY`. CLI arguments override their YAML counterparts. Scanning a
+source directory descends into symlinked directories, so a dependency installed
+by a Composer path repository -- which is a symlink -- is compiled like any
+other source; `ignore` excludes it, written as the path that reaches it. Native linker
 dependencies belong in `link-libs`; `ext-deps` writes `ZEND_MOD_REQUIRED`
 entries so Zend can reject loading when a required PHP extension is missing.
 `bundled-files` accepts files or directories with the same conditional syntax.

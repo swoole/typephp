@@ -117,6 +117,21 @@ Corresponding long options:
 
 When a `project.yml` is passed, command-line arguments take precedence over same-named settings in the YAML. For the project file format, see the user documentation and the project configuration parser in the code.
 
+### Symlinked source directories
+
+Scanning a source directory descends into symlinked directories, so a dependency
+installed by a Composer path repository -- which is installed as a symlink -- is
+compiled like any other source. A link pointing at one of its own ancestors does
+not recurse, and a file reached through more than one link is compiled once.
+
+Excluding one is the ordinary `ignore` entry, written as the path that reaches
+it rather than the path it points at:
+
+```yaml
+ignore:
+  - vendor/vendor/mylib
+```
+
 ### Precompiled object files
 
 A project can add object files produced by an external native toolchain as

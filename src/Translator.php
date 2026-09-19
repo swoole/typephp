@@ -3801,6 +3801,45 @@ CODE;
         return $baseDir . '/' . $path;
     }
 
+    /**
+     * Resolve `.` and `..` without touching the filesystem.
+     *
+     * realpath() would do this too, but it also follows every symlink on the
+     * way, which is exactly what a path compared against a scanned one must
+     * not do.
+     */
+    protected function normalizeLexicalPath(string $path): string
+    {
+        $prefix = '';
+        if (preg_match('/^[A-Za-z]:/', $path) === 1) {
+            $prefix = substr($path, 0, 2);
+            $path   = substr($path, 2);
+        }
+        if (DIRECTORY_SEPARATOR === '\\') {
+            $path = str_replace('\\', '/', $path);
+        }
+
+        $absolute = str_starts_with($path, '/');
+        $segments = [];
+        foreach (explode('/', $path) as $segment) {
+            if ($segment === '' || $segment === '.') {
+                continue;
+            }
+            if ($segment === '..' && $segments !== [] && end($segments) !== '..') {
+                array_pop($segments);
+                continue;
+            }
+            $segments[] = $segment;
+        }
+
+        $normalized = ($absolute ? '/' : '') . implode('/', $segments);
+        if ($prefix !== '') {
+            $normalized = $prefix . $normalized;
+        }
+
+        return str_replace('/', DIRECTORY_SEPARATOR, $normalized);
+    }
+
     protected function isAbsolutePath(string $path): bool
     {
         return $path !== ''
@@ -4123,14 +4162,25 @@ CODE;
                 $this->error('`ignore` must be array');
             }
             foreach ($ignore as $src) {
-                $realPath = $this->getAbsolutePath($src, $projectDir);
-                if (!$realPath) {
+                $path = $this->normalizeLexicalPath($this->resolvePath($src, $projectDir, 'Ignore path'));
+                if (!file_exists($path)) {
                     // Ignore entries describe optional exclusions. Projects often
                     // share one configuration across dependency versions where an
                     // excluded file or directory may not exist.
                     continue;
                 }
-                $this->ignorePaths[] = $realPath;
+                // The scanner reports the path it traversed, symlinks and all,
+                // so an entry naming a linked directory has to be compared as
+                // the project wrote it. Resolving it first would compare a real
+                // path against a linked one and never match.
+                $this->ignorePaths[] = $path;
+                // A source entry is resolved before it is scanned, so a project
+                // that links its source root traverses real paths instead. Keep
+                // the target as well, for that case.
+                $realPath = realpath($path);
+                if ($realPath !== false && $realPath !== $path) {
+                    $this->ignorePaths[] = $realPath;
+                }
             }
         }
 

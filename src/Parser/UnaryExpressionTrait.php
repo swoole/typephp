@@ -20,6 +20,12 @@ trait UnaryExpressionTrait
             return $this->unaryPlusOperandType($operand->expr);
         }
         if ($operand instanceof Expr\Assign) {
+            if ($operand->var instanceof Expr\Variable
+                && is_string($operand->var->name)
+                && !$this->hasVar($operand->var->name)) {
+                // A fresh local has no target type until assignment registers it.
+                return $this->unaryPlusOperandType($operand->expr);
+            }
             // Assignment evaluates to the value after conversion to its target
             // type, which can differ from the RHS (e.g. int to float).
             return $this->unaryPlusOperandType($operand->var);

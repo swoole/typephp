@@ -176,6 +176,9 @@ trait ConstantExpressionTrait
                 }
                 return '"' . $this->escapeString($class) . '"';
             case 'Scalar_MagicConst_Method':
+                if ($this->methodDef === null) {
+                    return '"' . $this->escapeString($function) . '"';
+                }
                 return '"' . $this->escapeString($class) . '::' . $this->escapeString($this->method) . '"';
             default:
                 $this->unsupportedSyntax($expr);

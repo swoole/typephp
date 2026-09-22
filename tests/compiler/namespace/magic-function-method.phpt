@@ -1,5 +1,5 @@
 --TEST--
-__FUNCTION__ uses the short name in namespaced methods
+__FUNCTION__ and __METHOD__ preserve function and method names
 --FILE--
 <?php
 namespace MagicFunctionMethod {
@@ -14,15 +14,21 @@ namespace MagicFunctionMethod {
     }
 
     function namespacedFunction(): void {
-        echo __FUNCTION__, "\n";
+        echo __FUNCTION__, "\n", __METHOD__, "\n";
     }
 }
 
 namespace {
+    function globalFunction(): void {
+        echo __FUNCTION__, "\n", __METHOD__, "\n";
+    }
+
     function main(): void {
         (new \MagicFunctionMethod\Example())->instanceMethod();
         \MagicFunctionMethod\Example::staticMethod();
         \MagicFunctionMethod\namespacedFunction();
+        globalFunction();
+        echo __METHOD__, "\n";
     }
 }
 ?>
@@ -32,3 +38,7 @@ MagicFunctionMethod\Example::instanceMethod
 staticMethod
 MagicFunctionMethod\Example::staticMethod
 MagicFunctionMethod\namespacedFunction
+MagicFunctionMethod\namespacedFunction
+globalFunction
+globalFunction
+main

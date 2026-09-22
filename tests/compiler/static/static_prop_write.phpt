@@ -29,4 +29,4 @@ function main() {
 }
 ?>
 --EXPECT--
-string(4) "init"
+string(27) "{closure:Worker::init():18}"

@@ -1177,6 +1177,11 @@ trait FuncCallOptimizer
         if (!$this->hasOptimizerSafeReflectedArguments($n, $e, $c)) {
             return false;
         }
+        // offsetExists only matches PHP key semantics for integer/string keys.
+        // Other keys need Zend's conversions, diagnostics and TypeErrors.
+        if (!in_array($this->detectTypeOfExpr($e->args[0]->value), [Type::INT, Type::STR], true)) {
+            return false;
+        }
         // The C++ receiver is PHP's second argument, but PHP still evaluates
         // the key first. Resolve both in source order before rearranging them.
         $key = $this->getArg($e, 0);

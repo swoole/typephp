@@ -222,9 +222,8 @@ class Preprocessor extends CompilerBase
                 continue;
             }
             $source = file_get_contents($file);
-            if (is_string($source)
-                && (str_contains($source, 'global') || str_contains($source, '$GLOBALS'))
-            ) {
+            // PHP keywords are case-insensitive; this also includes $GLOBALS accesses.
+            if (is_string($source) && stripos($source, 'global') !== false) {
                 $candidateSources[$file] = $source;
             }
         }

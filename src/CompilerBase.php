@@ -4572,7 +4572,7 @@ class CompilerBase implements PropertyAccessContext
 
     protected function parseInterpolatedStringPart(Node\InterpolatedStringPart $expr): string
     {
-        return '"' . $this->escapeString($expr->value) . '"';
+        return $this->getInlineString($expr->value);
     }
 
     protected function parseGlobal(Node\Stmt\Global_ $expr): string

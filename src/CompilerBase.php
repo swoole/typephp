@@ -3458,6 +3458,12 @@ class CompilerBase implements PropertyAccessContext
                     }
                     return Type::BIGINT;
                 }
+                // A dynamic operand keeps the runtime result type. Inferring
+                // Int from the other operand would truncate floating results
+                // when ordered evaluation materializes this expression.
+                if ($leftType === Type::VAR || $rightType === Type::VAR) {
+                    return Type::VAR;
+                }
                 if ($leftType === Type::FLOAT || $rightType === Type::FLOAT) {
                     return Type::FLOAT;
                 }

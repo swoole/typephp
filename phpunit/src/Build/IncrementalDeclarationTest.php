@@ -122,6 +122,42 @@ PHP);
         self::assertSame($this->provider, $symbols['constant:Incremental\\LIMIT']);
     }
 
+    public function testGroupedDeclarationsPreserveHelpersAndFilesWithoutFunctions(): void
+    {
+        file_put_contents($this->provider, <<<'PHP'
+<?php
+namespace Incremental;
+abstract class Base
+{
+    abstract public function amount(int $value = 5): int;
+}
+function answer(int $value = 42, string ...$labels): int { return $value; }
+PHP);
+        file_put_contents($this->consumer, "<?php\nfunction main(): int { return \\Incremental\\answer(); }\n");
+        file_put_contents($this->independent, "<?php\nconst MARKER = 1;\n");
+
+        $compiler = $this->convertProject();
+        foreach ([$this->provider, $this->consumer, $this->independent] as $file) {
+            $expected = $this->invoke($compiler, 'renderFunctionDeclarations', $file)
+                . $this->invoke($compiler, 'renderDataDeclarations', $file, false, false);
+            self::assertSame($expected, file_get_contents($compiler->getDeclarationHeaderFile($file)));
+        }
+        $provider = file_get_contents($compiler->getDeclarationHeaderFile($this->provider));
+        self::assertStringContainsString('php_incremental__answer_arg_0_default_value();', $provider);
+        self::assertStringContainsString('php_incremental__answer_arg_1_default_value();', $provider);
+        self::assertStringContainsString('php_incremental__base__amount_arg_0_default_value();', $provider);
+        self::assertStringNotContainsString('php_main(', $provider);
+        $independent = file_get_contents($compiler->getDeclarationHeaderFile($this->independent));
+        self::assertStringNotContainsString('php_incremental__answer', $independent);
+        self::assertStringNotContainsString('php_main(', $independent);
+        self::assertStringNotContainsString('_default_value', $independent);
+
+        $aggregate = $this->invoke($compiler, 'renderFunctionDeclarations');
+        self::assertStringContainsString('php_incremental__answer(', $aggregate);
+        self::assertStringContainsString('php_main(', $aggregate);
+        self::assertStringContainsString('php_incremental__base__amount_arg_0_default_value();', $aggregate);
+    }
+
     public function testSuperglobalsAreDeclaredInEachUsingSource(): void
     {
         file_put_contents($this->provider, <<<'PHP'

@@ -2841,8 +2841,15 @@ CODE;
         $this->writeFile($file, $this->renderFunctionDeclarations());
     }
 
-    protected function renderFunctionDeclarations(?string $sourceFile = null): string
+    /** @param array<string, FunctionDef>|null $functions */
+    protected function renderFunctionDeclarations(?string $sourceFile = null, ?array $functions = null): string
     {
+        $functions ??= $sourceFile === null
+            ? $this->symbols->functions()
+            : array_filter(
+                $this->symbols->functions(),
+                static fn (FunctionDef $function): bool => $function->sourceFile === $sourceFile,
+            );
         $code = '#pragma once' . PHP_EOL . PHP_EOL;
         $code .= '#include <phpx.h>' . PHP_EOL;
         $code .= '#include <typephp_helper.h>' . PHP_EOL;
@@ -2861,10 +2868,7 @@ CODE;
             $code .= $this->genLibraryApiMacro($this->targetName);
         }
         $importLibraries = [];
-        foreach ($this->symbols->functions() as $function) {
-            if ($sourceFile !== null && $function->sourceFile !== $sourceFile) {
-                continue;
-            }
+        foreach ($functions as $function) {
             if ($this->isImportedFunction($function)) {
                 $importLibraries[$function->importLibrary] = true;
             }
@@ -2873,12 +2877,9 @@ CODE;
             $code .= $this->genLibraryImportMacro($library);
         }
 
-        $code .= $this->genDefaultArgumentHelperDeclarations($sourceFile);
+        $code .= $this->genDefaultArgumentHelperDeclarations($functions);
 
-        foreach ($this->symbols->functions() as $name => $func) {
-            if ($sourceFile !== null && $func->sourceFile !== $sourceFile) {
-                continue;
-            }
+        foreach ($functions as $name => $func) {
             if ($func->abstractMethod) {
                 continue;
             }
@@ -3008,11 +3009,20 @@ CODE;
         $this->writeFile($runtimeHeader, '#pragma once' . PHP_EOL . PHP_EOL
             . $this->renderDataDeclarations(null, true, false)
             . $this->genNativeObjectForwardDeclarations());
+        $functionsBySource = null;
         foreach ($this->declarationHeaderFiles as $file => $header) {
             if (!$this->shouldRegeneratePhpFile($file)) {
                 continue;
             }
-            $code = $this->renderFunctionDeclarations($file);
+            // Group once, only if a header needs regeneration. Keep this local
+            // so later passes see symbols finalized by their own conversion.
+            if ($functionsBySource === null) {
+                $functionsBySource = [];
+                foreach ($this->symbols->functions() as $name => $function) {
+                    $functionsBySource[$function->sourceFile][$name] = $function;
+                }
+            }
+            $code = $this->renderFunctionDeclarations($file, $functionsBySource[$file] ?? []);
             $code .= $this->renderDataDeclarations($file, false, false);
             $this->writeFile(
                 $this->getIncludeDir() . '/' . $header,

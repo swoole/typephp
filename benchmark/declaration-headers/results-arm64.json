@@ -1,0 +1,31 @@
+{
+  "environment": "Linux ARM64 Docker, PHP 8.5.10 ZTS, no CLI opcache",
+  "baseline_commit": "b3898c32",
+  "files": 300,
+  "functions": 6001,
+  "baseline": {
+    "ms": [
+      88.000792,
+      87.998334,
+      90.341888,
+      90.412138,
+      87.537832
+    ],
+    "headers": 302,
+    "sha256": "bfad6f04ca81c591734aeeaf223cc32ef7064768ca12faba8ac41ef053444f37",
+    "median_ms": 88.000792
+  },
+  "candidate": {
+    "ms": [
+      13.015777,
+      13.490487,
+      12.763525,
+      13.087318,
+      13.106777
+    ],
+    "headers": 302,
+    "sha256": "bfad6f04ca81c591734aeeaf223cc32ef7064768ca12faba8ac41ef053444f37",
+    "median_ms": 13.087318
+  },
+  "speedup": 6.7241272810823425
+}

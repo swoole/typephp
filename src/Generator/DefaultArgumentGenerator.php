@@ -11,6 +11,7 @@ use TypePhp\Type;
 
 use TypePhp\Entity\ArgInfo;
 use TypePhp\Entity\ArrayInitPlan;
+use TypePhp\Entity\FunctionDef;
 
 trait DefaultArgumentGenerator
 {
@@ -43,13 +44,11 @@ trait DefaultArgumentGenerator
         return "do {\n" . $plan->init . $body . $plan->clean . "} while (0);\n";
     }
 
-    protected function genDefaultArgumentHelperDeclarations(?string $sourceFile = null): string
+    /** @param array<string, FunctionDef> $functions */
+    protected function genDefaultArgumentHelperDeclarations(array $functions): string
     {
         $code = '';
-        foreach ($this->symbols->functions() as $nativeName => $func) {
-            if ($sourceFile !== null && $func->sourceFile !== $sourceFile) {
-                continue;
-            }
+        foreach ($functions as $nativeName => $func) {
             foreach ($func->argInfoList as $argumentIndex => $argInfo) {
                 if (!$this->shouldGenerateDefaultArgumentHelper($argInfo)) {
                     continue;

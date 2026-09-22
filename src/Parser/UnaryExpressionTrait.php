@@ -16,8 +16,13 @@ trait UnaryExpressionTrait
 {
     protected function unaryPlusOperandType(Expr $operand): string
     {
-        if ($operand instanceof Expr\ErrorSuppress || $operand instanceof Expr\Assign) {
+        if ($operand instanceof Expr\ErrorSuppress) {
             return $this->unaryPlusOperandType($operand->expr);
+        }
+        if ($operand instanceof Expr\Assign) {
+            // Assignment evaluates to the value after conversion to its target
+            // type, which can differ from the RHS (e.g. int to float).
+            return $this->unaryPlusOperandType($operand->var);
         }
         if ($operand instanceof Expr\Ternary) {
             $ifType = $this->unaryPlusOperandType($operand->if ?? $operand->cond);

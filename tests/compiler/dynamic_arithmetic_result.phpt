@@ -38,11 +38,28 @@ function dynamic_kinds(mixed $value, int $n, float $fraction): array
         $value & $n, $value | $n, $value ^ $n];
 }
 
+function divisor(): int
+{
+    return 2;
+}
+
+function dynamic_reference_arithmetic(): array
+{
+    $values = [5.5];
+    foreach ($values as &$value) {
+        return [
+            'forward' => [$value / divisor(), $value + divisor(), $value - divisor(), $value * divisor()],
+            'reverse' => [divisor() / $value, divisor() + $value, divisor() - $value, divisor() * $value],
+        ];
+    }
+}
+
 function main()
 {
     var_dump(dynamic_arithmetic(['float' => 5.5, 'integer' => 5], 2));
     var_dump(dynamic_return(5.5, 2), dynamic_nested(['float' => 5.5], 2));
     var_dump(dynamic_kinds(4, 2, 0.5));
+    var_dump(dynamic_reference_arithmetic());
 }
 ?>
 --EXPECT--
@@ -95,4 +112,28 @@ array(10) {
   int(6)
   [9]=>
   int(6)
+}
+array(2) {
+  ["forward"]=>
+  array(4) {
+    [0]=>
+    float(2.75)
+    [1]=>
+    float(7.5)
+    [2]=>
+    float(3.5)
+    [3]=>
+    float(11)
+  }
+  ["reverse"]=>
+  array(4) {
+    [0]=>
+    float(0.36363636363636365)
+    [1]=>
+    float(7.5)
+    [2]=>
+    float(-3.5)
+    [3]=>
+    float(11)
+  }
 }

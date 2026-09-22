@@ -9,6 +9,7 @@ class UnaryAssignmentBox {
     public static ?float $nullableShared = null;
 }
 function assignedOnce(int &$calls): int { ++$calls; return 2; }
+function existingTarget(float $int): int|float { return +($int = 2); }
 function main() {
     $box = new UnaryAssignmentBox();
     var_dump(+($box->number = 2), $box->number);
@@ -19,6 +20,7 @@ function main() {
     $calls = 0;
     var_dump(+($box->number = assignedOnce($calls)), $calls);
     var_dump(+($local = 7), $local);
+    var_dump(existingTarget(0.0));
 }
 ?>
 --EXPECT--
@@ -35,3 +37,4 @@ float(2)
 int(1)
 int(7)
 int(7)
+float(2)

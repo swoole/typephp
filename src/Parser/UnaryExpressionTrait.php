@@ -22,7 +22,7 @@ trait UnaryExpressionTrait
         if ($operand instanceof Expr\Assign) {
             if ($operand->var instanceof Expr\Variable
                 && is_string($operand->var->name)
-                && !$this->hasVar($operand->var->name)) {
+                && !$this->hasVar($this->parseVariable($operand->var))) {
                 // A fresh local has no target type until assignment registers it.
                 return $this->unaryPlusOperandType($operand->expr);
             }

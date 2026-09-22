@@ -1421,17 +1421,26 @@ trait FuncCallOptimizer
         }
         $funcName = $expr->args[0]->value;
         if ($this->isScalarString($funcName)) {
-            $nameLower = strtolower(trim($funcName->value, '\\'));
-            $nativeFunction = $this->findNativeFunction($nameLower);
-            if ($nativeFunction) {
-                // A function whose ABI contains Native pointers is callable
-                // only from generated TypePHP C++. It has no Zend wrapper and
-                // therefore must remain invisible to function_exists().
-                return $this->functionRequiresNativeAbi($this->getFunction($nativeFunction))
-                    ? 'false'
-                    : 'true';
+            // Runtime function names are absolute, case-insensitive strings.
+            // PHP accepts one leading slash, but neither namespace/import
+            // resolution nor trimming other slashes applies to these names.
+            $nameLower = strtolower($funcName->value);
+            if (str_starts_with($nameLower, '\\')) {
+                $nameLower = substr($nameLower, 1);
             }
-            $funcName = $this->getLiteralString($nameLower);
+            $nativeFunction = $this->escapeNamespace($nameLower);
+            $this->checkFunction($nativeFunction);
+            if ($this->hasFunction($nativeFunction)) {
+                $function = $this->getFunction($nativeFunction);
+                // Escaped C++ names are not an exact PHP-name lookup: a
+                // namespace separator and literal underscores can collide.
+                if (!$function->method && strtolower($function->getNamespacedName()) === $nameLower) {
+                    // Native-pointer ABIs have no Zend wrapper and must
+                    // remain invisible to function_exists().
+                    return $this->functionRequiresNativeAbi($function) ? 'false' : 'true';
+                }
+            }
+            $funcName = $this->getLiteralString($funcName->value);
             return 'php::fn::function_exists(' . $funcName . ')';
         }
         return 'php::fn::function_exists(' . $this->parseIdentifier($funcName) . ')';

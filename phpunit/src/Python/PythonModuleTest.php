@@ -348,6 +348,35 @@ final class PythonModuleTest extends TestCase
         $this->assertStringNotContainsString('phpy::', $cpp);
     }
 
+    public function testPythonFacadeMethodsKeepTheirPhpReturnTypes(): void
+    {
+        global $translator;
+        $translator = $compiler = CompilerTest::create(TYPEPHP_ROOT_PATH);
+        $source = TYPEPHP_ROOT_PATH . '/phpunit/code/python/facade-methods.php';
+        $compiler->addFiles([$source]);
+        $compiler->prepareFile($source);
+        $cpp = file_get_contents($compiler->convertFile($source));
+
+        self::assertStringContainsString('php::Int count = 0;', $cpp);
+        self::assertStringContainsString('php::Bool contains = 0;', $cpp);
+        self::assertStringContainsString('php::Bool member = 0;', $cpp);
+        self::assertStringContainsString('php::Array slice;', $cpp);
+        self::assertStringContainsString('php::python::toArray(', $cpp);
+        self::assertStringNotContainsString('php::python::callMember(', $cpp);
+    }
+
+    public function testProjectClassesWithFacadeNamesDoNotUseThePythonBridge(): void
+    {
+        global $translator;
+        $translator = $compiler = CompilerTest::create(TYPEPHP_ROOT_PATH);
+        $source = TYPEPHP_ROOT_PATH . '/phpunit/code/python/facade-class-name-collision.php';
+        $compiler->addFiles([$source]);
+        $compiler->prepareFile($source);
+        $cpp = file_get_contents($compiler->convertFile($source));
+
+        self::assertStringNotContainsString('php::python::', $cpp);
+    }
+
     private function compileFixture(string $file): void
     {
         global $translator;

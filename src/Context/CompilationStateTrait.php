@@ -258,7 +258,7 @@ trait CompilationStateTrait
         // Interfaces have no concrete method body for native calls. Abstract classes may have concrete methods.
         if ($this->isInterface($class)) {
             $this->context->declaredObjects[$name] = $class;
-        } elseif ($this->isNativeClass($class) or $this->isInternalClass($class)) {
+        } elseif ($this->isNativeClass($class) || $this->isInternalClass($class) || $this->isPythonFacadeClass($class)) {
             $this->context->objects[$name] = $class;
         }
     }

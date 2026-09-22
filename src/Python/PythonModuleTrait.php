@@ -9,6 +9,51 @@ use TypePhp\Type;
 
 trait PythonModuleTrait
 {
+    /** phpy facade inheritance is part of the Python language bridge, even without the extension loaded. */
+    private const PYTHON_FACADE_PARENTS = [
+        'pyobject' => '',
+        'pysequence' => 'pyobject',
+        'pylist' => 'pysequence',
+        'pytuple' => 'pysequence',
+        'pydict' => 'pyobject',
+        'pyset' => 'pyobject',
+        'pystr' => 'pyobject',
+        'pytype' => 'pyobject',
+        'pyfn' => 'pyobject',
+        'pyiter' => 'pyobject',
+        'pymodule' => 'pyobject',
+    ];
+
+    /**
+     * Public method contracts from phpy's stubs/phpy_{object,sequence,set}.stub.php.
+     * These Zend methods must not become Python attribute calls when phpy is absent.
+     */
+    private const PYTHON_FACADE_METHOD_RETURN_TYPES = [
+        'pyobject' => [
+            '__construct' => Type::VOID,
+            '__call' => Type::VAR,
+            '__get' => Type::VAR,
+            '__set' => Type::VOID,
+            '__unset' => Type::VOID,
+            '__tostring' => Type::STR,
+            'toarray' => Type::ARRAY,
+            'tovalue' => Type::VAR,
+            '__invoke' => Type::VAR,
+            'offsetget' => Type::VAR,
+            'offsetset' => Type::VOID,
+            'offsetunset' => Type::VOID,
+            'offsetexists' => Type::BOOL,
+            'key' => Type::VAR,
+            'next' => Type::VOID,
+            'rewind' => Type::VOID,
+            'valid' => Type::BOOL,
+            'current' => Type::VAR,
+            'count' => Type::INT,
+        ],
+        'pysequence' => ['contains' => Type::BOOL, 'slice' => Type::OBJECT],
+        'pyset' => ['contains' => Type::BOOL],
+    ];
+
     /** @var array<string, string> TypePHP constructor sugar to the existing phpy facade class. */
     private const PYTHON_CONSTRUCTOR_CLASSES = [
         'list' => 'PyList',
@@ -56,6 +101,47 @@ trait PythonModuleTrait
 
     protected bool $pythonRuntimeUsed = false;
 
+    protected function isPythonFacadeClass(string $class): bool
+    {
+        $class = ltrim($class, '\\');
+        return isset(self::PYTHON_FACADE_PARENTS[strtolower($class)])
+            && !$this->hasClass($class)
+            && !$this->hasInterface($class);
+    }
+
+    protected function isPythonFacadeAssignableTo(string $class, string $expected): bool
+    {
+        if (!$this->isPythonFacadeClass($class) || !$this->isPythonFacadeClass($expected)) {
+            return false;
+        }
+        $class = strtolower(ltrim($class, '\\'));
+        $expected = strtolower(ltrim($expected, '\\'));
+        do {
+            if ($class === $expected) {
+                return true;
+            }
+            $class = self::PYTHON_FACADE_PARENTS[$class];
+        } while ($class !== '');
+        return false;
+    }
+
+    private function getPythonFacadeMethodReturnType(string $class, string $method): ?string
+    {
+        if (!$this->isPythonFacadeClass($class)) {
+            return null;
+        }
+        $method = strtolower($method);
+        $class = strtolower(ltrim($class, '\\'));
+        do {
+            $type = self::PYTHON_FACADE_METHOD_RETURN_TYPES[$class][$method] ?? null;
+            if ($type !== null) {
+                return $type;
+            }
+            $class = self::PYTHON_FACADE_PARENTS[$class];
+        } while ($class !== '');
+        return null;
+    }
+
     /** Return true when the expression is statically known to hold a phpy proxy. */
     protected function isPythonObjectExpr(NodeAbstract $expr): bool
     {
@@ -63,8 +149,12 @@ trait PythonModuleTrait
         if ($class === '') {
             return false;
         }
-        return strcasecmp($class, 'PyObject') === 0
-            || $this->isObjectClassStaticallyAssignableTo($class, 'PyObject');
+        if ($this->isPythonFacadeClass($class)) {
+            return true;
+        }
+        return !$this->hasClass('PyObject')
+            && !$this->hasInterface('PyObject')
+            && $this->isObjectClassStaticallyAssignableTo($class, 'PyObject');
     }
 
     /**
@@ -79,6 +169,9 @@ trait PythonModuleTrait
         }
 
         $class = $this->detectClassOfExpr($receiver);
+        if ($this->getPythonFacadeMethodReturnType($class, $method) !== null) {
+            return false;
+        }
         return $class === '' || !\TypePhp\Resolver\Reflection::hasMethod($class, $method);
     }
 
@@ -87,17 +180,17 @@ trait PythonModuleTrait
         if (!$this->isNamedMethod($expr->name) || !$this->isPythonObjectExpr($expr->var)) {
             return null;
         }
-        $method = $expr->name->toString();
+        $method = strtolower($expr->name->toString());
         $helper = match ($method) {
-            'toValue' => 'toValue',
-            'toArray' => 'toArray',
+            'tovalue' => 'toValue',
+            'toarray' => 'toArray',
             default => null,
         };
         if ($helper === null) {
             return null;
         }
         if ($expr->args !== []) {
-            $this->fatalError($expr, "The {$method} method does not accept parameters");
+            $this->fatalError($expr, "The {$helper} method does not accept parameters");
         }
         $this->markPythonRuntimeUsed();
         return 'php::python::' . $helper . '(' . $receiver . ')';
@@ -571,6 +664,15 @@ trait PythonModuleTrait
             return Type::OBJECT;
         }
         if ($expr instanceof Expr\MethodCall && $this->isPythonObjectExpr($expr->var)) {
+            if ($this->isIdExpr($expr->name)) {
+                $facadeType = $this->getPythonFacadeMethodReturnType(
+                    $this->detectClassOfExpr($expr->var),
+                    $this->parseIdentifier($expr->name),
+                );
+                if ($facadeType !== null) {
+                    return $facadeType;
+                }
+            }
             if (!$this->isIdExpr($expr->name)
                 || $this->isPythonDynamicMethodCall($expr->var, $this->parseIdentifier($expr->name))
             ) {
@@ -613,6 +715,15 @@ trait PythonModuleTrait
             return 'PyObject';
         }
         if ($expr instanceof Expr\MethodCall && $this->isPythonObjectExpr($expr->var)) {
+            if ($this->isIdExpr($expr->name)) {
+                $facadeType = $this->getPythonFacadeMethodReturnType(
+                    $this->detectClassOfExpr($expr->var),
+                    $this->parseIdentifier($expr->name),
+                );
+                if ($facadeType !== null) {
+                    return $facadeType === Type::OBJECT ? 'PyObject' : '';
+                }
+            }
             if (!$this->isIdExpr($expr->name)
                 || $this->isPythonDynamicMethodCall($expr->var, $this->parseIdentifier($expr->name))
             ) {

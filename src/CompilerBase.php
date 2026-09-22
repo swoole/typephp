@@ -2596,6 +2596,12 @@ class CompilerBase implements PropertyAccessContext
             return true;
         }
 
+        // Python facade inheritance is a compiler-known bridge contract and
+        // does not depend on phpy being loaded in the compiler process.
+        if ($this->isPythonFacadeAssignableTo($class, $expected)) {
+            return true;
+        }
+
         if (!$this->hasClass($class)
             && !$this->hasInterface($class)
             && !$this->isInternalClass($class)

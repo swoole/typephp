@@ -2594,7 +2594,6 @@ class Preprocessor extends CompilerBase
             case 'Expr_Array':
                 return 'array';
             case 'Expr_UnaryMinus':
-            case 'Expr_UnaryPlus':
                 return $this->detectDefaultValueType($node->expr, $scopeClass, $depth + 1);
             case 'Expr_ConstFetch':
                 return match (strtolower($node->name->toString())) {

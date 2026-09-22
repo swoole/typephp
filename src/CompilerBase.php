@@ -3369,8 +3369,18 @@ class CompilerBase implements PropertyAccessContext
 
         $exprType = $expr->getType();
         switch ($exprType) {
-            case 'Expr_UnaryMinus':
             case 'Expr_UnaryPlus':
+                $constant = $this->constantUnaryPlusValue($expr);
+                if ($constant !== null) {
+                    return is_float($constant) ? Type::FLOAT : Type::INT;
+                }
+                $innerType = $this->unaryPlusOperandType($expr->expr);
+                return match ($innerType) {
+                    Type::BOOL => Type::INT,
+                    Type::INT, Type::FLOAT, Type::BIGINT, Type::BIGFLOAT, Type::DECIMAL => $innerType,
+                    default => Type::VAR,
+                };
+            case 'Expr_UnaryMinus':
                 $innerType = $this->detectTypeOfExpr($expr->expr);
                 if (
                     $this->varIntTypes

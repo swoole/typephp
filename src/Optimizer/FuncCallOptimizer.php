@@ -892,6 +892,13 @@ trait FuncCallOptimizer
             $args[] = $this->parseOrderedOperand($expr->args[1]->value, false);
         }
 
+        // PHP abs(PHP_INT_MIN) returns a float. The scalar PHPX overload
+        // cannot represent that value-dependent return type, so route static
+        // integers through the Variant overload, which preserves it.
+        if ($target === 'php::fn::abs' && $type === Type::INT) {
+            return $target . '(php::Variant(' . $args[0] . '))';
+        }
+
         return $target . '(' . implode(', ', $args) . ')';
     }
 

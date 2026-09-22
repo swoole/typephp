@@ -4666,6 +4666,7 @@ class CompilerBase implements PropertyAccessContext
 
         $this->context = new FunctionContext();
         $this->context->arguments = $oriCtx->localVars;
+        $this->context->closureMagicName = $oriCtx->closureMagicName;
         // Outer locals are captured arguments. New initializer temporaries
         // must not reuse their names and inherit an incompatible scalar type.
         $this->context->tmpVarIndex = $oriCtx->tmpVarIndex;

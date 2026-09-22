@@ -134,6 +134,9 @@ class FunctionContext
     /** True when the innermost enclosing breakable construct is a switch, not a loop. */
     public bool $breakableIsSwitch = false;
     public bool $inClosure = false;
+
+    /** Lexical PHP closure name; null for named functions, including generated callbacks. */
+    public ?string $closureMagicName = null;
     public ?array $closureReturnTypeCheck = null;
     public string $closureReturnTypeStr = '';
 
@@ -196,6 +199,7 @@ class FunctionContext
         $this->inLoop = false;
         $this->inContinuableLoop = false;
         $this->inClosure = false;
+        $this->closureMagicName = null;
         $this->closureReturnTypeCheck = null;
         $this->closureReturnTypeStr = '';
     }

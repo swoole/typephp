@@ -126,6 +126,7 @@ trait ClosureGenerator
             $this->resolveTypeDecl($expr->returnType, self::DECL_TYPE_OF_RETURN);
         }
 
+        $closureMagicName = $this->getClosureMagicName($expr);
         $entryContext = $this->context;
         $entryIndent = $this->indentLevel;
         $entryInGeneratorBody = $this->inGeneratorBody;
@@ -140,6 +141,7 @@ trait ClosureGenerator
         try {
             $this->context = new FunctionContext();
             $this->context->inClosure = true;
+            $this->context->closureMagicName = $closureMagicName;
             $this->inGeneratorBody = false;
             $this->indentLevel = $entryIndent + 1;
 
@@ -352,6 +354,26 @@ trait ClosureGenerator
         return 'php::UserCodeScopeGuard ' . $tmpScope . '{' . $this->getCallableScopeExpr() . '};' . PHP_EOL;
     }
 
+    private function getClosureMagicName(Expr\ArrowFunction|Expr\Closure $expr): string
+    {
+        $parent = $this->context->closureMagicName;
+        if ($parent === null) {
+            if ($this->methodDef !== null) {
+                $class = $this->methodDef->traitOrigin !== ''
+                    ? $this->methodDef->traitOrigin
+                    : $this->classDef->getNamespacedName(false);
+                $method = $this->methodDef->node?->getAttribute('typephp_trait_method', $this->method)
+                    ?? $this->method;
+                $parent = $class . '::' . $method . '()';
+            } elseif ($this->function !== '') {
+                $parent = ($this->namespace !== '' ? $this->namespace . '\\' : '') . $this->function . '()';
+            } else {
+                $parent = $this->file;
+            }
+        }
+        return '{closure:' . $parent . ':' . $expr->getStartLine() . '}';
+    }
+
     protected function genClosure(Expr\ArrowFunction|Expr\Closure $expr, array $params, array $uses = []): string
     {
         $entryContext = $this->context;
@@ -458,10 +480,12 @@ trait ClosureGenerator
             . Type::ARGS . ' &vars_) ' .
             '-> ' . Type::VAR . ' {' . PHP_EOL;
 
+        $closureMagicName = $this->getClosureMagicName($expr);
         $oriContext = $this->context;
         $this->context = new FunctionContext();
 
         $this->context->inClosure = true;
+        $this->context->closureMagicName = $closureMagicName;
         $body = $expr instanceof Expr\ArrowFunction ? $expr->expr : $expr->stmts;
         $this->prepareReferenceCaptureDegradations($body);
         if (!$isGenerator
@@ -676,6 +700,7 @@ trait ClosureGenerator
 
         $this->context = new FunctionContext();
         $this->context->inClosure = true;
+        $this->context->closureMagicName = $outerContext->closureMagicName;
         $this->inGeneratorBody = true;
         $this->indentLevel++;
 

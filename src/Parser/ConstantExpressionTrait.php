@@ -158,6 +158,9 @@ trait ConstantExpressionTrait
                 // with PHP, where it is an empty string outside a property.
                 return '""';
             case 'Scalar_MagicConst_Function':
+                if ($this->context->closureMagicName !== null) {
+                    return '"' . $this->escapeString($this->context->closureMagicName) . '"';
+                }
                 return '"' . $this->escapeString($function) . '"';
             case 'Scalar_MagicConst_Class':
                 if (!$this->classDef) {
@@ -176,6 +179,9 @@ trait ConstantExpressionTrait
                 }
                 return '"' . $this->escapeString($class) . '"';
             case 'Scalar_MagicConst_Method':
+                if ($this->context->closureMagicName !== null) {
+                    return '"' . $this->escapeString($this->context->closureMagicName) . '"';
+                }
                 if ($this->methodDef === null) {
                     return '"' . $this->escapeString($function) . '"';
                 }

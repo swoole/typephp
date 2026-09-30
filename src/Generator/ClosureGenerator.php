@@ -391,6 +391,7 @@ trait ClosureGenerator
 
     private function doGenClosure(Expr\ArrowFunction|Expr\Closure $expr, array $params, array $uses = []): string
     {
+        $this->clearReplaceAttributes($expr);
         // Closure signatures flow through the same declaration validation in
         // parseTypeDecl() as named functions (e.g. callable inside an
         // intersection or DNF member). Bare class names are skipped here: the
@@ -637,6 +638,31 @@ trait ClosureGenerator
             $this->methodDef !== null,
             $params
         );
+    }
+
+    /**
+     * Drop parseValueSelection()'s "replace" shortcuts from a closure's subtree.
+     *
+     * parseExpr() honours a node's replace attribute as a same-context
+     * deduplication: the second parse of an expression returns the temporary
+     * its first parse lowered into instead of emitting the materialization
+     * twice. A closure body, however, is regenerated into a fresh lambda
+     * whenever the expression holding the closure is parsed again (for
+     * example parseValueSelection lowering its left operand), while the
+     * temporaries recorded by the previous generation live in the previous,
+     * discarded lambda body. Honouring them would read an uninitialized
+     * temporary instead of re-emitting the materialization, so each
+     * generation rebuilds those statements.
+     */
+    protected function clearReplaceAttributes(NodeAbstract $expr): void
+    {
+        $nodes = (new NodeFinder())->find(
+            $expr,
+            static fn (Node $node): bool => $node->hasAttribute('replace'),
+        );
+        foreach ($nodes as $node) {
+            $node->setAttributes(array_diff_key($node->getAttributes(), ['replace' => true]));
+        }
     }
 
     protected function closureContainsYield(Expr\ArrowFunction|Expr\Closure $expr): bool

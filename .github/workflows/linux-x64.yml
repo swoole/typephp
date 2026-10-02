@@ -368,7 +368,7 @@ jobs:
           path: build/integration-*
 
   phpt:
-    name: PHPT - PHP ${{ matrix.php }} ZTS
+    name: PHPT - PHP ${{ matrix.php }} ZTS${{ matrix.sanitize && format(' ({0} sanitizer)', matrix.sanitize) || '' }}
     if: ${{ startsWith(github.ref, 'refs/tags/') || !contains(github.event.head_commit.message || '', '--skip-tests') }}
     runs-on: ubuntu-22.04
     timeout-minutes: 180
@@ -377,6 +377,14 @@ jobs:
       fail-fast: false
       matrix:
         php: ["8.4", "8.5"]
+        # Empty means no sanitizer. The include below overrides it, so GitHub
+        # adds a separate job instead of merging into the PHP 8.5 one.
+        sanitize: [""]
+        include:
+          # Undefined behavior in the generated C++ (division by zero, shift
+          # counts, signed overflow, misaligned access...) aborts the test binary.
+          - php: "8.5"
+            sanitize: undefined
     env:
       PHPX_HOME: ${{ github.workspace }}/third_party/phpx
       NO_INTERACTION: 1
@@ -489,6 +497,7 @@ jobs:
           mkdir -p build/phpt-metrics
           .github/scripts/observe-command.sh build/phpt-metrics -- \
             php run-tests.php -q -j8 --compiler .github/scripts/observe-tpc.sh \
+            ${{ matrix.sanitize && format('--sanitize {0}', matrix.sanitize) || '' }} \
             -w build/failed-tests.txt -W build/test-results.txt tests/compiler
 
       - name: Summarize PHPT compiler metrics
@@ -503,13 +512,13 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: phpt-metrics-linux-x64-php-${{ matrix.php }}-zts
+          name: phpt-metrics-linux-x64-php-${{ matrix.php }}-zts${{ matrix.sanitize && format('-{0}', matrix.sanitize) || '' }}
           if-no-files-found: warn
           retention-days: 14
           path: build/phpt-metrics
 
       - name: Package tested Linux compiler
-        if: startsWith(github.ref, 'refs/tags/')
+        if: startsWith(github.ref, 'refs/tags/') && !matrix.sanitize
         shell: bash
         run: |
           composer install --no-dev --prefer-dist --no-progress --classmap-authoritative
@@ -521,7 +530,7 @@ jobs:
           test "$(find . -maxdepth 1 -name 'tpc_v*_linux_x64_php${{ matrix.php }}.*-zts.tar.gz' -type f | wc -l)" -eq 1
 
       - name: Upload Linux release package
-        if: startsWith(github.ref, 'refs/tags/')
+        if: startsWith(github.ref, 'refs/tags/') && !matrix.sanitize
         uses: actions/upload-artifact@v4
         with:
           name: release-linux-x64-php-${{ matrix.php }}-zts
@@ -533,7 +542,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: phpt-failures-linux-x64-php-${{ matrix.php }}-zts
+          name: phpt-failures-linux-x64-php-${{ matrix.php }}-zts${{ matrix.sanitize && format('-{0}', matrix.sanitize) || '' }}
           if-no-files-found: ignore
           retention-days: 7
           path: |

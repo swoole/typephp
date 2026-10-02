@@ -298,6 +298,16 @@ trait ArrayExpressionTrait
 
         $items = $node->items;
         foreach ($items as $item) {
+            // PHP evaluates a key before its value. A side-effecting key must
+            // be materialized first: the value may hoist a nested call into
+            // a pre-statement temporary, which would otherwise run before an
+            // inline key expression.
+            $orderedKey = null;
+            if ($item->key && !$item->unpack && $this->shouldMaterializeOrderedOperand($item->key)) {
+                $this->assertExprCanBeUsedAsValue($item->key, 'array key');
+                $this->assertNotNativeObjectArrayKey($item->key);
+                $orderedKey = $this->parseOrderedOperand($item->key, false, true);
+            }
             $this->assertExprCanBeUsedAsValue($item->value, $item->unpack ? 'array unpack value' : 'array value');
             if ($item->byRef) {
                 if ($item->unpack) {
@@ -314,7 +324,7 @@ trait ArrayExpressionTrait
                 $this->context->beforeStmtLines[] = $this->getIndent() . $tmpVar . '.merge(' . $value . ');';
             } elseif ($item->key) {
                 $this->assertExprCanBeUsedAsValue($item->key, 'array key');
-                $key = $this->parseArrayKey($item->key);
+                $key = $orderedKey ?? $this->parseArrayKey($item->key);
                 $method = $item->byRef ? 'set' : 'setValue';
                 $this->context->beforeStmtLines[] = $this->getIndent() . $tmpVar . '.' . $method . '(' . $key . ', ' . $value . ');';
             } else {

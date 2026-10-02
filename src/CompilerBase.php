@@ -2413,9 +2413,21 @@ abstract class CompilerBase implements PropertyAccessContext
 
     protected function parseEcho(mixed $v): string
     {
+        // PHP prints each operand before it evaluates the next one. A nested
+        // call inside an operand may be materialized into a pre-statement
+        // temporary; keep those lines next to the operand they belong to,
+        // otherwise they all run (and may throw) before the first operand
+        // has been printed.
         $lines = [];
         foreach ($v->exprs as $expr) {
-            $lines[] = 'php::echo(' . $this->parseExprToString($expr) . ');';
+            $beforeCount = count($this->context->beforeStmtLines);
+            $afterCount = count($this->context->afterStmtLines);
+            $value = $this->parseExprToString($expr);
+            $before = array_slice($this->context->beforeStmtLines, $beforeCount);
+            $after = array_slice($this->context->afterStmtLines, $afterCount);
+            $this->context->beforeStmtLines = array_slice($this->context->beforeStmtLines, 0, $beforeCount);
+            $this->context->afterStmtLines = array_slice($this->context->afterStmtLines, 0, $afterCount);
+            array_push($lines, ...$before, ...['php::echo(' . $value . ');'], ...$after);
         }
 
         return implode("\n" . $this->getIndent(), $lines);

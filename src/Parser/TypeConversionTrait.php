@@ -56,7 +56,8 @@ trait TypeConversionTrait
             default => null,
         };
         if ($bigConversion !== null) {
-            return $bigConversion . '(' . $expr . ')';
+            // The Big* conversions return a php::Variant; unwrap it to the native scalar.
+            return 'php::toInt(' . $bigConversion . '(' . $expr . '))';
         }
         if (!$this->isClosedExpr($expr, 'php::toInt')) {
             return 'php::toInt(' . $expr . ')';
@@ -74,7 +75,8 @@ trait TypeConversionTrait
             default => null,
         };
         if ($bigConversion !== null) {
-            return $bigConversion . '(' . $expr . ')';
+            // The Big* conversions return a php::Variant; unwrap it to the native scalar.
+            return 'php::toFloat(' . $bigConversion . '(' . $expr . '))';
         }
         if (!$this->isClosedExpr($expr, 'php::toFloat')) {
             return 'php::toFloat(' . $expr . ')';
@@ -184,7 +186,8 @@ trait TypeConversionTrait
             default => null,
         };
         if ($bigConversion !== null) {
-            return $bigConversion . '(' . $expr . ')';
+            // The Big* conversions return a php::Variant; unwrap it to the native scalar.
+            return 'php::toBool(' . $bigConversion . '(' . $expr . '))';
         }
         if (!$this->isClosedExpr($expr, 'php::toBool')) {
             return 'php::toBool(' . $expr . ')';
@@ -203,16 +206,25 @@ trait TypeConversionTrait
         return $this->convertBoolExpr($expr, $type);
     }
 
+    protected function bigNumberTypeOf(mixed $type): ?string
+    {
+        return in_array($type, [Type::BIGINT, Type::BIGFLOAT, Type::DECIMAL], true) ? $type : null;
+    }
+
     protected function convertExprType(string $expr, $leftType, $rightType): string
     {
+        // A BigInt/BigFloat/Decimal operand is a php::Box resource. The generic
+        // php::toFloat()/php::toInt() would read its resource handle, so the
+        // conversion must go through the high-precision type itself.
+        $bigType = $this->bigNumberTypeOf($rightType) ?? $this->bigNumberTypeOf($leftType) ?? '';
         if ($leftType === Type::FLOAT or $rightType === Type::FLOAT) {
-            return $this->convertFloatExpr($expr);
+            return $this->convertFloatExpr($expr, $bigType);
         }
         if ($leftType === Type::INT or $rightType === Type::INT) {
-            return $this->convertIntExpr($expr);
+            return $this->convertIntExpr($expr, $bigType);
         }
         if ($leftType === Type::BOOL or $rightType === Type::BOOL) {
-            return $this->convertBoolExpr($expr);
+            return $this->convertBoolExpr($expr, $bigType);
         }
 
         return $expr;

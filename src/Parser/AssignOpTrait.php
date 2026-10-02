@@ -1026,6 +1026,26 @@ trait AssignOpTrait
                 return $this->parseBigAssignOp($node, $var, $type, $expr, $rightType, $op);
             }
 
+            // C++ has no %, bitwise or shift compound operator for double. PHP
+            // converts float operands of these to int and always yields an int,
+            // so an int local takes the Variant operator (Zend's conversion),
+            // and a native float local would have to change type, which native
+            // locals cannot do.
+            if (in_array($op, ['%=', '&=', '|=', '^=', '<<=', '>>='], true)
+                && ($type === Type::FLOAT || $rightType === Type::FLOAT)
+            ) {
+                if ($type === Type::FLOAT) {
+                    $this->fatalError(
+                        $node,
+                        "Cannot apply {$op} to a native float variable: PHP converts the result to int",
+                    );
+                }
+                if ($type === Type::INT) {
+                    return $var . ' = php::toInt(((php::Var(' . $var . ')) ' . $this->removeAssignOp($op)
+                        . ' (php::Var(' . $expr . '))))';
+                }
+            }
+
             // A dynamic local must retain the RHS runtime type. Variant's
             // compound operators already implement PHP coercion and checked
             // integer overflow; eagerly converting an int-looking expression

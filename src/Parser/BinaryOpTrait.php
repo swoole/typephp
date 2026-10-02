@@ -120,6 +120,19 @@ trait BinaryOpTrait
             $this->fatalError($left, "Operator '{$op}' is not supported for Big* numeric types");
         }
 
+        // C++ has no bitwise or shift operators for double. PHP converts each
+        // float operand to int (deprecating a lossy conversion) and yields an
+        // int, so let the Variant operator apply Zend's conversion. This must
+        // happen before the Int -> Float promotion below, which would round a
+        // large int operand.
+        if (in_array($op, ['&', '|', '^', '<<', '>>'], true)
+            && ($leftType === Type::FLOAT || $rightType === Type::FLOAT)
+        ) {
+            return $this->convertIntExpr(
+                '((php::Var(' . $leftExpr . ')) ' . $op . ' (php::Var(' . $rightExpr . ')))'
+            );
+        }
+
         // Only promote between native types (Int ↔ Float).  When one side is
         // php::Var, let the Variant operator handle type coercion so that
         // run-time PHP type-juggling rules are followed correctly.

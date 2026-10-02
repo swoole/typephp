@@ -3540,7 +3540,16 @@ abstract class CompilerBase implements PropertyAccessContext
                     return Type::VAR;
                 }
                 if ($leftType === Type::FLOAT || $rightType === Type::FLOAT) {
-                    return Type::FLOAT;
+                    // PHP converts float operands of %, <<, >>, &, | and ^ to int,
+                    // so these operators always produce an int.
+                    return in_array($exprType, [
+                        'Expr_BinaryOp_Mod',
+                        'Expr_BinaryOp_ShiftLeft',
+                        'Expr_BinaryOp_ShiftRight',
+                        'Expr_BinaryOp_BitwiseAnd',
+                        'Expr_BinaryOp_BitwiseOr',
+                        'Expr_BinaryOp_BitwiseXor',
+                    ], true) ? Type::INT : Type::FLOAT;
                 }
                 if ($this->varIntTypes && $leftType === Type::INT && $rightType === Type::INT) {
                     $op = match ($exprType) {

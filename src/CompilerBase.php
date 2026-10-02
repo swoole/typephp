@@ -3472,7 +3472,14 @@ abstract class CompilerBase implements PropertyAccessContext
                 return Type::BOOL;
             case 'Expr_BitwiseNot':
                 $inner = $this->detectTypeOfExpr($expr->expr);
-                return $inner === Type::BIGINT ? Type::BIGINT : Type::INT;
+                return match ($inner) {
+                    Type::BIGINT => Type::BIGINT,
+                    // ~"abc" inverts the bytes of the string.
+                    Type::STR => Type::STR,
+                    // ~bool and ~array throw a TypeError at runtime.
+                    Type::BOOL, Type::ARRAY => Type::VAR,
+                    default => Type::INT,
+                };
             case 'Expr_Print':
             case 'Expr_Cast_Int':
                 return Type::INT;

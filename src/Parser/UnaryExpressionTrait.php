@@ -85,6 +85,15 @@ trait UnaryExpressionTrait
             return 'php::BigInt::bitNot(' . $this->parseExpr($expr->expr) . ')';
         }
         $var = $this->parseIdentifier($expr->expr);
+        // A statically non-numeric operand goes through Zend's
+        // bitwise_not_function(): a string has its bytes inverted and stays a
+        // string, while bool and array raise "Cannot perform bitwise not on ...".
+        if ($type === Type::STR) {
+            return $this->convertStringExpr('(~php::Variant(' . $var . '))');
+        }
+        if ($type === Type::BOOL || $type === Type::ARRAY) {
+            return '(~php::Variant(' . $var . '))';
+        }
         return '~' . $this->convertIntExpr($var);
     }
 

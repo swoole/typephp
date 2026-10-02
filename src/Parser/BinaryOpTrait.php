@@ -463,6 +463,16 @@ trait BinaryOpTrait
         if ($expr instanceof Node\Scalar\Float_) {
             return $expr->value;
         }
+        if ($expr instanceof Node\Scalar\String_) {
+            if ($this->isIntNumericString($expr->value)) {
+                return intval($expr->value);
+            }
+            if ($this->isFloatNumericString($expr->value)) {
+                $floatValue = floatval($expr->value);
+                return is_finite($floatValue) ? $floatValue : null;
+            }
+            return null;
+        }
         if ($expr instanceof Node\Expr\UnaryPlus) {
             return $this->constantNumericValue($expr->expr, $nativeSemantics);
         }

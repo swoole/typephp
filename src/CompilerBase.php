@@ -2427,11 +2427,15 @@ abstract class CompilerBase implements PropertyAccessContext
     protected function parseNumericIdentifier(NodeAbstract $expr): string
     {
         if ($expr instanceof Node\Scalar\String_) {
-            if ($this->isFloatStr($expr->value)) {
-                return (string) floatval($expr->value);
+            $floatValue = floatval($expr->value);
+            if ($this->isFloatNumericString($expr->value) && is_finite($floatValue)) {
+                return $this->shortestFloatRepr($floatValue);
             }
             if ($this->isIntStr($expr->value)) {
                 return (string) intval($expr->value);
+            }
+            if ($this->isFloatStr($expr->value)) {
+                return (string) floatval($expr->value);
             }
             if ($expr->value === '0') {
                 return '0';
@@ -3542,7 +3546,23 @@ abstract class CompilerBase implements PropertyAccessContext
                 if ($leftType === Type::FLOAT || $rightType === Type::FLOAT) {
                     return Type::FLOAT;
                 }
-                if ($this->varIntTypes && $leftType === Type::INT && $rightType === Type::INT) {
+                if (in_array($exprType, [
+                    'Expr_BinaryOp_Plus',
+                    'Expr_BinaryOp_Minus',
+                    'Expr_BinaryOp_Mul',
+                    'Expr_BinaryOp_Div',
+                    'Expr_BinaryOp_Pow',
+                ], true)
+                    && (($leftType === Type::STR && $this->isFloatNumericStringExpr($expr->left))
+                        || ($rightType === Type::STR && $this->isFloatNumericStringExpr($expr->right)))
+                ) {
+                    return Type::FLOAT;
+                }
+                $leftIntLike = $leftType === Type::INT
+                    || ($leftType === Type::STR && $this->isIntNumericStringExpr($expr->left));
+                $rightIntLike = $rightType === Type::INT
+                    || ($rightType === Type::STR && $this->isIntNumericStringExpr($expr->right));
+                if ($this->varIntTypes && $leftIntLike && $rightIntLike) {
                     $op = match ($exprType) {
                         'Expr_BinaryOp_Plus' => '+',
                         'Expr_BinaryOp_Minus' => '-',

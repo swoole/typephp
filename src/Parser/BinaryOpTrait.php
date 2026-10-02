@@ -120,6 +120,36 @@ trait BinaryOpTrait
             $this->fatalError($left, "Operator '{$op}' is not supported for Big* numeric types");
         }
 
+        // PHP converts a bool operand of an arithmetic operator to int. Doing it
+        // here lets the int paths below apply, including the checked varint
+        // division (a raw C++ division by a false operand is a SIGFPE). % is left
+        // out: a non-int operand already takes the checked php::fn::mod path.
+        if (in_array($op, ['+', '-', '*', '/'], true)) {
+            if ($leftType === Type::BOOL) {
+                $leftExpr = $this->convertIntExpr($leftExpr, Type::BOOL);
+                $leftType = Type::INT;
+            }
+            if ($rightType === Type::BOOL) {
+                $rightExpr = $this->convertIntExpr($rightExpr, Type::BOOL);
+                $rightType = Type::INT;
+            }
+        }
+
+        // PHP compares a bool with any other scalar as two bools (false < true).
+        // The raw C++ operator would compare the bool numerically with the
+        // other operand (false <= -7 is true in PHP, false in C++).
+        if (in_array($op, ['<', '<=', '>', '>='], true) && ($leftType === Type::BOOL) !== ($rightType === Type::BOOL)) {
+            $scalars = [Type::INT, Type::FLOAT, Type::STR];
+            if (in_array($leftType, $scalars, true)) {
+                $leftExpr = $this->convertBoolExpr($leftExpr, $leftType);
+                $leftType = Type::BOOL;
+            }
+            if (in_array($rightType, $scalars, true)) {
+                $rightExpr = $this->convertBoolExpr($rightExpr, $rightType);
+                $rightType = Type::BOOL;
+            }
+        }
+
         // Only promote between native types (Int ↔ Float).  When one side is
         // php::Var, let the Variant operator handle type coercion so that
         // run-time PHP type-juggling rules are followed correctly.

@@ -3454,6 +3454,15 @@ abstract class CompilerBase implements PropertyAccessContext
                 ) {
                     return Type::FLOAT;
                 }
+                if ($exprType === 'Expr_UnaryMinus') {
+                    // -bool is an int; a non-numeric operand keeps its runtime type.
+                    if ($innerType === Type::BOOL) {
+                        return Type::INT;
+                    }
+                    if (!in_array($innerType, [Type::INT, Type::FLOAT, Type::BIGINT, Type::BIGFLOAT, Type::DECIMAL], true)) {
+                        return Type::VAR;
+                    }
+                }
                 return $innerType;
             case 'Expr_BooleanNot':
             case 'Expr_BinaryOp_LogicalAnd':
@@ -3519,6 +3528,9 @@ abstract class CompilerBase implements PropertyAccessContext
             case 'Expr_BinaryOp_BitwiseXor':
                 $leftType  = $this->detectTypeOfExpr($expr->left);
                 $rightType = $this->detectTypeOfExpr($expr->right);
+                // PHP converts a bool operand of these operators to int.
+                $leftType = $leftType === Type::BOOL ? Type::INT : $leftType;
+                $rightType = $rightType === Type::BOOL ? Type::INT : $rightType;
                 if ($leftType === Type::BIGFLOAT || $rightType === Type::BIGFLOAT) {
                     return Type::BIGFLOAT;
                 }

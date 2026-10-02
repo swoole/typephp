@@ -174,6 +174,15 @@ trait UnaryExpressionTrait
             }
         }
         $code = $this->parseExprAsValue($expr->expr);
+        if ($type === Type::BOOL) {
+            // PHP negates a bool as an int: -true is -1.
+            return '-' . $this->convertIntExpr($code, Type::BOOL);
+        }
+        if (!in_array($type, [Type::INT, Type::FLOAT], true)) {
+            // Zend lowers unary minus to multiplication by -1, which applies
+            // numeric string conversion, warnings and TypeError.
+            return '(php::Variant(' . $code . ') * -1)';
+        }
 
         // A bare numeric literal is a single C++ token; negating it directly
         // cannot change the parse, and keeps the emitted code (and the test

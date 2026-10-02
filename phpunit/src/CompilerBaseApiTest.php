@@ -399,7 +399,7 @@ PHP);
     public function testNumericStringIdentifiersGenerateSourceCodeStrings(): void
     {
         $this->assertSame(
-            (string) floatval('0.2'),
+            '2e-1',
             $this->invokeMethod('parseNumericIdentifier', new \PhpParser\Node\Scalar\String_('0.2'))
         );
         $this->assertSame(

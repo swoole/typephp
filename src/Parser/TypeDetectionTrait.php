@@ -151,6 +151,50 @@ trait TypeDetectionTrait
         return filter_var($str, FILTER_VALIDATE_FLOAT) !== false;
     }
 
+    /**
+     * Whether the value is an integer-syntax numeric string (one that PHP
+     * juggles as an int in arithmetic): optionally signed decimal digits
+     * with optional surrounding whitespace, within the int64 range.
+     * Matches "5", " 10 ", but not "1.5", "1e2", or "9223372036854775808"
+     * (out of int64 range — PHP promotes those to float).
+     */
+    protected function isIntNumericString(string $value): bool
+    {
+        if (!is_numeric($value)
+            || !preg_match('/^[\t\n\r\v\f ]*([+-]?)([0-9]+)[\t\n\r\v\f ]*$/', $value, $m)) {
+            return false;
+        }
+        $digits = ltrim($m[2], '0');
+        if ($digits === '') {
+            return true;
+        }
+        $len = strlen($digits);
+        if ($len < 19) {
+            return true;
+        }
+        if ($len > 19) {
+            return false;
+        }
+        // Exactly 19 digits: must fit in int64. PHP_INT_MAX is
+        // 9223372036854775807; negative values may reach |PHP_INT_MIN|.
+        return strcmp($digits, $m[1] === '-' ? '9223372036854775808' : '9223372036854775807') <= 0;
+    }
+
+    protected function isFloatNumericString(string $value): bool
+    {
+        return is_numeric($value) && !$this->isIntNumericString($value);
+    }
+
+    protected function isFloatNumericStringExpr(NodeAbstract $expr): bool
+    {
+        return $expr instanceof Node\Scalar\String_ && $this->isFloatNumericString($expr->value);
+    }
+
+    protected function isIntNumericStringExpr(NodeAbstract $expr): bool
+    {
+        return $expr instanceof Node\Scalar\String_ && $this->isIntNumericString($expr->value);
+    }
+
     protected function isIntStr(string $str): bool
     {
         return filter_var($str, FILTER_VALIDATE_INT) !== false;

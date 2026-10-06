@@ -108,7 +108,7 @@ trait DefaultArgumentGenerator
      */
     private function convertRuntimeConstantDefault(string $type, string $default): string
     {
-        if (!str_contains($default, 'php::constant(')) {
+        if (!str_contains($default, 'php::constant(') && !str_contains($default, 'php::Var(')) {
             return $default;
         }
 

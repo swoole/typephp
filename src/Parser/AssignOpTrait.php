@@ -1345,6 +1345,7 @@ trait AssignOpTrait
         }
         if (!$this->isAssignOpConcat($op)
             && $this->hasDynamicScalarOperand($def->type, $rightType)
+            && $rightType !== Type::VAR
             && !in_array($rightType, [Type::BIGINT, Type::DECIMAL, Type::BIGFLOAT], true)
         ) {
             if (!$this->isNativeObjectClass($this->detectClassOfExpr($node->var->var))) {

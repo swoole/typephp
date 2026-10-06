@@ -1,0 +1,9 @@
+name: terminal-demo
+version: 1.0.0
+mode: bin
+cxx-std: c++17
+
+sources:
+  - php-src
+  - ./cpp-src
+  - main.php

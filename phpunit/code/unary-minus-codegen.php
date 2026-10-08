@@ -9,3 +9,9 @@ function doubleNegate(int $a): int
 {
     return - -$a;
 }
+
+function negateBool(bool $value): mixed
+{
+    $result = -$value;
+    return $result;
+}

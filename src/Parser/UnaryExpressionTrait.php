@@ -177,6 +177,9 @@ trait UnaryExpressionTrait
             }
         }
         $code = $this->parseExprAsValue($expr->expr);
+        if (Type::getReferencedType($type) === Type::BOOL) {
+            return '-(' . $this->convertIntExpr($code) . ')';
+        }
 
         // A bare numeric literal is a single C++ token; negating it directly
         // cannot change the parse, and keeps the emitted code (and the test

@@ -25,6 +25,14 @@ final class UnaryMinusCodegenTest extends \BaseTest
         self::assertStringNotContainsString('--a', $code);
     }
 
+    public function testBooleanNegationUsesAnIntegerResult(): void
+    {
+        $code = $this->compileFixture();
+
+        self::assertStringContainsString('php::Int result = 0;', $code);
+        self::assertStringContainsString('-(php::toInt(value))', $code);
+    }
+
     private function compileFixture(): string
     {
         global $translator;

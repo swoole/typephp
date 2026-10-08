@@ -3434,6 +3434,9 @@ abstract class CompilerBase implements PropertyAccessContext
                 };
             case 'Expr_UnaryMinus':
                 $innerType = $this->detectTypeOfExpr($expr->expr);
+                if (Type::getReferencedType($innerType) === Type::BOOL) {
+                    return Type::INT;
+                }
                 if (
                     $this->varIntTypes
                     && $exprType === 'Expr_UnaryMinus'

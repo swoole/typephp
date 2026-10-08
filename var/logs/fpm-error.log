@@ -1,6 +1,0 @@
-[30-Sep-2026 20:00:27] NOTICE: configuration file /home/swoole/workspace/typephp/compiler/var/php-fpm.conf test is successful
-[30-Sep-2026 20:00:27] NOTICE: configuration file /home/swoole/workspace/typephp/compiler/var/php-fpm.conf test is successful
-[30-Sep-2026 20:02:37] NOTICE: configuration file examples/promo-ext/conf/php-fpm.conf test is successful
-[30-Sep-2026 20:02:37] NOTICE: configuration file examples/promo-ext/conf/php-fpm.conf test is successful
-[30-Sep-2026 20:09:05] NOTICE: configuration file examples/promo-ext/conf/php-fpm.conf test is successful
-[30-Sep-2026 20:23:07] NOTICE: configuration file examples/shop/conf/php-fpm.conf test is successful

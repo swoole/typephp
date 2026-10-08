@@ -90,7 +90,7 @@ trait DefaultArgumentGenerator
                         $code .= 'return ' . $plan->expr . ';' . PHP_EOL;
                     }
                 } else {
-                    $default = $this->convertRuntimeConstantDefault($type, $argInfo->default);
+                    $default = $this->convertDefaultArgumentValue($type, $argInfo->default);
                     $code .= 'return ' . $default . ';' . PHP_EOL;
                 }
 
@@ -102,16 +102,12 @@ trait DefaultArgumentGenerator
     }
 
     /**
-     * Runtime constant lookup returns Variant, but a typed default helper must
-     * return its native C++ type explicitly. Convert the complete expression so
-     * constants nested in expressions are covered as well.
+     * A default expression can return Variant even when its constants have
+     * already been folded. Convert the complete value to the helper's declared
+     * return type instead of relying on the generated expression's spelling.
      */
-    private function convertRuntimeConstantDefault(string $type, string $default): string
+    private function convertDefaultArgumentValue(string $type, string $default): string
     {
-        if (!str_contains($default, 'php::constant(')) {
-            return $default;
-        }
-
         return match ($type) {
             Type::INT => 'php::toInt(' . $default . ')',
             Type::FLOAT => 'php::toFloat(' . $default . ')',

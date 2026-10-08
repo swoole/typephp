@@ -32,7 +32,24 @@ runs:
         path: third_party/phpx
 
     - name: Setup PHP
+      if: inputs.os != 'macos'
       uses: shivammathur/setup-php@v2
+      with:
+        php-version: ${{ inputs.php-version }}
+        coverage: none
+        extensions: mbstring
+        ini-values: precision=17, memory_limit=4G, error_reporting=E_ERROR|E_WARNING, display_errors=1, display_startup_errors=1, log_errors=0
+        tools: composer:v2
+      env:
+        fail-fast: true
+        phpts: ts
+        update: true
+
+    # The 2.40 installer supplies cached macOS ZTS builds and propagates
+    # installation errors. Keep this pin until those fixes reach v2.
+    - name: Setup macOS PHP
+      if: inputs.os == 'macos'
+      uses: shivammathur/setup-php@bc12f5cef4c73a871331e196ff380d38232ba293 # 2.40.0-beta
       with:
         php-version: ${{ inputs.php-version }}
         coverage: none

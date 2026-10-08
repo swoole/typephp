@@ -2073,7 +2073,7 @@ YAML);
         $this->assertStringNotContainsString('ZVAL_STRINGL(_literal_strings[', $extension);
         $this->assertStringNotContainsString('ZVAL_NULL(_literal_strings[', $extension);
         $this->assertStringContainsString('php::Str &get_str(uint32_t index) noexcept {', $extension);
-        $this->assertStringContainsString('return get_str(', $extension);
+        $this->assertStringContainsString('return php::toString(get_str(', $extension);
         $this->assertStringContainsString('php::Array php_exported_variadic_arg_0_default_value() {', $extension);
     }
 

@@ -1,7 +1,8 @@
 --TEST--
-Native scalar object property compound assignment checks var RHS before native write
+Typed scalar property compound assignment computes the Zend result before checking the write
 --FILE--
 <?php
+declare(strict_types=1);
 class NativeScalarAssignOpVarBox
 {
     public int $intValue = 1;
@@ -33,12 +34,29 @@ function main(): void
     var_dump($box->intValue);
     var_dump($box->floatValue);
 
+    $numericIntDelta = std::any("4");
+    $box->intValue += $numericIntDelta;
+    var_dump($box->intValue);
+
+    $numericFloatDelta = std::any("1.25");
+    $box->floatValue += $numericFloatDelta;
+    var_dump($box->floatValue);
+
     try {
-        $badIntDelta = std::any("4");
+        $badIntDelta = std::any("4.5");
         $box->intValue += $badIntDelta;
     } catch (TypeError $e) {
         var_dump($e->getMessage());
     }
+    var_dump($box->intValue);
+
+    try {
+        $nonNumericDelta = std::any("oops");
+        $box->intValue += $nonNumericDelta;
+    } catch (TypeError $e) {
+        var_dump($e->getMessage());
+    }
+    var_dump($box->intValue);
 }
 ?>
 --EXPECT--
@@ -46,4 +64,9 @@ int(3)
 float(3.75)
 int(6)
 float(4)
-string(82) "Cannot assign string to property NativeScalarAssignOpVarBox::$intValue of type int"
+int(10)
+float(5.25)
+string(81) "Cannot assign float to property NativeScalarAssignOpVarBox::$intValue of type int"
+int(10)
+string(39) "Unsupported operand types: int + string"
+int(10)

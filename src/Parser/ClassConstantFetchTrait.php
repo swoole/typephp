@@ -93,6 +93,7 @@ trait ClassConstantFetchTrait
 
     protected function parseClassConstFetch(Expr\ClassConstFetch $expr): string
     {
+        $expr->setAttribute(self::ATTR_LOWERED_TYPE, Type::VAR);
         if (!$this->isNameExpr($expr->class)) {
             $this->assertNotNativeObjectDynamicClassTarget($expr->class, $expr);
         }
@@ -139,6 +140,7 @@ trait ClassConstantFetchTrait
                 $this->fatalError($expr, "The 'static' keyword can only be used as the class name in class methods");
             }
             if ($const === 'class') {
+                $expr->setAttribute(self::ATTR_LOWERED_TYPE, Type::STR);
                 return $this->getCalledClassExpr();
             } else {
                 return Symbol::constant() . '(' . $this->getCalledCeExpr() . ', ' . $this->getLiteralString($const) . ')';
@@ -150,6 +152,7 @@ trait ClassConstantFetchTrait
         }
         if ($const === 'class') {
             if ($self or $this->isNameExpr($expr->class)) {
+                $expr->setAttribute(self::ATTR_LOWERED_TYPE, Type::STR);
                 return $this->getLiteralString($class);
             }
         }
@@ -157,16 +160,25 @@ trait ClassConstantFetchTrait
             if ($this->hasClass($class)) {
                 $classDef = $this->getClass($class);
                 if ($classDef->enum) {
+                    $expr->setAttribute(self::ATTR_LOWERED_TYPE, Type::OBJECT);
                     $ce = $this->getClassEntryPtr($class);
                     return 'php::getEnumCase(' . $ce . ', ' . $this->getLiteralString($const) . ')';
                 }
                 $nativeConst = $this->findNativeClassConst($expr, $class, $const);
                 if ($nativeConst) {
+                    $constant = $expr->getAttribute('nativeConst');
+                    $expr->setAttribute(self::ATTR_LOWERED_TYPE, $constant?->valueExpr !== null
+                        ? $this->getLoweredExpressionType($constant->valueExpr)
+                        : null);
                     return $nativeConst;
                 }
             }
             $internalConst = $this->getInternalScalarClassConstant($class, $const);
             if ($internalConst !== null) {
+                $value = $internalConst[0];
+                $expr->setAttribute(self::ATTR_LOWERED_TYPE, is_string($value)
+                    ? 'const char *'
+                    : $this->getTypeFromZendType(gettype($value)));
                 return $this->genInternalScalarConstantValue($internalConst[0]);
             }
             $ce = $this->getClassEntryPtr($class);

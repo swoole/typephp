@@ -19,10 +19,12 @@ trait ConstantExpressionTrait
 {
     protected function parseConstFetch(Expr\ConstFetch $expr, bool $scalar = false): string
     {
+        $expr->setAttribute(self::ATTR_LOWERED_TYPE, null);
         $pythonAttribute = $this->parsePythonModuleAttributeFetch($expr, $scalar);
         if ($pythonAttribute !== null) {
             return $pythonAttribute;
         }
+        $expr->setAttribute(self::ATTR_LOWERED_TYPE, Type::VAR);
 
         if ($expr->name->getType() != 'Name' and !($expr->name instanceof Node\Name\FullyQualified)) {
             $this->unsupportedSyntax($expr);
@@ -33,9 +35,11 @@ trait ConstantExpressionTrait
             return self::VALUE_NULL;
         }
         if (strcasecmp($name, 'true') === 0) {
+            $expr->setAttribute(self::ATTR_LOWERED_TYPE, Type::BOOL);
             return 'true';
         }
         if (strcasecmp($name, 'false') === 0) {
+            $expr->setAttribute(self::ATTR_LOWERED_TYPE, Type::BOOL);
             return 'false';
         }
         if ($this->isNameExpr($expr->name)) {
@@ -58,12 +62,18 @@ trait ConstantExpressionTrait
             }
 
             if ($this->hasConstant($name)) {
+                $expr->setAttribute(self::ATTR_LOWERED_TYPE, $this->getConstantType($name));
                 return $this->getConstant($name);
             }
             if ($name === 'PHP_EOL') {
+                $expr->setAttribute(self::ATTR_LOWERED_TYPE, 'const char *');
                 return '"' . $this->escapeString(PHP_EOL) . '"';
             }
             if ($this->isInternalScalarConstant($name)) {
+                $value = $this->internalConstants[$name];
+                $expr->setAttribute(self::ATTR_LOWERED_TYPE, is_string($value)
+                    ? 'const char *'
+                    : $this->getTypeFromZendType(gettype($value)));
                 return $this->getInternalScalarConstantValue($name);
             }
             if ($this->isInternalConstant($name)) {

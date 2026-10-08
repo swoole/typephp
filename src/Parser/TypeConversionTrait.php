@@ -144,9 +144,6 @@ trait TypeConversionTrait
 
     protected function convertStringExpr(string $expr): string
     {
-        if (preg_match('/^get_str\(\d+\)$/', $expr) === 1) {
-            return $expr;
-        }
         if (!$this->isClosedExpr($expr, 'php::toString')) {
             return 'php::toString(' . $expr . ')';
         }

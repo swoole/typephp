@@ -2080,6 +2080,44 @@ YAML);
             $extension,
         );
         $this->assertStringContainsString('php::Array php_exported_variadic_arg_0_default_value() {', $extension);
+
+        $defaults = $this->invokeMethod('getFunction', 'exported_storage_defaults')->argInfoList;
+        $this->assertSame(Type::STR, $defaults[0]->defaultType);
+        $this->assertSame(Type::VAR, $defaults[1]->defaultType);
+        $this->assertSame(Type::STR, $defaults[2]->defaultType);
+        $this->assertSame(Type::STR, $defaults[3]->defaultType);
+        $this->assertSame(Type::VAR, $defaults[4]->defaultType);
+        $this->assertSame(Type::STR, $defaults[5]->defaultType);
+        $this->assertSame(Type::VAR, $defaults[6]->defaultType);
+        $this->assertStringContainsString('return php::toString(_const_var_EXPORTED_ABI_STRING);', $extension);
+        $this->assertMatchesRegularExpression(
+            '/php::Str php_exported_storage_defaults_arg_2_default_value\(\) \{\s*return php::concat\(/',
+            $extension,
+        );
+        $this->assertMatchesRegularExpression(
+            '/php::Int php_exported_storage_defaults_arg_4_default_value\(\) \{\s*return php::toInt\(/',
+            $extension,
+        );
+    }
+
+    public function testInlineStringDefaultUsesAstStorageType(): void
+    {
+        global $translator;
+        $translator = $this->compiler;
+        $this->setPropertyValue('buildMode', CompilerBase::BUILD_MODE_LIB);
+        $this->compiler->setTargetName('inline_defaults');
+
+        $testFile = TYPEPHP_ROOT_PATH . '/phpunit/code/compiler_api/default_argument_abi.stub.php';
+        $this->compiler->addFiles([$testFile]);
+        $this->compiler->prepareFile($testFile);
+        $defaults = $this->invokeMethod('getFunction', 'exported_storage_defaults')->argInfoList;
+        $defaults[0]->defaultExpr->setAttribute('noLiteralString', true);
+        $this->compiler->convertFile($testFile);
+        $extension = file_get_contents($this->compiler->genExtension());
+
+        $this->assertSame(Type::STR, $defaults[0]->defaultType);
+        $this->assertStringContainsString('return php::Str{ZEND_STRL("hello")};', $extension);
+        $this->assertStringNotContainsString('php::toString(php::Str{', $extension);
     }
 
     public function testExternalImportStubFunctionsAreAlwaysImported(): void

@@ -1486,6 +1486,7 @@ abstract class Preprocessor extends CompilerBase
             } elseif ($param->variadic) {
                 // A variadic parameter can be treated as an empty-array default value
                 $argInfo->default = '{}';
+                $argInfo->defaultType = Type::ARRAY;
                 $argInfo->defaultValue = new Node\Expr\Array_();
             }
             $functionDef->argInfoList[] = $argInfo;
@@ -1506,6 +1507,7 @@ abstract class Preprocessor extends CompilerBase
             : null;
         $argInfo->arrayInitPlan = $arrayInitPlan;
         if ($param->byRef) {
+            $argInfo->defaultType = Type::REF;
             if ($this->isEmptyArray($param->default)) {
                 $argInfo->default = 'php::getEmptyArrayRef()';
                 return;
@@ -1519,6 +1521,7 @@ abstract class Preprocessor extends CompilerBase
             return;
         }
         $argInfo->default = $arrayInitPlan?->expr ?? $this->parseParamDefaultValue($param->default);
+        $argInfo->defaultType = $this->getLoweredExpressionType($param->default);
     }
 
     protected function getFunctionDisplayName(FunctionDef $functionDef): string

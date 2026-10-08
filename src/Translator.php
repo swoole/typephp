@@ -3551,12 +3551,14 @@ CODE;
                     $declarationHeaders[] = $header;
                 }
             }
-            // Generated arginfo registration helpers call compile-time
-            // attribute factories directly to materialize lazy values such as
-            // enum cases. Include only the declaration owners of those helper
-            // functions instead of every PHP declaration header.
+            // Attribute factories and default-value helpers reference symbols
+            // declared in their source headers (including constant storage).
             foreach ($this->symbols->functions() as $functionDef) {
-                if (!$functionDef->attributeFactory) {
+                $requiresDeclaration = $functionDef->attributeFactory;
+                foreach ($functionDef->argInfoList as $argument) {
+                    $requiresDeclaration = $requiresDeclaration || $argument->hasDefaultValue();
+                }
+                if (!$requiresDeclaration) {
                     continue;
                 }
                 $header = $this->declarationHeaderFiles[$functionDef->sourceFile] ?? null;

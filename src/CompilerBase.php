@@ -193,6 +193,7 @@ abstract class CompilerBase implements PropertyAccessContext
     protected const string ATTR_MULTI_RETURN_IMPL = 'aotMultiReturnImpl';
     protected const string ATTR_SCOPED_CALLBACK = 'aotScopedCallback';
     protected const string ATTR_FORCE_FLOAT_LITERAL = 'aotForceFloatLiteral';
+    protected const string ATTR_LOWERED_TYPE = 'aotLoweredType';
 
     /**
      * Keyword methods (to* builtins) with mandated return types.
@@ -1121,7 +1122,7 @@ abstract class CompilerBase implements PropertyAccessContext
             return $varName === 'GLOBALS' ? 'php::globalsArray()' : $varName;
         }
 
-        return match (true) {
+        $code = match (true) {
             $expr instanceof Expr\Isset_ => $this->parseIsset($expr),
             $expr instanceof Expr\Empty_ => $this->parseEmpty($expr),
             $expr instanceof Expr\Assign => $this->parseAssign($expr),
@@ -1218,6 +1219,20 @@ abstract class CompilerBase implements PropertyAccessContext
             $expr instanceof Expr\YieldFrom => $this->parseYieldFromExpr($expr),
             default => $this->unsupportedSyntax($expr),
         };
+
+        if ($expr instanceof Expr\Array_) {
+            $expr->setAttribute(self::ATTR_LOWERED_TYPE, Type::ARRAY);
+        } elseif ($expr instanceof Expr\BinaryOp\Concat) {
+            $expr->setAttribute(self::ATTR_LOWERED_TYPE, Type::STR);
+        } elseif ($expr instanceof Expr\BinaryOp && !$expr instanceof Expr\BinaryOp\Coalesce) {
+            $type = $this->detectTypeOfExpr($expr);
+            // Dynamic arithmetic returns Variant; comparisons return bool.
+            // Native arithmetic can widen during folding, so leave its C++
+            // result unknown until its emitter records an exact type.
+            $expr->setAttribute(self::ATTR_LOWERED_TYPE,
+                $type === Type::VAR || $type === Type::BOOL ? $type : null);
+        }
+        return $code;
     }
 
     public function stop(string $string): never
@@ -1888,6 +1903,7 @@ abstract class CompilerBase implements PropertyAccessContext
 
     protected function parseScalar(Node\Scalar $expr): string
     {
+        $expr->setAttribute(self::ATTR_LOWERED_TYPE, $this->detectTypeOfExpr($expr));
         if ($expr instanceof Node\Scalar\Int_) {
             if ($this->bigintTypes) {
                 return 'php::toBigInt(' . $expr->value . ')';
@@ -2074,6 +2090,16 @@ abstract class CompilerBase implements PropertyAccessContext
             }
             return $this->parseIdentifier($default);
         });
+    }
+
+    /**
+     * Return a proven C++ result type from the lowered AST. PHP value types
+     * alone are insufficient: a string constant may still use Variant storage.
+     * Unrecorded results stay unknown and require conversion at a typed boundary.
+     */
+    protected function getLoweredExpressionType(NodeAbstract $expr): ?string
+    {
+        return $expr->getAttribute(self::ATTR_LOWERED_TYPE);
     }
 
     protected function getComment(Node\Stmt $v, string $class): string

@@ -59,6 +59,11 @@ trait SelectionExpressionTrait
         }
 
         $hasBranchStmts = $condBeforeStmts || $condAfterStmts || $ifBeforeStmts || $ifAfterStmts || $elseBeforeStmts || $elseAfterStmts;
+        $ifStorageType = $this->getLoweredExpressionType($expr->if);
+        $elseStorageType = $this->getLoweredExpressionType($expr->else);
+        $expr->setAttribute(self::ATTR_LOWERED_TYPE, $nativeSelection
+            ? $this->getNativeObjectPointerType($nativeClass)
+            : ($typeChanged ? Type::VAR : ($ifStorageType === $elseStorageType ? $ifStorageType : null)));
         if (!$hasBranchStmts && $typeChanged) {
             $if = 'php::Var(' . $if . ')';
             $else = 'php::Var(' . $else . ')';
@@ -69,6 +74,7 @@ trait SelectionExpressionTrait
             $ternaryType = $nativeSelection
                 ? $this->getNativeObjectPointerType($nativeClass)
                 : $this->getNormalAssignType($typeChanged ? Type::VAR : $ifType);
+            $expr->setAttribute(self::ATTR_LOWERED_TYPE, $ternaryType);
             $code = '[&]() -> ' . $ternaryType . ' {' . PHP_EOL;
             $this->indentLevel++;
             $code .= $this->formatCapturedStmtLines($condBeforeStmts);

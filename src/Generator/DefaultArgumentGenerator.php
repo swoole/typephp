@@ -108,10 +108,11 @@ trait DefaultArgumentGenerator
             return $value;
         }
         // The conversion is selected exclusively from AST lowering metadata.
+        $fromType = $argInfo->defaultType ?? '';
         return match ($type) {
-            Type::INT => 'php::toInt(' . $value . ')',
-            Type::FLOAT => 'php::toFloat(' . $value . ')',
-            Type::BOOL => 'php::toBool(' . $value . ')',
+            Type::INT => $this->convertIntExpr($value, $fromType),
+            Type::FLOAT => $this->convertFloatExpr($value, $fromType),
+            Type::BOOL => $this->convertBoolExpr($value, $fromType),
             Type::STR => 'php::toString(' . $value . ')',
             Type::ARRAY => 'php::toArray(' . $value . ')',
             Type::OBJECT => 'php::toObject(' . $value . ')',

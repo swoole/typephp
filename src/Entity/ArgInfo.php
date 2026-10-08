@@ -18,7 +18,7 @@ class ArgInfo
     public string $phpName = '';
     public string $type;
     public string $default = '';
-    /** C++ result type recorded while lowering the default AST; null if unknown. */
+    /** C++ result or boxed Big-number payload type from the default AST; null if unknown. */
     public ?string $defaultType = null;
     public ?ArrayInitPlan $arrayInitPlan = null;
     /** Explicit std-container contract; the call ABI remains php::Var. */

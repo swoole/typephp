@@ -1227,10 +1227,16 @@ abstract class CompilerBase implements PropertyAccessContext
         } elseif ($expr instanceof Expr\BinaryOp && !$expr instanceof Expr\BinaryOp\Coalesce) {
             $type = $this->detectTypeOfExpr($expr);
             // Dynamic arithmetic returns Variant; comparisons return bool.
+            // Big arithmetic keeps its payload type even though it is boxed.
             // Native arithmetic can widen during folding, so leave its C++
             // result unknown until its emitter records an exact type.
             $expr->setAttribute(self::ATTR_LOWERED_TYPE,
-                $type === Type::VAR || $type === Type::BOOL ? $type : null);
+                $type === Type::VAR || $type === Type::BOOL || $this->bigNumberTypeOf($type) !== null
+                    ? $type : null);
+        } elseif ($expr instanceof Expr\UnaryMinus || $expr instanceof Expr\UnaryPlus
+            || $expr instanceof Expr\BitwiseNot) {
+            $expr->setAttribute(self::ATTR_LOWERED_TYPE,
+                $this->bigNumberTypeOf($this->detectTypeOfExpr($expr)));
         }
         return $code;
     }
@@ -2096,8 +2102,8 @@ abstract class CompilerBase implements PropertyAccessContext
     }
 
     /**
-     * Return a proven C++ result type from the lowered AST. PHP value types
-     * alone are insufficient: a string constant may still use Variant storage.
+     * Return a proven C++ result type or Big-number payload type from the lowered AST.
+     * PHP value types alone are insufficient: a string constant may still use Variant storage.
      * Unrecorded results stay unknown and require conversion at a typed boundary.
      */
     protected function getLoweredExpressionType(NodeAbstract $expr): ?string

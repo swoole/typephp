@@ -359,7 +359,7 @@ trait SelectionExpressionTrait
             $this->context->beforeStmtLines[] = $comment .
                 $tmpVar . ' = ' . $condExpr . ' ? ' . $leftExpr . ' : ' . $rightExpr . ';';
         }
-        $expr->setAttribute('replace', $tmpVar);
+        $this->context->materializedExpressions->offsetSet($expr, $tmpVar);
 
         return $tmpVar;
     }

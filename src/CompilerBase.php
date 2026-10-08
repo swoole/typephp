@@ -1100,8 +1100,8 @@ abstract class CompilerBase implements PropertyAccessContext
 
     public function parseExpr(Node $expr): string
     {
-        if ($expr->hasAttribute('replace')) {
-            return $expr->getAttribute('replace');
+        if ($this->context->materializedExpressions->offsetExists($expr)) {
+            return $this->context->materializedExpressions->offsetGet($expr);
         }
         $type = $expr->getType();
         $this->writeLog('Line ' . $this->getLine($expr) . ': ' . $type);

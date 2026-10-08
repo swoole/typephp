@@ -8,6 +8,8 @@
 
 namespace TypePhp\Context;
 
+use PhpParser\Node;
+use SplObjectStorage;
 use TypePhp\Analysis\SsaBuilder;
 
 class FunctionContext
@@ -148,6 +150,14 @@ class FunctionContext
 
     public array $beforeStmtLines = [];
     public array $afterStmtLines = [];
+    /**
+     * Materialized expression results belong to the context that emitted their
+     * assignments. Repeated parses in this context reuse the same temporary;
+     * another context lowering the same AST must emit its own assignment.
+     *
+     * @var SplObjectStorage<Node, string>
+     */
+    public SplObjectStorage $materializedExpressions;
     public array $objectProps;
     /** Map of lazily resolved, function-local static-property zval slots. */
     public array $staticPropRefs = [];
@@ -159,6 +169,7 @@ class FunctionContext
 
     public function __construct()
     {
+        $this->materializedExpressions = new SplObjectStorage();
         $this->localVars = [];
         $this->varTypeDegradations = [];
         $this->explicitNativeTypeVars = [];
@@ -239,6 +250,7 @@ class FunctionContext
         $this->nativeStackPromotions = [];
         $this->beforeStmtLines = [];
         $this->afterStmtLines = [];
+        $this->materializedExpressions = new SplObjectStorage();
         $this->objectProps = [];
         $this->hoistedProps = [];
         $this->staticPropRefs = [];

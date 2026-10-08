@@ -1,5 +1,5 @@
 --TEST--
-Native bool, int and float operands use C++ scalar arithmetic and comparisons
+Native bool, int and float use C++ arithmetic and PHP comparison semantics
 --FILE--
 <?php
 function sumBools(bool $left, bool $right): int {
@@ -27,10 +27,10 @@ int(3)
 int(0)
 float(2.5)
 float(2.5)
-bool(false)
 bool(true)
 bool(false)
-bool(true)
+bool(false)
+bool(false)
 int(1)
 int(0)
 int(4)

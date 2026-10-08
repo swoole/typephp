@@ -120,6 +120,21 @@ trait BinaryOpTrait
             $this->fatalError($left, "Operator '{$op}' is not supported for Big* numeric types");
         }
 
+        if (in_array($op, ['==', '!=', '<', '<=', '>', '>='], true)) {
+            if (!$this->hasOnlyNativeScalarOperands($leftType, $rightType)) {
+                return $this->emitDynamicBinaryOp($leftExpr, $rightExpr, $op);
+            }
+            // PHP compares a bool with another scalar as two booleans. This
+            // differs from arithmetic, where C++ promotes bool to an integer.
+            if (Type::getReferencedType($leftType) === Type::BOOL
+                || Type::getReferencedType($rightType) === Type::BOOL
+            ) {
+                $leftExpr = $this->convertBoolExpr($leftExpr, $leftType);
+                $rightExpr = $this->convertBoolExpr($rightExpr, $rightType);
+                return '((' . $leftExpr . ') ' . $op . ' (' . $rightExpr . '))';
+            }
+        }
+
         $this->guardLiteralDivisionByZero($left, $right, $op);
 
         if ($this->hasDynamicScalarOperand($leftType, $rightType)) {

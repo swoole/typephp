@@ -19,6 +19,6 @@ final class StringArithmeticDispatchTest extends \BaseTest
         self::assertMatchesRegularExpression('/php::Var\(get_str\(\d+\)\)\) \/ \(php::Var\(3L+\)\)/', $code);
         self::assertStringContainsString('php::Int php_nativeboolsum(php::Bool left, php::Bool right)', $code);
         self::assertStringContainsString('((left) + (right))', $code);
-        self::assertStringContainsString('((left) == (right))', $code);
+        self::assertStringContainsString('((php::toBool(left)) == (php::toBool(right)))', $code);
     }
 }

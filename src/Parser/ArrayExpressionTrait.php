@@ -11,6 +11,7 @@ use TypePhp\Type;
 
 use PhpParser\Node;
 use PhpParser\Node\Expr;
+use PhpParser\Node\Expr\CallLike;
 use PhpParser\NodeAbstract;
 
 trait ArrayExpressionTrait
@@ -306,7 +307,9 @@ trait ArrayExpressionTrait
             if ($item->key && !$item->unpack && $this->shouldMaterializeOrderedOperand($item->key)) {
                 $this->assertExprCanBeUsedAsValue($item->key, 'array key');
                 $this->assertNotNativeObjectArrayKey($item->key);
-                $orderedKey = $this->parseOrderedOperand($item->key, false, true);
+                $preserveReference = $item->key instanceof CallLike
+                    && $this->resolveRefReturningCall($item->key) !== false;
+                $orderedKey = $this->parseOrderedOperand($item->key, false, true, $preserveReference);
             }
             $this->assertExprCanBeUsedAsValue($item->value, $item->unpack ? 'array unpack value' : 'array value');
             if ($item->byRef) {
@@ -323,10 +326,12 @@ trait ArrayExpressionTrait
             if ($item->unpack) {
                 $this->context->beforeStmtLines[] = $this->getIndent() . $tmpVar . '.merge(' . $value . ');';
             } elseif ($item->key) {
-                $this->assertExprCanBeUsedAsValue($item->key, 'array key');
-                $key = $orderedKey ?? $this->parseArrayKey($item->key);
+                if ($orderedKey === null) {
+                    $this->assertExprCanBeUsedAsValue($item->key, 'array key');
+                    $orderedKey = $this->parseArrayKey($item->key);
+                }
                 $method = $item->byRef ? 'set' : 'setValue';
-                $this->context->beforeStmtLines[] = $this->getIndent() . $tmpVar . '.' . $method . '(' . $key . ', ' . $value . ');';
+                $this->context->beforeStmtLines[] = $this->getIndent() . $tmpVar . '.' . $method . '(' . $orderedKey . ', ' . $value . ');';
             } else {
                 $method = $item->byRef ? 'append' : 'appendValue';
                 $this->context->beforeStmtLines[] = $this->getIndent() . $tmpVar . '.' . $method . '(' . $value . ');';

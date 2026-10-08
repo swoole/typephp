@@ -683,6 +683,12 @@ trait BinaryOpTrait
             return false;
         }
 
+        // Runtime constant lookups can throw or autoload a class. Preserve
+        // their position even when their names contain no side effects.
+        if ($expr instanceof Expr\ConstFetch) {
+            return !$this->isHoistSafeConstFetch($expr);
+        }
+
         if ($expr instanceof Expr\FuncCall
             || $expr instanceof Expr\MethodCall
             || $expr instanceof Expr\StaticCall
@@ -699,6 +705,7 @@ trait BinaryOpTrait
             || $expr instanceof Expr\ArrayDimFetch
             || $expr instanceof Expr\PropertyFetch
             || $expr instanceof Expr\StaticPropertyFetch
+            || $expr instanceof Expr\ClassConstFetch
             || $expr instanceof Expr\Ternary
             || $expr instanceof Expr\Match_
             || $expr instanceof Expr\NullsafeMethodCall
@@ -740,7 +747,12 @@ trait BinaryOpTrait
         return $this->parseOrderedOperand($expr, true);
     }
 
-    protected function parseOrderedOperand(NodeAbstract $expr, bool $numeric, bool $forceMaterialize = false): string
+    protected function parseOrderedOperand(
+        NodeAbstract $expr,
+        bool $numeric,
+        bool $forceMaterialize = false,
+        bool $preserveReference = false,
+    ): string
     {
         $this->assertExprCanBeUsedAsValue($expr, 'operand');
         if (!$forceMaterialize && !$this->shouldMaterializeOrderedOperand($expr)) {
@@ -758,7 +770,7 @@ trait BinaryOpTrait
             $this->addLocalVar($tmpVar, $type);
             $this->addNativeObject($tmpVar, $nativeClass);
         } else {
-            $type = $this->getOrderedOperandTmpType($expr, (string) $value);
+            $type = $preserveReference ? Type::VAR : $this->getOrderedOperandTmpType($expr, (string) $value);
             $tmpVar = $this->addTmpVar($type);
         }
         if ($this->usesNativeScalarStorage($type)) {
@@ -767,7 +779,16 @@ trait BinaryOpTrait
             // element), so normalize it at the materialization boundary.
             $value = $this->convertExprFromType($type, (string) $value);
         }
-        $this->context->beforeStmtLines[] = $tmpVar . ' = ' . $value . ';';
+        if ($preserveReference) {
+            // A call result used as an array key keeps its returned reference
+            // until insertion, after the value expression has run. Ordinary
+            // assignment dereferences it. Clear a reused temporary first so
+            // copyFrom() cannot write through a reference from an earlier loop.
+            $this->context->beforeStmtLines[] = $tmpVar . '.unset();';
+            $this->context->beforeStmtLines[] = $tmpVar . '.copyFrom(php::Var(' . $value . ').const_ptr());';
+        } else {
+            $this->context->beforeStmtLines[] = $tmpVar . ' = ' . $value . ';';
+        }
         $this->appendCapturedStmtLinesToContext($afterStmts);
         if ($this->isNativeObjectClass($nativeClass)) {
             $this->context->afterStmtLines[] = $tmpVar . ' = nullptr;';

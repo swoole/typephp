@@ -2069,26 +2069,29 @@ abstract class CompilerBase implements PropertyAccessContext
             return null;
         }
         return $this->withoutLocalClassEntryHoisting(function () use ($default): string {
-            /*
-             * Function parameter default values may only be literals; they
-             * cannot be obtained through an expression. Since PHP 5.6, however,
-             * constant expressions are allowed in default parameter values,
-             * including class constants (self::FOO, ClassName::BAR,
-             * \Full\Class::BAZ). The compiler must fold these into the
-             * corresponding literal at compile time.
-             *
-             * PHP 8.1 also permits `new` in selected default-value contexts.
-             * These expressions are emitted into standalone helper functions,
-             * so a class entry must remain in the helper expression rather than
-             * being hoisted into the containing function's entry block.
-             */
-            if ($default instanceof Expr\ConstFetch) {
-                return $this->parseConstFetch($default, true);
+            // Defaults execute in standalone helpers. Keep captured operand
+            // statements and their locals inside the default expression,
+            // rather than leaking them into the containing PHP function.
+            $context = $this->context;
+            $this->context = new FunctionContext();
+            try {
+                $value = match (true) {
+                    $default instanceof Expr\ConstFetch => $this->parseConstFetch($default, true),
+                    $default instanceof Expr\ClassConstFetch => $this->parseClassConstFetch($default),
+                    default => $this->parseIdentifier($default),
+                };
+                if (!$this->context->beforeStmtLines && !$this->context->afterStmtLines) {
+                    return $value;
+                }
+                $locals = $this->genScopeVarDecl();
+                $before = $this->parseBeforeStmtLines();
+                $after = $this->parseAfterStmtLines();
+                return '([]() {' . PHP_EOL . $locals . $before
+                    . 'auto default_value = ' . $value . ';' . PHP_EOL
+                    . $after . 'return default_value;' . PHP_EOL . '})()';
+            } finally {
+                $this->context = $context;
             }
-            if ($default instanceof Expr\ClassConstFetch) {
-                return $this->parseClassConstFetch($default);
-            }
-            return $this->parseIdentifier($default);
         });
     }
 
@@ -2136,11 +2139,11 @@ abstract class CompilerBase implements PropertyAccessContext
         return '';
     }
 
-    protected function parseExprWithCapturedStmts(NodeAbstract $expr): array
+    protected function parseExprWithCapturedStmts(NodeAbstract $expr, bool $asString = false): array
     {
         $beforeStmtCount = count($this->context->beforeStmtLines);
         $afterStmtCount = count($this->context->afterStmtLines);
-        $value = $this->parseExprAsValue($expr);
+        $value = $asString ? $this->parseExprToString($expr) : $this->parseExprAsValue($expr);
         $beforeStmts = array_slice($this->context->beforeStmtLines, $beforeStmtCount);
         $afterStmts = array_slice($this->context->afterStmtLines, $afterStmtCount);
         $this->context->beforeStmtLines = array_slice($this->context->beforeStmtLines, 0, $beforeStmtCount);
@@ -2446,14 +2449,14 @@ abstract class CompilerBase implements PropertyAccessContext
         // has been printed.
         $lines = [];
         foreach ($v->exprs as $expr) {
-            $beforeCount = count($this->context->beforeStmtLines);
-            $afterCount = count($this->context->afterStmtLines);
-            $value = $this->parseExprToString($expr);
-            $before = array_slice($this->context->beforeStmtLines, $beforeCount);
-            $after = array_slice($this->context->afterStmtLines, $afterCount);
-            $this->context->beforeStmtLines = array_slice($this->context->beforeStmtLines, 0, $beforeCount);
-            $this->context->afterStmtLines = array_slice($this->context->afterStmtLines, 0, $afterCount);
-            array_push($lines, ...$before, ...['php::echo(' . $value . ');'], ...$after);
+            [$value, $before, $after] = $this->parseExprWithCapturedStmts($expr, true);
+            foreach ($before as $line) {
+                $lines[] = $line;
+            }
+            $lines[] = 'php::echo(' . $value . ');';
+            foreach ($after as $line) {
+                $lines[] = $line;
+            }
         }
 
         return implode("\n" . $this->getIndent(), $lines);

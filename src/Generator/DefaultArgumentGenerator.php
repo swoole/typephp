@@ -90,7 +90,10 @@ trait DefaultArgumentGenerator
                         $code .= 'return ' . $plan->expr . ';' . PHP_EOL;
                     }
                 } else {
-                    $default = $this->convertDefaultArgumentValue($type, $argInfo->default);
+                    // Default expressions may produce Variant after constant
+                    // folding. Use the shared conversions, which also preserve
+                    // native string literals and already converted values.
+                    $default = $this->convertExprFromType($type, $argInfo->default);
                     $code .= 'return ' . $default . ';' . PHP_EOL;
                 }
 
@@ -99,24 +102,6 @@ trait DefaultArgumentGenerator
         }
 
         return $code;
-    }
-
-    /**
-     * A default expression can return Variant even when its constants have
-     * already been folded. Convert the complete value to the helper's declared
-     * return type instead of relying on the generated expression's spelling.
-     */
-    private function convertDefaultArgumentValue(string $type, string $default): string
-    {
-        return match ($type) {
-            Type::INT => 'php::toInt(' . $default . ')',
-            Type::FLOAT => 'php::toFloat(' . $default . ')',
-            Type::BOOL => 'php::toBool(' . $default . ')',
-            Type::STR => 'php::toString(' . $default . ')',
-            Type::ARRAY => 'php::toArray(' . $default . ')',
-            Type::OBJECT => 'php::toObject(' . $default . ')',
-            default => $default,
-        };
     }
 
     private function shouldGenerateDefaultArgumentHelper(ArgInfo $argInfo): bool

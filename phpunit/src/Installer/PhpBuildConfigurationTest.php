@@ -198,6 +198,28 @@ final class PhpBuildConfigurationTest extends TestCase
         self::assertContains('--enable-mbstring', $options);
     }
 
+    public function testPhpBuilderSelectsDebugWithoutConflictingConfigureOptions(): void
+    {
+        foreach ([false, true] as $debug) {
+            $options = PhpBuildConfiguration::derivePhpBuilder(
+                ['--enable-debug', '--disable-debug', '--enable-debug=yes'],
+                '/unused/typephp',
+                ['embed'],
+                true,
+                $debug,
+            );
+
+            self::assertSame(
+                [$debug ? '--enable-debug' : '--disable-debug'],
+                array_values(array_filter(
+                    $options,
+                    static fn(string $option): bool => str_contains($option, 'debug')
+                        && !str_contains($option, 'phpdbg'),
+                )),
+            );
+        }
+    }
+
     public function testParseShellWordsRejectsIncompleteInput(): void
     {
         $this->expectException(\InvalidArgumentException::class);

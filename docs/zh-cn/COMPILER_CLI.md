@@ -101,11 +101,15 @@ php-builder:
 项目源码、YAML 和 Composer 元数据收集扩展依赖，自动生成 configure 参数，并使用
 操作系统提供的底层库构建私有静态运行时。
 
+`php-builder.zts` 和 `php-builder.debug` 接受 `on` / `off`，省略时分别默认采用
+宿主的 `PHP_ZTS` / `PHP_DEBUG`。目标与编译器的 PHP major/minor、ZTS、DEBUG
+必须一致，否则报错；release（补丁）版本不同只警告。详见 [PHP builder](LIBPHP_INSTALLER.md)。
+
 ## 目标和工具链
 
 | 选项 | 说明 |
 |---|---|
-| `--php-version <8.4|8.5>` | 限制接受的 PHP 语法版本，默认 `8.5`。 |
+| `--php-version <8.4|8.5>` | 限制接受的 PHP 语法版本，也选择 php-builder 的 PHP 分支；默认 `8.5`。 |
 | `--cxx-std <ver>` | C++ 标准，例如 `c++17`、`c++20`。 |
 | `--march <arch>` | 目标指令集，例如 `native`、`x86-64-v3`。 |
 | `--target-platform <triple>` | 交叉编译目标 triple。 |
@@ -116,7 +120,7 @@ php-builder:
 
 `--php-version` 控制解析器接受的源码语法，也用于 `project.yml` 中依据 `PHP_VERSION` / `PHP_VERSION_ID` 选择源文件。它不负责选择链接的 PHP 安装目录。
 
-TypePHP 和 PHPX 的最低运行时版本均为 PHP 8.4。`--php-version` 与实际链接的 `libphp.so` 不要求小版本完全相同，但两者都必须为 PHP 8.4 或更高版本。
+TypePHP 和 PHPX 的最低运行时版本均为 PHP 8.4。未启用 php-builder 时，`--php-version` 与实际链接的 `libphp.so` 不要求小版本完全相同，但两者都必须为 PHP 8.4 或更高版本。启用 php-builder 时，所选 PHP 分支必须与运行编译器的 PHP major/minor 一致。
 
 ## C++ 编译和链接参数
 

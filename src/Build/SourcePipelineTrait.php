@@ -238,8 +238,13 @@ trait SourcePipelineTrait
             fclose($pipes[2]);
             if (proc_close($process) === 0) {
                 $signature = json_decode((string) $stdout, true);
-                if (!is_array($signature) || !is_string($signature['php'] ?? null)) {
+                if (!is_array($signature) || !is_string($signature['php'] ?? null)
+                    || !is_bool($signature['zts'] ?? null) || !is_bool($signature['debug'] ?? null)
+                ) {
                     throw new \RuntimeException("Invalid OPcache build PHP signature from {$php}");
+                }
+                if ($this->isPhpBuilderBuild()) {
+                    $this->validatePhpBuilderRuntimeSignature($signature);
                 }
                 $this->opcodeBuildPhpVersion = $signature['php'];
                 $this->opcodeBuildSignature = (string) $stdout;
@@ -662,7 +667,7 @@ trait SourcePipelineTrait
             $this->error(
                 "The host PHP embed library is missing: {$detail}. "
                 . 'Run tpc in an interactive terminal to enable php-builder, or pass '
-                . "--php-builder='extensions: []; zts: off'",
+                . '--php-builder to inherit the compiler runtime settings',
             );
         }
 
@@ -672,7 +677,8 @@ trait SourcePipelineTrait
         }
 
         $this->phpBuilderEnabled = true;
-        $this->phpBuilderZts = false;
+        $this->phpBuilderZts = PHP_ZTS;
+        $this->phpBuilderDebug = PHP_DEBUG;
         $this->phpBuilderExtensions = [];
         $console->write('php-builder enabled; required extensions will be collected automatically.');
     }
@@ -710,6 +716,11 @@ trait SourcePipelineTrait
     /** @param list<string>|null $sourceDependencies */
     private function preparePhpBuilderEnvironment(?array $sourceDependencies = null): void
     {
+        $this->validatePhpBuilderCompatibility(
+            $this->phpVersion,
+            $this->phpBuilderZts,
+            $this->phpBuilderDebug,
+        );
         try {
             $composerDependencies = SapiExtensionRequirements::fromEmbeddedVendorFiles(
                 $this->embeddedFiles,
@@ -791,11 +802,21 @@ trait SourcePipelineTrait
                 min(8, max(1, $this->maxJob)),
                 $requiredExtensions,
                 $this->phpBuilderZts,
+                $this->phpBuilderDebug,
             );
         } catch (\Throwable $exception) {
             $this->error('Unable to prepare self-contained PHP SAPI runtime: ' . $exception->getMessage());
         }
 
+        if ($this->sapiPhpPrefix !== $runtime->prefix) {
+            // Extension discovery can select another private runtime. Its
+            // OPcache arguments and build signature must be probed again.
+            $this->opcodeBuildChecked = false;
+            $this->opcodeBuildExtensionArgs = null;
+            $this->opcodeBuildProbeError = '';
+            $this->opcodeBuildPhpVersion = '';
+            $this->opcodeBuildSignature = '';
+        }
         $this->sapiPhpSourceDirectory = $runtime->sourceDirectory;
         $this->sapiPhpBuildDirectory = $runtime->buildDirectory;
         $this->sapiPhpPrefix = $runtime->prefix;
@@ -806,58 +827,48 @@ trait SourcePipelineTrait
         putenv('PHP_HOME=' . $runtime->prefix);
         $_ENV['PHP_HOME'] = $runtime->prefix;
         $this->validatePhpRuntimeMinimum($runtime->prefix);
-        $this->restartSourceCompilerWithSapiPhp($runtime, $builder);
         $this->output(
             'Using private PHP ' . $runtime->version . ' runtime from ' . $runtime->buildDirectory,
             'green',
         );
     }
 
-    private function restartSourceCompilerWithSapiPhp(SapiPhpBuild $runtime, SapiPhpBuilder $builder): void
+    private function validatePhpBuilderCompatibility(string $version, bool $zts, bool $debug): void
     {
-        $targetMinor = implode('.', array_slice(explode('.', $runtime->version), 0, 2));
+        $targetMinor = implode('.', array_slice(explode('.', $version), 0, 2));
         $compilerMinor = PHP_MAJOR_VERSION . '.' . PHP_MINOR_VERSION;
-        if ($targetMinor === $compilerMinor || !$this->compilerRuntime->sourceEntry) {
-            // The native tpc executable has no host Zend VM. Its opcode worker
-            // is already the private PHP CLI selected above, so there is no
-            // compiler PHP process to replace.
-            return;
+        $mismatches = [];
+        if ($targetMinor !== $compilerMinor) {
+            $mismatches[] = "PHP major/minor (compiler: {$compilerMinor}, target: {$targetMinor})";
         }
-        if (getenv('TYPEPHP_SAPI_PHP_VERSION') === $targetMinor) {
-            throw new \RuntimeException("Unable to restart tpc with PHP {$targetMinor}; the restarted process still runs PHP {$compilerMinor}");
+        if ($zts !== PHP_ZTS) {
+            $mismatches[] = 'ZTS (compiler: ' . (PHP_ZTS ? 'on' : 'off')
+                . ', target: ' . ($zts ? 'on' : 'off') . ')';
         }
-
-        $script = realpath((string) ($_SERVER['SCRIPT_FILENAME'] ?? ''));
-        $php = $runtime->prefix . '/bin/php';
-        if ($script === false || !is_file($script) || !is_executable($php)) {
-            throw new \RuntimeException("Cannot restart the source compiler with target PHP {$targetMinor}");
+        if ($debug !== PHP_DEBUG) {
+            $mismatches[] = 'DEBUG (compiler: ' . (PHP_DEBUG ? 'on' : 'off')
+                . ', target: ' . ($debug ? 'on' : 'off') . ')';
         }
-        // The compiler needs these extensions even when the application does
-        // not. Keep its cross-version CLI separate from the application SAPI.
-        $compilerExtensions = ['ctype', 'filter', 'mbstring', 'tokenizer'];
-        if (array_diff($compilerExtensions, $runtime->enabledExtensions) !== []) {
-            $compilerRuntime = $builder->prepare(
-                $runtime->version,
-                ['cli'],
-                min(8, max(1, $this->maxJob)),
-                SapiExtensionRequirements::merge($runtime->enabledExtensions, $compilerExtensions),
-                $this->phpBuilderZts,
+        if ($mismatches !== []) {
+            $this->error(
+                '`php-builder` must match the compiler runtime: ' . implode('; ', $mismatches) . '. '
+                . 'Run tpc with a matching PHP build or change --php-version / php-builder.zts / php-builder.debug.',
             );
-            $php = $compilerRuntime->prefix . '/bin/php';
         }
-        global $argv;
-        $arguments = [$php, $script, ...array_slice($argv, 1)];
-        $this->output(
-            "Restarting tpc with PHP {$targetMinor} to match the SAPI runtime and OPcache format",
-            'lightBlue',
-        );
-        putenv('TYPEPHP_SAPI_PHP_VERSION=' . $targetMinor);
-        $_ENV['TYPEPHP_SAPI_PHP_VERSION'] = $targetMinor;
-        $process = proc_open($arguments, [STDIN, STDOUT, STDERR], $pipes, getcwd() ?: null);
-        if (!is_resource($process)) {
-            throw new \RuntimeException("Unable to start target PHP compiler: {$php}");
+    }
+
+    /** @param array{php: string, zts: bool, debug: bool} $signature */
+    private function validatePhpBuilderRuntimeSignature(array $signature): void
+    {
+        $this->validatePhpBuilderCompatibility($signature['php'], $signature['zts'], $signature['debug']);
+        if ($signature['php'] !== PHP_VERSION) {
+            $this->output(
+                'Warning: php-builder PHP release version ' . $signature['php']
+                . ' differs from compiler PHP ' . PHP_VERSION . '; continuing. '
+                . 'PHP_VERSION constants use the compiler runtime values.',
+                'yellow',
+            );
         }
-        exit(proc_close($process));
     }
 
     /** @param list<string> $files @return list<string> */

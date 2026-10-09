@@ -568,7 +568,8 @@ abstract class CompilerBase implements PropertyAccessContext
 
     protected bool $sapiConfigured = false;
 
-    protected bool $phpBuilderZts = false;
+    protected bool $phpBuilderZts = PHP_ZTS;
+    protected bool $phpBuilderDebug = PHP_DEBUG;
 
     /** @var list<string> */
     protected array $phpBuilderExtensions = [];

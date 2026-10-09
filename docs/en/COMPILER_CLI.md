@@ -104,11 +104,16 @@ php-src tree. It collects extension requirements from project sources, YAML,
 and Composer metadata, then configures a private static runtime using libraries
 provided by the operating system.
 
+`php-builder.zts` and `php-builder.debug` accept `on` / `off` and default to
+the host's `PHP_ZTS` / `PHP_DEBUG` when omitted. The target and compiler must
+match in PHP major/minor, ZTS, and DEBUG; mismatches fail the build. A different
+release (patch) version only warns. See [PHP builder](LIBPHP_INSTALLER.md).
+
 ## Target and Toolchain
 
 | Option | Description |
 |---|---|
-| `--php-version <8.4|8.5>` | Restrict the accepted PHP syntax version, default `8.5`. |
+| `--php-version <8.4|8.5>` | Restrict the accepted PHP syntax version and select the php-builder PHP branch; default `8.5`. |
 | `--cxx-std <ver>` | C++ standard, e.g. `c++17`, `c++20`. |
 | `--march <arch>` | Target instruction set, e.g. `native`, `x86-64-v3`. |
 | `--target-platform <triple>` | Cross-compilation target triple. |
@@ -119,7 +124,7 @@ provided by the operating system.
 
 `--php-version` controls the source syntax accepted by the parser and is also used in `project.yml` to select source files based on `PHP_VERSION` / `PHP_VERSION_ID`. It is not responsible for choosing the PHP installation directory to link against.
 
-The minimum runtime version for both TypePHP and PHPX is PHP 8.4. `--php-version` and the actually linked `libphp.so` do not need to match exactly in minor version, but both must be PHP 8.4 or higher.
+The minimum runtime version for both TypePHP and PHPX is PHP 8.4. Without php-builder, `--php-version` and the actually linked `libphp.so` do not need to match exactly in minor version, but both must be PHP 8.4 or higher. With php-builder, the selected PHP branch must match the major/minor version of the PHP running the compiler.
 
 ## C++ Compilation and Link Arguments
 

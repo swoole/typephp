@@ -164,6 +164,7 @@ final class PhpBuildConfiguration
         string $prefix,
         array $targets,
         bool $zts,
+        bool $debug = false,
     ): array
     {
         $replace = [
@@ -173,6 +174,7 @@ final class PhpBuildConfiguration
             '--enable-embed', '--disable-embed', '--enable-opcache', '--disable-opcache',
             '--enable-all', '--disable-all',
             '--enable-zts', '--disable-zts',
+            '--enable-debug', '--disable-debug',
             '--with-pear', '--without-pear',
         ];
         $drop = ['--with-apxs', '--with-apxs2', '--with-fpm-systemd', ...self::PREFIX_DERIVED];
@@ -204,6 +206,7 @@ final class PhpBuildConfiguration
             '--disable-phpdbg',
             in_array('embed', $targets, true) ? '--enable-embed=static' : '--disable-embed',
             $zts ? '--enable-zts' : '--disable-zts',
+            $debug ? '--enable-debug' : '--disable-debug',
             '--enable-opcache',
             '--without-pear',
             ...$result,

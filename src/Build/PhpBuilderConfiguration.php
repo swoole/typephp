@@ -18,6 +18,7 @@ final readonly class PhpBuilderConfiguration
     public function __construct(
         public bool $zts,
         public array $extensions,
+        public bool $debug = PHP_DEBUG,
     ) {
     }
 
@@ -50,7 +51,7 @@ final readonly class PhpBuilderConfiguration
     /** @param array<string, mixed> $config */
     private static function fromArray(array $config): self
     {
-        $unknown = array_diff(array_keys($config), ['zts', 'extensions']);
+        $unknown = array_diff(array_keys($config), ['zts', 'debug', 'extensions']);
         if ($unknown !== []) {
             throw new \InvalidArgumentException(
                 'Unknown `php-builder` option' . (count($unknown) > 1 ? 's' : '')
@@ -61,8 +62,9 @@ final readonly class PhpBuilderConfiguration
         $extensions = SapiExtensionRequirements::merge($extensions);
 
         return new self(
-            self::boolean($config['zts'] ?? false),
+            self::boolean($config['zts'] ?? PHP_ZTS, 'zts'),
             $extensions,
+            self::boolean($config['debug'] ?? PHP_DEBUG, 'debug'),
         );
     }
 
@@ -86,7 +88,7 @@ final readonly class PhpBuilderConfiguration
         return $result;
     }
 
-    private static function boolean(mixed $value): bool
+    private static function boolean(mixed $value, string $name): bool
     {
         if (is_bool($value)) {
             return $value;
@@ -98,10 +100,10 @@ final readonly class PhpBuilderConfiguration
             return match (strtolower(trim($value))) {
                 'on', 'true', 'yes', '1' => true,
                 'off', 'false', 'no', '0' => false,
-                default => throw new \InvalidArgumentException('`php-builder.zts` must be on or off'),
+                default => throw new \InvalidArgumentException("`php-builder.{$name}` must be on or off"),
             };
         }
-        throw new \InvalidArgumentException('`php-builder.zts` must be on or off');
+        throw new \InvalidArgumentException("`php-builder.{$name}` must be on or off");
     }
 
     private static function semicolonSeparatedYaml(string $value): string

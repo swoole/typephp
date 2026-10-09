@@ -9,6 +9,8 @@
 namespace TypePhp\Tests;
 
 use PHPUnit\Framework\TestCase;
+use PHPUnit\Framework\Attributes\DataProvider;
+use TypePhp\Build\CompilerRuntime;
 use TypePhp\Build\PhpBuilderConfiguration;
 use TypePhp\CompilerBase;
 use TypePhp\CompilerTest;
@@ -989,6 +991,100 @@ YAML, 'myproject.yml', 'examples/tetris-sdl');
         $this->assertTrue($this->compiler->isPhpBuilderBuild());
         $this->assertFalse($this->compiler->isSapiBuild());
         $this->assertTrue($this->compiler->isBuildModeBin());
+        $this->assertSame(PHP_ZTS, $this->getPropertyValue('phpBuilderZts'));
+        $this->assertSame(PHP_DEBUG, $this->getPropertyValue('phpBuilderDebug'));
+    }
+
+    public function testPhpBuilderStoresExplicitRuntimeFlags(): void
+    {
+        $this->invokeMethod('configurePhpBuilder', PhpBuilderConfiguration::fromYaml([
+            'zts' => !PHP_ZTS,
+            'debug' => !PHP_DEBUG,
+        ]));
+
+        $this->assertSame(!PHP_ZTS, $this->getPropertyValue('phpBuilderZts'));
+        $this->assertSame(!PHP_DEBUG, $this->getPropertyValue('phpBuilderDebug'));
+    }
+
+    #[DataProvider('incompatiblePhpBuilderRuntimes')]
+    public function testPhpBuilderRejectsIncompatibleConfigurationBeforeBuilding(
+        bool $sourceEntry,
+        string $version,
+        bool $zts,
+        bool $debug,
+        string $diagnostic,
+    ): void {
+        $this->setPropertyValue('compilerRuntime', $sourceEntry
+            ? CompilerRuntime::source($this->testDir, PHP_BINARY)
+            : CompilerRuntime::nativeAt($this->testDir, PHP_BINARY));
+        $this->compiler->setPhpVersion($version);
+        $this->invokeMethod('configurePhpBuilder', PhpBuilderConfiguration::fromYaml([
+            'zts' => $zts,
+            'debug' => $debug,
+        ]));
+
+        $this->expectException(TestError::class);
+        $this->expectExceptionMessage('`php-builder` must match the compiler runtime: ' . $diagnostic);
+        $this->invokeMethod('preparePhpBuilderEnvironment');
+    }
+
+    public static function incompatiblePhpBuilderRuntimes(): array
+    {
+        $minor = PHP_MAJOR_VERSION . '.' . PHP_MINOR_VERSION;
+        $otherMinor = PHP_MINOR_VERSION === 4 ? '8.5' : '8.4';
+        $cases = [];
+        foreach ([false, true] as $sourceEntry) {
+            $cases[] = [$sourceEntry, $otherMinor, PHP_ZTS, PHP_DEBUG,
+                "PHP major/minor (compiler: {$minor}, target: {$otherMinor})"];
+            $cases[] = [$sourceEntry, $minor, !PHP_ZTS, PHP_DEBUG,
+                'ZTS (compiler: ' . (PHP_ZTS ? 'on' : 'off') . ', target: ' . (PHP_ZTS ? 'off' : 'on') . ')'];
+            $cases[] = [$sourceEntry, $minor, PHP_ZTS, !PHP_DEBUG,
+                'DEBUG (compiler: ' . (PHP_DEBUG ? 'on' : 'off') . ', target: ' . (PHP_DEBUG ? 'off' : 'on') . ')'];
+        }
+        return $cases;
+    }
+
+    public function testPhpBuilderMatchingRuntimeDoesNotWarn(): void
+    {
+        $climate = $this->getPropertyValue('climate');
+        $climate->output->defaultTo('buffer');
+
+        $this->invokeMethod('validatePhpBuilderRuntimeSignature', [
+            'php' => PHP_VERSION,
+            'zts' => PHP_ZTS,
+            'debug' => PHP_DEBUG,
+        ]);
+
+        $this->assertSame('', $climate->output->get('buffer')->get());
+    }
+
+    public function testPhpBuilderReleaseMismatchOnlyWarnsAndKeepsCompilerConstants(): void
+    {
+        $climate = $this->getPropertyValue('climate');
+        $climate->output->defaultTo('buffer');
+        $targetVersion = PHP_MAJOR_VERSION . '.' . PHP_MINOR_VERSION . '.' . (PHP_RELEASE_VERSION + 1);
+
+        $this->invokeMethod('validatePhpBuilderRuntimeSignature', [
+            'php' => $targetVersion,
+            'zts' => PHP_ZTS,
+            'debug' => PHP_DEBUG,
+        ]);
+
+        $output = $climate->output->get('buffer')->get();
+        $this->assertStringContainsString('Warning: php-builder PHP release version ' . $targetVersion, $output);
+        $this->assertStringContainsString('differs from compiler PHP ' . PHP_VERSION . '; continuing.', $output);
+        $this->assertSame(PHP_VERSION, $this->getPropertyValue('internalConstants')['PHP_VERSION']);
+    }
+
+    public function testPhpBuilderRechecksTheActualRuntimeSignature(): void
+    {
+        $this->expectException(TestError::class);
+        $this->expectExceptionMessage('ZTS (compiler:');
+        $this->invokeMethod('validatePhpBuilderRuntimeSignature', [
+            'php' => PHP_VERSION,
+            'zts' => !PHP_ZTS,
+            'debug' => PHP_DEBUG,
+        ]);
     }
 
     public function testCliSapiRequiresPhpBuilder(): void

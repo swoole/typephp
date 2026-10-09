@@ -25,8 +25,6 @@ libxml；可选依赖不会自动开启。mbstring、sockets、zlib 等扩展不
 需要时请加入 `extensions` 或通过上述项目依赖声明。
 PHP 不可禁用的核心扩展，以及运行时所需的 OPcache，仍会保留。
 构建不继承宿主 PHP 或源码目录中 `config.nice` 的配置。
-若源码版编译器需要切换 PHP 版本，会单独构建带 ctype、filter、mbstring、tokenizer
-的编译器 CLI；这些编译器依赖不会因此加入应用产物。
 
 等价的命令行为：
 
@@ -36,8 +34,28 @@ bin/tpc.php project.yml \
   --php-builder='extensions: [swoole, mongodb]; zts: on'
 ```
 
-`zts` 接受 `on` 或 `off`。`php-builder.sapi` 是非法配置；SAPI 始终通过独立的
-顶层 `sapi` 选项指定。
+`zts` 和 `debug` 接受 `on` 或 `off`，未配置时分别采用运行 TypePHP 编译器的
+`PHP_ZTS` 和 `PHP_DEBUG`。例如 `php-builder: {}` 会沿用宿主的 ZTS/NTS 和
+debug/release 构建设置。`php-builder.debug` 控制 PHP 的 `--enable-debug` /
+`--disable-debug`，与顶层控制 C++ 调试信息的 `debug` 选项不同。
+`php-builder.sapi` 是非法配置；SAPI 始终通过独立的顶层 `sapi` 选项指定。
+
+## PHP 运行时兼容性
+
+php-builder 的目标 PHP 必须与运行编译器的 PHP 保持以下设置一致，否则构建报错：
+
+- major/minor 版本，例如 `8.4` 与 `8.5` 不能混用。
+- ZTS/NTS 设置。
+- DEBUG 设置。
+
+这些规则同时适用于源码版 `bin/tpc.php` 和原生 `tpc` 可执行文件。
+TypePHP 会在下载或编译 PHP 前检查配置，并在使用目标 PHP CLI 时核对实际运行时。
+编译器不会自动切换到另一个 PHP。宿主为 PHP 8.4 时，请设置 `--php-version=8.4`
+或 YAML 的 `php-version: '8.4'`；该选项的默认值仍为 `8.5`。
+
+release（补丁）版本不同只输出警告，例如宿主 `8.5.7` 与目标 `8.5.10` 可以继续构建。
+`PHP_VERSION`、`PHP_VERSION_ID` 等常量在编译期仍采用编译器运行时的值；需要查询
+目标的实际版本时，可在程序中调用 `phpversion()` 或 `constant('PHP_VERSION')`。
 
 ## 默认 Embed 行为
 
@@ -47,7 +65,7 @@ Embed 库（`libphp.so` 或 `libphp.dylib`）。Linux 或 macOS 上缺少该库�
 
 ```bash
 bin/tpc.php project.yml \
-  --php-builder='extensions: []; zts: off'
+  --php-builder
 ```
 
 若拒绝提示，则没有可用的 Embed 运行时，构建会停止。
@@ -56,11 +74,12 @@ bin/tpc.php project.yml \
 
 下载的源码和私有运行时缓存在 `~/.typephp`，兼容的运行时会在不同应用构建之间复用。
 缓存匹配包含扩展需求及其 configure 参数，不再复用扩展配置不同的运行时。
+ZTS 和 DEBUG 设置也参与缓存匹配，配置不同的运行时不会共用缓存。
 旧版本未使用 `--disable-all` 的缓存会自动失效，首次构建需要重新编译 PHP。
 `--proxy` 是全局网络设置，不属于 `php-builder`；PHP、PECL 元数据与归档，以及
 TypePHP 的其他网络传输，都会使用指定的 HTTP(S) 或 SOCKS 代理。
 
 ```bash
 bin/tpc.php project.yml --proxy=socks5h://127.0.0.1:1080 \
-  --php-builder='extensions: []; zts: off'
+  --php-builder
 ```

@@ -41,6 +41,7 @@ final class SapiPhpBuilder
         int $jobs,
         array $requiredExtensions = [],
         bool $zts = false,
+        bool $debug = false,
     ): SapiPhpBuild {
         if (PHP_OS_FAMILY !== 'Linux' && PHP_OS_FAMILY !== 'Darwin') {
             throw new \RuntimeException('Self-contained SAPI builds currently require Linux or macOS');
@@ -78,6 +79,7 @@ final class SapiPhpBuilder
             $extensionOptions,
             $runtimeTargets,
             $zts,
+            $debug,
             $externalExtensions,
             PHP_OS_FAMILY,
             php_uname('m'),
@@ -119,6 +121,7 @@ final class SapiPhpBuilder
                 $prefix,
                 $runtimeTargets,
                 $zts,
+                $debug,
             );
             $configured = $build . '/.typephp-configure.json';
             $configuration = json_encode($options, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
@@ -176,6 +179,7 @@ final class SapiPhpBuilder
                 'configure_options' => $options,
                 'sapis' => $runtimeTargets,
                 'zts' => $zts,
+                'debug' => $debug,
             ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR) . PHP_EOL);
             return new SapiPhpBuild(
                 $source,

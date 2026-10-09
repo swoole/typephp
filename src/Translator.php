@@ -4706,6 +4706,7 @@ CODE;
     {
         $this->phpBuilderEnabled = true;
         $this->phpBuilderZts = $configuration->zts;
+        $this->phpBuilderDebug = $configuration->debug;
         $this->phpBuilderExtensions = $configuration->extensions;
         // The SAPI executable owns main(). Generated TypePHP code is linked as
         // an internal Zend module and therefore has no dynamic get_module().

@@ -727,12 +727,14 @@ trait AssignOpTrait
             }
         } elseif ($this->isPropertyFetch($left) and !$this->isNativePropertyAccess($left)) {
             return $this->parseAssignPropertyFetch($left, $right, $propertyWriteTarget, $resultUnused);
+        } elseif ($left instanceof Expr\ArrayDimFetch && $this->isStdContainerExpr($left)) {
+            // Resolve the full access path before dispatching PHP/ArrayAccess
+            // writes. Nested std::array elements must update native storage,
+            // rather than a converted copy of an intermediate container.
+            return $this->parseStdContainerAssign($left, $right);
         } elseif ($this->isArrayDimFetch($left) and $this->isVarExpr($left->var)) {
             $tmp = $this->parseIdentifier($left->var);
             $this->assertArrayDimVariableTypeIsSupported($left, $tmp);
-            if ($this->isStdContainerExpr($left)) {
-                return $this->parseStdContainerAssign($left, $right);
-            }
             return $this->parseAssignArrayDim($left, $right, $resultUnused);
         } elseif ($this->isArrayDimFetch($left) and $this->isPropertyFetch($left->var)) {
             return $this->parseAssignPropertyArrayDim($left, $right);

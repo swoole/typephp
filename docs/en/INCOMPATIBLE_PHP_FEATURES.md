@@ -166,6 +166,13 @@ incompatible with or more restrictive than standard PHP.
 
 ## Expressions and control flow
 
+- When an operand is statically known to be an `array`, arithmetic, bitwise
+  operations and compound assignments unsupported by PHP are compile-time
+  errors, including `array + int/float/bool/string/null/resource/object` and
+  `array * array`. `array + array` and `array += array` use PHP union semantics:
+  preserve keys and order, and keep the left value for duplicate keys.
+  Potentially valid combinations such as `array + mixed` retain runtime checks;
+  array comparisons and logical operations remain supported.
 - Dynamic dimension writes use PHPX's array/object/string abstractions. Exact
   ZendVM behavior is not promised when a key expression, `ArrayAccess` callback,
   or right-hand side rebinds the container or key between the read and write

@@ -9,33 +9,54 @@
 namespace TypePhp\Parser;
 
 use PhpParser\Node\Expr;
+use PhpParser\NodeAbstract;
 use TypePhp\Transform\VoidCastValidationVisitor;
 use TypePhp\Type;
 
 trait UnaryExpressionTrait
 {
-    protected function unaryPlusOperandType(Expr $operand): string
+    protected function detectOperatorOperandType(NodeAbstract $operand, ?string $type = null): string
     {
         if ($operand instanceof Expr\ErrorSuppress) {
-            return $this->unaryPlusOperandType($operand->expr);
+            return $this->detectOperatorOperandType($operand->expr);
         }
         if ($operand instanceof Expr\Assign) {
             if ($operand->var instanceof Expr\Variable
                 && is_string($operand->var->name)
                 && !$this->hasVar($this->parseVariable($operand->var))) {
                 // A fresh local has no target type until assignment registers it.
-                return $this->unaryPlusOperandType($operand->expr);
+                return $this->detectOperatorOperandType($operand->expr);
             }
             // Assignment evaluates to the value after conversion to its target
             // type, which can differ from the RHS (e.g. int to float).
-            return $this->unaryPlusOperandType($operand->var);
+            return $this->detectOperatorOperandType($operand->var);
         }
         if ($operand instanceof Expr\Ternary) {
-            $ifType = $this->unaryPlusOperandType($operand->if ?? $operand->cond);
-            $elseType = $this->unaryPlusOperandType($operand->else);
+            $ifType = $this->detectOperatorOperandType($operand->if ?? $operand->cond);
+            $elseType = $this->detectOperatorOperandType($operand->else);
             return $ifType === $elseType ? $ifType : Type::VAR;
         }
-        $type = $this->detectTypeOfExpr($operand);
+        if ($operand instanceof Expr\ConstFetch) {
+            [$name, $runtimeFallback] = $this->resolveConstantFetchName($operand, $this->parseIdentifier($operand->name));
+            if (!$runtimeFallback && $this->hasConstant($name)
+                && $this->constants[$this->escapeConstVar($name)]->valueExpr instanceof Expr\Array_
+            ) {
+                // Global constants use Variant storage, but a declared array
+                // literal still has a known semantic type.
+                return Type::ARRAY;
+            }
+        }
+        if ($operand instanceof Expr\ClassConstFetch
+            && $operand->class instanceof \PhpParser\Node\Name
+            && $operand->name instanceof \PhpParser\Node\Identifier
+            && strcasecmp($operand->class->toString(), 'static') !== 0
+        ) {
+            $constantType = $this->resolveReferencedConstantType($operand, $this->getFullClassName());
+            if ($constantType !== null) {
+                return $constantType;
+            }
+        }
+        $type ??= $this->detectTypeOfExpr($operand);
         if ($operand instanceof Expr\PropertyFetch && $this->isIdExpr($operand->name)) {
             $class = $this->resolveObjectClassDef($operand->var);
             $name = $operand->name->toString();
@@ -47,6 +68,13 @@ trait UnaryExpressionTrait
             return Type::VAR;
         }
         return $type;
+    }
+
+    protected function assertPhpArrayUnaryOperand(Expr $operand, string $operator): void
+    {
+        if (Type::getReferencedType($this->detectOperatorOperandType($operand)) === Type::ARRAY) {
+            $this->fatalError($operand, "Operator '{$operator}' is not supported for array operands");
+        }
     }
 
     protected function constantUnaryPlusValue(Expr\UnaryPlus $expr): int|float|null
@@ -79,6 +107,7 @@ trait UnaryExpressionTrait
             return $pythonOperator;
         }
         $this->assertNativeObjectOperatorOperandSupported($expr->expr, $expr, '~', true);
+        $this->assertPhpArrayUnaryOperand($expr->expr, '~');
         $type = Type::getReferencedType($this->detectTypeOfExpr($expr->expr));
         $this->assertExprCanBeUsedAsValue($expr->expr, 'bitwise operand');
         if ($type === Type::BIGINT) {
@@ -152,6 +181,7 @@ trait UnaryExpressionTrait
             return $pythonOperator;
         }
         $this->assertNativeObjectOperatorOperandSupported($expr->expr, $expr, '-', true);
+        $this->assertPhpArrayUnaryOperand($expr->expr, '-');
         $type = $this->detectTypeOfExpr($expr->expr);
         $this->assertExprCanBeUsedAsValue($expr->expr, 'unary operand');
         if ($type === Type::BIGFLOAT) {
@@ -203,8 +233,9 @@ trait UnaryExpressionTrait
             return $pythonOperator;
         }
         $this->assertNativeObjectOperatorOperandSupported($expr->expr, $expr, '+', true);
+        $this->assertPhpArrayUnaryOperand($expr->expr, '+');
         $this->assertExprCanBeUsedAsValue($expr->expr, 'unary operand');
-        $type = $this->unaryPlusOperandType($expr->expr);
+        $type = $this->detectOperatorOperandType($expr->expr);
         $constant = $this->constantUnaryPlusValue($expr);
         if ($constant !== null) {
             return is_float($constant)
@@ -215,7 +246,12 @@ trait UnaryExpressionTrait
         if ($type === Type::BOOL) {
             return $this->convertIntExpr($code);
         }
-        if (in_array($type, [Type::INT, Type::FLOAT, Type::BIGINT, Type::BIGFLOAT, Type::DECIMAL], true)) {
+        if ($type === Type::INT || $type === Type::FLOAT) {
+            // A declared constant can have a known scalar type while its
+            // runtime lookup still returns Variant storage.
+            return $this->convertExprType($code, $type, $this->detectTypeOfExpr($expr->expr));
+        }
+        if (in_array($type, [Type::BIGINT, Type::BIGFLOAT, Type::DECIMAL], true)) {
             return $code;
         }
         // Zend lowers unary plus to multiplication by one, preserving numeric

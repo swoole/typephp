@@ -1,5 +1,5 @@
 --TEST--
-Std container scalar elements retain arithmetic and PHP arrays retain union and runtime errors
+Std container scalar elements retain arithmetic and PHP arrays retain union and dynamic runtime errors
 --FILE--
 <?php
 function multiply_dynamic($value): void {
@@ -41,7 +41,7 @@ function main() {
     var_dump($typedUnion[0], $typedUnion[2]);
 
     try {
-        var_dump($left * 2);
+        var_dump(std::any($left) * 2);
     } catch (TypeError $error) {
         echo "PHP array runtime error\n";
     }

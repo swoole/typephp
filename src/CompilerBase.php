@@ -3475,7 +3475,7 @@ abstract class CompilerBase implements PropertyAccessContext
                 if ($constant !== null) {
                     return is_float($constant) ? Type::FLOAT : Type::INT;
                 }
-                $innerType = $this->unaryPlusOperandType($expr->expr);
+                $innerType = $this->detectOperatorOperandType($expr->expr);
                 return match ($innerType) {
                     Type::BOOL => Type::INT,
                     Type::INT, Type::FLOAT, Type::BIGINT, Type::BIGFLOAT, Type::DECIMAL => $innerType,
@@ -3563,6 +3563,12 @@ abstract class CompilerBase implements PropertyAccessContext
             case 'Expr_BinaryOp_BitwiseXor':
                 $leftType  = $this->detectTypeOfExpr($expr->left);
                 $rightType = $this->detectTypeOfExpr($expr->right);
+                if ($exprType === 'Expr_BinaryOp_Plus'
+                    && Type::getReferencedType($this->detectOperatorOperandType($expr->left, $leftType)) === Type::ARRAY
+                    && Type::getReferencedType($this->detectOperatorOperandType($expr->right, $rightType)) === Type::ARRAY
+                ) {
+                    return Type::ARRAY;
+                }
                 if ($leftType === Type::BIGFLOAT || $rightType === Type::BIGFLOAT) {
                     return Type::BIGFLOAT;
                 }
@@ -3910,6 +3916,7 @@ abstract class CompilerBase implements PropertyAccessContext
         $this->assertImmutableMutationTarget($expr->var);
         $this->assertNativeArrayAccessDirectWrite($expr->var, false);
         $this->assertNativeObjectOperatorOperandSupported($expr->var, $expr, '++');
+        $this->assertPhpArrayUnaryOperand($expr->var, '++');
         $this->assertNotNullsafeWriteContext($expr->var);
         $this->assertNativePropertyHookDirectWriteTarget($expr->var);
         $result = $this->genDynamicPropIncDec($expr->var, '+', true);
@@ -4327,6 +4334,7 @@ abstract class CompilerBase implements PropertyAccessContext
         $this->assertImmutableMutationTarget($expr->var);
         $this->assertNativeArrayAccessDirectWrite($expr->var, false);
         $this->assertNativeObjectOperatorOperandSupported($expr->var, $expr, str_repeat($op, 2));
+        $this->assertPhpArrayUnaryOperand($expr->var, str_repeat($op, 2));
         $this->assertNotNullsafeWriteContext($expr->var);
         $this->assertNativePropertyHookDirectWriteTarget($expr->var);
         $result = $this->genDynamicPropIncDec($expr->var, $op, false);
@@ -4386,6 +4394,7 @@ abstract class CompilerBase implements PropertyAccessContext
         $this->assertImmutableMutationTarget($expr->var);
         $this->assertNativeArrayAccessDirectWrite($expr->var, false);
         $this->assertNativeObjectOperatorOperandSupported($expr->var, $expr, '--');
+        $this->assertPhpArrayUnaryOperand($expr->var, '--');
         $this->assertNotNullsafeWriteContext($expr->var);
         $this->assertNativePropertyHookDirectWriteTarget($expr->var);
         $result = $this->genDynamicPropIncDec($expr->var, '-', true);

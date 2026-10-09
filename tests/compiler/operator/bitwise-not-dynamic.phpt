@@ -20,7 +20,7 @@ function main(): void {
         }
     }
     try {
-        $invalidArray = ~[];
+        $invalidArray = ~std::any([]);
     } catch (TypeError $e) {
         echo "array TypeError\n";
     }

@@ -947,6 +947,7 @@ trait AssignOpTrait
         if ($pythonOperator !== null) {
             return $pythonOperator;
         }
+        $this->assertPhpArrayArithmeticOperands($node->var, $node->expr, $op);
         $propertyWriteTarget = $this->preparePropertyWriteTarget($node->var);
         $this->guardLiteralDivisionByZero($node->var, $node->expr, $op);
 

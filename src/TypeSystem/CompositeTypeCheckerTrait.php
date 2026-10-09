@@ -177,16 +177,19 @@ trait CompositeTypeCheckerTrait
 
     protected function isNullExpr(NodeAbstract $expr): bool
     {
+        if ($expr instanceof Expr\ErrorSuppress) {
+            return $this->isNullExpr($expr->expr);
+        }
         return $expr instanceof Expr\ConstFetch
             && strcasecmp($this->parseIdentifier($expr->name), 'null') === 0;
     }
 
-    protected function staticTypeNameOfExpr(NodeAbstract $expr): string
+    protected function staticTypeNameOfExpr(NodeAbstract $expr, ?string $type = null): string
     {
         if ($this->isNullExpr($expr)) {
             return 'null';
         }
-        $type = $this->detectTypeOfExpr($expr);
+        $type = Type::getReferencedType($type ?? $this->detectTypeOfExpr($expr));
         return match ($type) {
             Type::INT => 'int',
             Type::FLOAT => 'float',
@@ -194,6 +197,11 @@ trait CompositeTypeCheckerTrait
             Type::STR => 'string',
             Type::ARRAY => 'array',
             Type::OBJECT => 'object',
+            Type::RESOURCE, Type::STREAM => 'resource',
+            Type::BIGINT => 'bigint',
+            Type::BIGFLOAT => 'bigfloat',
+            Type::DECIMAL => 'decimal',
+            Type::BOX => 'box',
             default => 'mixed',
         };
     }

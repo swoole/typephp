@@ -77,6 +77,10 @@
 
 ## 表达式与控制流
 
+- 静态类型明确为 `array` 时，PHP 不支持的算术、位运算及其复合赋值会在编译阶段报错，
+  包括 `array + int/float/bool/string/null/resource/object`、`array * array` 等。
+  `array + array` 与 `array += array` 使用 PHP 并集规则：保留原有键和顺序，重复键采用左侧值。
+  `array + mixed` 等可能合法的组合仍在运行时检查；数组比较和逻辑运算不受此限制。
 - 动态维度写入使用 PHPX 的 array/object/string 抽象。当 key 表达式、
   `ArrayAccess` 回调或右值在读写阶段之间重新绑定 container/key 时，不承诺
   复刻 ZendVM 的全部行为。不支持的标量 container 会抛出稳定、统一的 PHPX

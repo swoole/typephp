@@ -36,6 +36,7 @@ trait BinaryOpTrait
 
         $leftType  = $this->detectTypeOfExpr($left);
         $rightType = $this->detectTypeOfExpr($right);
+        $this->assertPhpArrayArithmeticOperands($left, $right, $op, $leftType, $rightType);
 
         if ($leftType === Type::BIGFLOAT || $rightType === Type::BIGFLOAT) {
             // BigFloat cannot implicitly mix with BigInt or Decimal — risk of precision loss
@@ -277,6 +278,43 @@ trait BinaryOpTrait
         }
 
         return '((' . $leftExpr . ') ' . $op . ' (' . $rightExpr . '))';
+    }
+
+    protected function assertPhpArrayArithmeticOperands(
+        NodeAbstract $left,
+        NodeAbstract $right,
+        string $operator,
+        ?string $leftType = null,
+        ?string $rightType = null,
+    ): void
+    {
+        $op = rtrim($operator, '=');
+        if (!in_array($op, ['+', '-', '*', '/', '%', '**', '&', '|', '^', '<<', '>>'], true)) {
+            return;
+        }
+
+        $leftType = Type::getReferencedType($this->detectOperatorOperandType($left, $leftType));
+        $rightType = Type::getReferencedType($this->detectOperatorOperandType($right, $rightType));
+        if ($leftType !== Type::ARRAY && $rightType !== Type::ARRAY) {
+            return;
+        }
+        if ($op === '+') {
+            if ($leftType === Type::ARRAY && $rightType === Type::ARRAY) {
+                return;
+            }
+            $other = $leftType === Type::ARRAY ? $right : $left;
+            $otherType = $leftType === Type::ARRAY ? $rightType : $leftType;
+            // A dynamic value may be another array, so union needs a runtime
+            // check. Every other arithmetic/bitwise operator rejects arrays
+            // regardless of the other operand's runtime type.
+            if (in_array($otherType, [Type::VAR, Type::REF], true) && !$this->isNullExpr($other)) {
+                return;
+            }
+        }
+
+        $this->fatalError($left, 'Unsupported operand types: '
+            . $this->staticTypeNameOfExpr($left, $leftType) . ' ' . $operator . ' '
+            . $this->staticTypeNameOfExpr($right, $rightType));
     }
 
     protected function hasDynamicScalarOperand(string $leftType, string $rightType): bool
@@ -1193,6 +1231,7 @@ trait BinaryOpTrait
         $this->assertExprCanBeUsedAsValue($expr->right, 'binary operand');
         $leftType = $this->detectTypeOfExpr($expr->left);
         $rightType = $this->detectTypeOfExpr($expr->right);
+        $this->assertPhpArrayArithmeticOperands($expr->left, $expr->right, '**', $leftType, $rightType);
         if ($leftType === Type::DECIMAL || $rightType === Type::DECIMAL
             || $leftType === Type::BIGFLOAT || $rightType === Type::BIGFLOAT) {
             $this->fatalError($expr, "Operator '**' is not supported for Decimal or BigFloat; use pow() where supported");

@@ -99,7 +99,6 @@ final class StdContainerArithmeticTest extends BaseTest
         yield 'map element' => ['$a = std::map([0 => 1]); $a[0] * 2; $a[0] *= 2;'];
         yield 'PHP array union' => ['$a = [1, 2]; $b = [3, 4]; $a + $b; $a += $b;'];
         yield 'typed PHP array union' => ['$a = std::list([1, 2]); $b = std::list([3, 4]); $a + $b;'];
-        yield 'PHP runtime error' => ['$a = [1, 2]; $a * 2;'];
         yield 'explicit erasure' => ['$v = std::any([1, 2]); $v * 2;'];
         yield 'logical and comparison operators' => ['$a = std::array(Type::Int, 2); $a == $a; $a < $a; $a > $a; $a <= $a; $a >= $a; $a && true; $a || false;'];
     }

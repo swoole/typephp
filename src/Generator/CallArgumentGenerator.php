@@ -305,7 +305,16 @@ trait CallArgumentGenerator
                     }
                 }
 
-                $variadicVar ??= $this->addTmpVar(Type::ARRAY);
+                if ($variadicVar === null) {
+                    // Keep the aggregation array in the function preamble
+                    // (addTmpVar) so a forward goto can never jump across a
+                    // call-site C++ local declaration, and reset it instead.
+                    // The reset runs on every evaluation of the call site, so a
+                    // call inside a loop aggregates into an empty array every
+                    // iteration instead of accumulating arguments.
+                    $variadicVar = $this->addTmpVar(Type::ARRAY);
+                    $this->context->beforeStmtLines[] = $variadicVar . '.unset();';
+                }
                 if ($arg->unpack) {
                     $method = $argInfo->byRef ? 'mergeReferences' : 'merge';
                     $this->context->beforeStmtLines[] = $variadicVar . '.' . $method

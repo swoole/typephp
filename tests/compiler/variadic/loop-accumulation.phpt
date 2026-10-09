@@ -34,8 +34,14 @@ function main()
         $b->add(...$arr);
     }
 
+    // Mixed positional + unpacked variadic enters the aggregation path
+    // (the single-unpack fast path does not): 2 iterations x 3 args = 6.
+    for ($i = 0; $i < 2; $i++) {
+        $b->add(new Leaf(), ...$arr);
+    }
+
     var_dump($b->cnt());
 }
 ?>
 --EXPECT--
-int(12)
+int(18)

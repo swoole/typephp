@@ -132,6 +132,11 @@ Options:
 
     --no-aot    Run tests without AOT compilation (plain PHP mode).
 
+    --sanitize <list>
+                Compile every test binary with the given sanitizers (passed to
+                the compiler as --sanitize), e.g. undefined or address,undefined.
+                A sanitizer report aborts the binary, so the test fails.
+
     --compiler <path>
                 Use specified compiler binary (default: ./bin/tpc.php).
                 For bootstrap testing, use: --compiler ./tpc
@@ -169,7 +174,7 @@ function main(): void
            $temp_source, $temp_target, $test_cnt,
            $test_files, $test_idx, $test_results, $testfile,
            $valgrind, $sum_results, $shuffle, $file_cache, $num_repeats,
-           $show_progress, $aot_parallel_root, $test_target;
+           $show_progress, $aot_parallel_root, $test_target, $aot_sanitize;
     // Parallel testing
     global $workers, $workerID;
     global $context_line_count;
@@ -608,6 +613,15 @@ function main(): void
                     if (file_exists($lsanSuppressions)) {
                         $environment['LSAN_OPTIONS'] = 'suppressions=' . $lsanSuppressions
                             . ':print_suppressions=0';
+                    }
+                    break;
+                case '--sanitize':
+                    $aot_sanitize = parse_sanitize_option($argv[++$i] ?? '');
+                    // A report must fail the test instead of scrolling past in its output.
+                    $environment['UBSAN_OPTIONS'] = 'halt_on_error=1:abort_on_error=0:print_stacktrace=1';
+                    if (in_array('address', $aot_sanitize, true)) {
+                        $environment['ASAN_OPTIONS'] = 'halt_on_error=1:detect_leaks=0';
+                        $environment['SKIP_ASAN'] = 1;
                     }
                     break;
                 case '--repeat':
@@ -2497,6 +2511,10 @@ TEST $file
     if (!$no_aot) {
         try {
             $aot_args = $test->hasSection('AOT_ARGS') ? trim($test->getSection('AOT_ARGS')) : '';
+            global $aot_sanitize;
+            if (!empty($aot_sanitize)) {
+                $aot_args = trim($aot_args . ' --sanitize ' . implode(',', $aot_sanitize));
+            }
             if ($test_target === 'native') {
                 $bin_file = compile_php_file($test_file, $aot_args);
             } else {
@@ -4532,6 +4550,22 @@ function find_test_executable(string $environmentName, array $names): ?string
 function normalize_wasm_test_output(string $output): string
 {
     return str_replace("\r\n", "\n", trim($output));
+}
+
+/**
+ * Parse --sanitize: a comma-separated subset of the sanitizers the compiler supports.
+ *
+ * @return list<string>
+ */
+function parse_sanitize_option(string $value): array
+{
+    $sanitizers = array_values(array_unique(array_filter(array_map('trim', explode(',', $value)))));
+    $unknown = array_diff($sanitizers, ['address', 'undefined']);
+    if ($sanitizers === [] || $unknown !== []) {
+        fwrite(STDERR, "--sanitize expects address and/or undefined, got: " . $value . "\n");
+        exit(1);
+    }
+    return $sanitizers;
 }
 
 function compile_php_file(string $file, string $compiler_args = ''): string

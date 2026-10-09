@@ -171,6 +171,7 @@ final class PhpBuildConfiguration
             '--enable-cli', '--disable-cli', '--enable-fpm', '--disable-fpm',
             '--enable-cgi', '--disable-cgi', '--enable-phpdbg', '--disable-phpdbg',
             '--enable-embed', '--disable-embed', '--enable-opcache', '--disable-opcache',
+            '--enable-all', '--disable-all',
             '--enable-zts', '--disable-zts',
             '--with-pear', '--without-pear',
         ];
@@ -193,6 +194,7 @@ final class PhpBuildConfiguration
         }
 
         return array_values(array_unique([
+            '--disable-all',
             '--prefix=' . $prefix,
             '--with-config-file-path=' . $prefix . '/lib',
             '--with-config-file-scan-dir=' . $prefix . '/lib/conf.d',

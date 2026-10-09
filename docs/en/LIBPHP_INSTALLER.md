@@ -22,6 +22,19 @@ derived source tree. Extension requirements are merged from the explicit
 `extensions` list, project sources, YAML dependencies, and embedded Composer
 metadata, and then translated to PHP configure options.
 
+Every build starts with `--disable-all`, followed by explicit `--enable-*` /
+`--with-*` options for required extensions and their mandatory dependencies.
+For example, `pdo_sqlite` also enables PDO, and `dom` also enables libxml;
+optional dependencies are not enabled automatically. Extensions such as
+mbstring, sockets, and zlib are no longer enabled by default. Add them to
+`extensions` or declare them through the project dependencies above when needed.
+PHP's unconditional core extensions and OPcache, required by the runtime, remain
+available. Builds do not inherit the host PHP configuration or a source tree's
+`config.nice` options.
+When the source compiler needs to switch PHP versions, a separate compiler CLI
+is built with ctype, filter, mbstring, and tokenizer. These compiler dependencies
+are not added to the application artifact.
+
 The command-line equivalent is:
 
 ```bash
@@ -50,8 +63,11 @@ Declining the prompt leaves no usable Embed runtime and stops the build.
 ## Cache and proxy
 
 Downloaded sources and private runtimes are cached under `~/.typephp`. Compatible
-runtimes are reused across application builds. `--proxy` is a global network
-setting rather than a `php-builder` field; PHP and PECL metadata and archives,
+runtimes are reused across application builds only when extension requirements
+and their configure options match. Older caches built without `--disable-all`
+are invalidated automatically, so the first build recompiles PHP.
+`--proxy` is a global network setting rather than a `php-builder` field; PHP and
+PECL metadata and archives,
 and any other TypePHP network transfers, use the configured HTTP(S) or SOCKS
 proxy.
 

@@ -67,14 +67,15 @@ final class SapiPhpBuilder
         $source = $preparedSource['source'];
         $externalExtensions = $preparedSource['external'];
         $sourceVersion = OfficialPhpSource::version($source);
-        $baseOptions = $this->sourceConfigureOptions($source);
         $requiredExtensions = SapiExtensionRequirements::merge($requiredExtensions);
         $extensionOptions = SapiExtensionConfiguration::configureOptions($source, $requiredExtensions);
         $runtimeTargets = array_values(array_unique($targets));
         sort($runtimeTargets, SORT_STRING);
         $identity = [
             $sourceVersion,
-            $baseOptions,
+            '--disable-all',
+            $requiredExtensions,
+            $extensionOptions,
             $runtimeTargets,
             $zts,
             $externalExtensions,
@@ -99,10 +100,7 @@ final class SapiPhpBuilder
             return $cached;
         }
 
-        // Keep the original no-extension key stable so runtimes created by an
-        // earlier TypePHP version can be adopted without rebuilding php-src.
-        $fingerprintInput = $extensionOptions === [] ? $identity : [...$identity, $extensionOptions];
-        $fingerprint = substr(hash('sha256', json_encode($fingerprintInput, JSON_THROW_ON_ERROR)), 0, 16);
+        $fingerprint = substr($compatibility, 0, 16);
         $root = $cacheDirectory . '/php-'
             . $sourceVersion . '-' . $fingerprint;
         $this->mkdir($root);
@@ -117,7 +115,7 @@ final class SapiPhpBuilder
             $this->mkdir($prefix . '/lib/conf.d');
 
             $options = PhpBuildConfiguration::derivePhpBuilder(
-                [...$baseOptions, ...$extensionOptions],
+                $extensionOptions,
                 $prefix,
                 $runtimeTargets,
                 $zts,
@@ -209,6 +207,11 @@ final class SapiPhpBuilder
             }
             $metadata = json_decode((string) file_get_contents($manifest), true);
             if (!is_array($metadata) || ($metadata['compatibility'] ?? null) !== $compatibility) {
+                continue;
+            }
+            if (!is_array($metadata['requested_extensions'] ?? null)
+                || SapiExtensionRequirements::merge($metadata['requested_extensions']) !== $requiredExtensions
+            ) {
                 continue;
             }
             $enabled = SapiExtensionRequirements::merge(
@@ -400,20 +403,6 @@ final class SapiPhpBuilder
             }
         }
         return $values;
-    }
-
-    /** @return list<string> */
-    private function sourceConfigureOptions(string $source): array
-    {
-        $configNice = $source . '/config.nice';
-        if (!is_file($configNice)) {
-            return ['--enable-zts', '--enable-mbstring', '--enable-sockets', '--with-zlib'];
-        }
-        $contents = (string) file_get_contents($configNice);
-        $contents = preg_replace('/^#!.*\n|^#.*\n/m', '', $contents) ?? $contents;
-        $contents = str_replace(["\\\r\n", "\\\n", '"$@"', "'$@'"], [' ', ' ', '', ''], $contents);
-        $options = PhpBuildConfiguration::parseShellWords($contents);
-        return array_values(array_filter($options, static fn (string $value): bool => str_starts_with($value, '--')));
     }
 
     /** @param list<string> $command */

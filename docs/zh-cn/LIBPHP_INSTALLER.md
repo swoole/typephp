@@ -19,6 +19,15 @@ php-builder:
 外部 PECL 扩展会注入派生的源码目录。显式 `extensions`、项目源码、YAML 依赖和
 内嵌 Composer 元数据中的扩展需求会合并，并自动转换为 PHP configure 参数。
 
+构建统一使用 `--disable-all`，然后通过显式 `--enable-*` / `--with-*` 参数开启
+所需扩展及其必要依赖。例如 `pdo_sqlite` 会同时启用 PDO，`dom` 会同时启用
+libxml；可选依赖不会自动开启。mbstring、sockets、zlib 等扩展不再默认启用，
+需要时请加入 `extensions` 或通过上述项目依赖声明。
+PHP 不可禁用的核心扩展，以及运行时所需的 OPcache，仍会保留。
+构建不继承宿主 PHP 或源码目录中 `config.nice` 的配置。
+若源码版编译器需要切换 PHP 版本，会单独构建带 ctype、filter、mbstring、tokenizer
+的编译器 CLI；这些编译器依赖不会因此加入应用产物。
+
 等价的命令行为：
 
 ```bash
@@ -46,6 +55,8 @@ bin/tpc.php project.yml \
 ## 缓存与代理
 
 下载的源码和私有运行时缓存在 `~/.typephp`，兼容的运行时会在不同应用构建之间复用。
+缓存匹配包含扩展需求及其 configure 参数，不再复用扩展配置不同的运行时。
+旧版本未使用 `--disable-all` 的缓存会自动失效，首次构建需要重新编译 PHP。
 `--proxy` 是全局网络设置，不属于 `php-builder`；PHP、PECL 元数据与归档，以及
 TypePHP 的其他网络传输，都会使用指定的 HTTP(S) 或 SOCKS 代理。
 

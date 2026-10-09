@@ -732,7 +732,7 @@ trait SourcePipelineTrait
             $phpBuildProgress = null;
             $lastLineProgress = -1;
             $lastLineProgressLabel = '';
-            $runtime = (new SapiPhpBuilder(
+            $builder = new SapiPhpBuilder(
                 $this->getPhpxDir(),
                 fn (string $message) => $this->output($message, 'lightBlue'),
                 $this->downloadProxy,
@@ -784,7 +784,8 @@ trait SourcePipelineTrait
                     }
                 },
                 CompilerToolchain::fromBackend($this->getCompilerBackend()),
-            ))->prepare(
+            );
+            $runtime = $builder->prepare(
                 $this->phpVersion,
                 $this->sapiTargets,
                 min(8, max(1, $this->maxJob)),
@@ -805,14 +806,14 @@ trait SourcePipelineTrait
         putenv('PHP_HOME=' . $runtime->prefix);
         $_ENV['PHP_HOME'] = $runtime->prefix;
         $this->validatePhpRuntimeMinimum($runtime->prefix);
-        $this->restartSourceCompilerWithSapiPhp($runtime);
+        $this->restartSourceCompilerWithSapiPhp($runtime, $builder);
         $this->output(
             'Using private PHP ' . $runtime->version . ' runtime from ' . $runtime->buildDirectory,
             'green',
         );
     }
 
-    private function restartSourceCompilerWithSapiPhp(SapiPhpBuild $runtime): void
+    private function restartSourceCompilerWithSapiPhp(SapiPhpBuild $runtime, SapiPhpBuilder $builder): void
     {
         $targetMinor = implode('.', array_slice(explode('.', $runtime->version), 0, 2));
         $compilerMinor = PHP_MAJOR_VERSION . '.' . PHP_MINOR_VERSION;
@@ -830,6 +831,19 @@ trait SourcePipelineTrait
         $php = $runtime->prefix . '/bin/php';
         if ($script === false || !is_file($script) || !is_executable($php)) {
             throw new \RuntimeException("Cannot restart the source compiler with target PHP {$targetMinor}");
+        }
+        // The compiler needs these extensions even when the application does
+        // not. Keep its cross-version CLI separate from the application SAPI.
+        $compilerExtensions = ['ctype', 'filter', 'mbstring', 'tokenizer'];
+        if (array_diff($compilerExtensions, $runtime->enabledExtensions) !== []) {
+            $compilerRuntime = $builder->prepare(
+                $runtime->version,
+                ['cli'],
+                min(8, max(1, $this->maxJob)),
+                SapiExtensionRequirements::merge($runtime->enabledExtensions, $compilerExtensions),
+                $this->phpBuilderZts,
+            );
+            $php = $compilerRuntime->prefix . '/bin/php';
         }
         global $argv;
         $arguments = [$php, $script, ...array_slice($argv, 1)];

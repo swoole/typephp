@@ -155,6 +155,7 @@ final class PhpBuildConfigurationTest extends TestCase
         );
 
         self::assertContains('--prefix=/tmp/typephp-sapi', $options);
+        self::assertContains('--disable-all', $options);
         self::assertContains('--enable-cli', $options);
         self::assertContains('--enable-fpm', $options);
         self::assertContains('--enable-zts', $options);
@@ -174,6 +175,27 @@ final class PhpBuildConfigurationTest extends TestCase
         self::assertContains('--enable-cli', $options);
         self::assertContains('--disable-fpm', $options);
         self::assertContains('--disable-zts', $options);
+        self::assertContains('--disable-all', $options);
+        self::assertNotContains('--enable-mbstring', $options);
+        self::assertNotContains('--enable-sockets', $options);
+        self::assertNotContains('--with-zlib', $options);
+    }
+
+    public function testPhpBuilderDisablesDefaultsAndPreservesExplicitExtensions(): void
+    {
+        $options = PhpBuildConfiguration::derivePhpBuilder(
+            ['--enable-all', '--disable-all', '--enable-sockets', '--with-zlib', '--enable-mbstring=shared'],
+            '/unused/typephp',
+            ['cli'],
+            false,
+        );
+
+        self::assertSame('--disable-all', $options[0]);
+        self::assertSame(1, count(array_keys($options, '--disable-all', true)));
+        self::assertNotContains('--enable-all', $options);
+        self::assertContains('--enable-sockets', $options);
+        self::assertContains('--with-zlib', $options);
+        self::assertContains('--enable-mbstring', $options);
     }
 
     public function testParseShellWordsRejectsIncompleteInput(): void

@@ -96,6 +96,54 @@ final class SapiPhpBuilderTest extends TestCase
         self::assertSame(0, $method->invoke($builder, 1, 1));
     }
 
+    public function testCacheRequiresTheSameRequestedExtensions(): void
+    {
+        $directory = sys_get_temp_dir() . '/typephp-runtime-cache-' . bin2hex(random_bytes(6));
+        $root = $directory . '/php-8.4.25-test';
+        foreach (['build', 'install/bin', 'install/lib', 'phpx-build/lib', 'source'] as $child) {
+            mkdir($root . '/' . $child, 0777, true);
+        }
+        foreach (['build/Makefile', 'install/lib/libphp.a', 'phpx-build/lib/libphpx.a'] as $file) {
+            file_put_contents($root . '/' . $file, 'fixture');
+        }
+        file_put_contents($root . '/install/bin/php', '#!/bin/sh');
+        chmod($root . '/install/bin/php', 0755);
+        $metadata = [
+            'source' => $root . '/source',
+            'compatibility' => 'same-platform',
+            'requested_extensions' => ['curl', 'mbstring'],
+            'enabled_extensions' => ['Core', 'curl', 'mbstring'],
+            'sapis' => ['embed'],
+        ];
+        $builder = new SapiPhpBuilder(__DIR__, static function (string $message): void {});
+        $method = new \ReflectionMethod($builder, 'findCompatibleRuntime');
+        try {
+            file_put_contents($root . '/runtime.json', json_encode($metadata, JSON_THROW_ON_ERROR));
+            self::assertNull($method->invoke($builder, $directory, '8.4.25', 'same-platform', ['curl']));
+            self::assertNull($method->invoke($builder, $directory, '8.4.25', 'same-platform', []));
+            self::assertNotNull($method->invoke($builder, $directory, '8.4.25', 'same-platform', ['curl', 'mbstring']));
+            self::assertNull($method->invoke($builder, $directory, '8.4.25', 'old-policy', ['curl', 'mbstring']));
+
+            $metadata['requested_extensions'] = ['curl'];
+            $metadata['enabled_extensions'] = ['Core'];
+            file_put_contents($root . '/runtime.json', json_encode($metadata, JSON_THROW_ON_ERROR));
+            self::assertNull($method->invoke($builder, $directory, '8.4.25', 'same-platform', ['curl']));
+
+            unset($metadata['requested_extensions']);
+            file_put_contents($root . '/runtime.json', json_encode($metadata, JSON_THROW_ON_ERROR));
+            self::assertNull($method->invoke($builder, $directory, '8.4.25', 'same-platform', []));
+        } finally {
+            $files = new \RecursiveIteratorIterator(
+                new \RecursiveDirectoryIterator($directory, \FilesystemIterator::SKIP_DOTS),
+                \RecursiveIteratorIterator::CHILD_FIRST,
+            );
+            foreach ($files as $file) {
+                $file->isDir() ? rmdir($file->getPathname()) : unlink($file->getPathname());
+            }
+            rmdir($directory);
+        }
+    }
+
     public function testDetectsPostCompilationBuildStages(): void
     {
         $builder = new SapiPhpBuilder(__DIR__, static function (string $message): void {});

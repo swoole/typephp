@@ -82,6 +82,48 @@ final class SapiExtensionRequirementsTest extends TestCase
         );
     }
 
+    public function testRequiredDependenciesAreEnabledWithoutOptionalDependencies(): void
+    {
+        $configs = [
+            'pdo_sqlite' => 'PHP_ARG_WITH([pdo-sqlite], [sqlite]) PHP_ADD_EXTENSION_DEP(pdo_sqlite, pdo)',
+            'pdo' => 'PHP_ARG_ENABLE([pdo], [pdo]) PHP_ADD_EXTENSION_DEP(pdo, spl)',
+            'xmlreader' => 'PHP_ARG_ENABLE([xmlreader], [reader]) PHP_ADD_EXTENSION_DEP(xmlreader, libxml) PHP_ADD_EXTENSION_DEP(xmlreader, dom, true)',
+            'libxml' => 'PHP_ARG_WITH([libxml], [xml])',
+        ];
+        foreach ($configs as $extension => $configuration) {
+            mkdir($this->directory . '/ext/' . $extension, 0777, true);
+            file_put_contents($this->directory . '/ext/' . $extension . '/config.m4', $configuration);
+        }
+
+        self::assertSame(
+            ['--with-pdo-sqlite', '--enable-xmlreader', '--enable-pdo', '--with-libxml'],
+            SapiExtensionConfiguration::configureOptions($this->directory, ['pdo_sqlite', 'xmlreader']),
+        );
+        self::assertSame([], SapiExtensionConfiguration::configureOptions($this->directory, []));
+    }
+
+    public function testTransitiveDependenciesHandleCyclesCommentsAndNumberedConfigFiles(): void
+    {
+        mkdir($this->directory . '/ext/pdo_mysql', 0777, true);
+        mkdir($this->directory . '/ext/pdo', 0777, true);
+        mkdir($this->directory . '/ext/mysqlnd', 0777, true);
+        file_put_contents($this->directory . '/ext/pdo_mysql/config.m4', <<<'M4'
+PHP_ARG_WITH([pdo-mysql], [mysql])
+PHP_ADD_EXTENSION_DEP([pdo_mysql], [pdo])
+PHP_ADD_EXTENSION_DEP(pdo_mysql, mysqlnd)
+dnl PHP_ADD_EXTENSION_DEP(pdo_mysql, ignored)
+# PHP_ADD_EXTENSION_DEP(pdo_mysql, ignored)
+PHP_ADD_EXTENSION_DEP(unrelated, ignored)
+M4);
+        file_put_contents($this->directory . '/ext/pdo/config.m4', 'PHP_ARG_ENABLE(pdo, pdo) PHP_ADD_EXTENSION_DEP(pdo, mysqlnd)');
+        file_put_contents($this->directory . '/ext/mysqlnd/config9.m4', 'PHP_ARG_ENABLE(mysqlnd, mysqlnd) PHP_ADD_EXTENSION_DEP(mysqlnd, pdo)');
+
+        self::assertSame(
+            ['--with-pdo-mysql', '--enable-pdo', '--enable-mysqlnd'],
+            SapiExtensionConfiguration::configureOptions($this->directory, ['pdo_mysql', 'pdo_mysql']),
+        );
+    }
+
     public function testPhpSourceStubsProvideFunctionAndClassOwnership(): void
     {
         mkdir($this->directory . '/ext/example', 0777, true);

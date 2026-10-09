@@ -55,12 +55,9 @@ trait AssignOpTrait
             return '((' . $tmp . ' = ' . $value . ', ' . $target . ' = ' . $tmp . '), ' . $tmp . ')';
         }
         $array              = $this->parseWritableIdentifier($left->var);
-        $code               = '';
         if (!$this->hasVar($array) and $this->isVarExpr($left->var)) {
             $this->addLocalVar($array, Type::ARRAY);
         }
-
-        $value = $this->parseExprAsValue($right);
 
         // item(dim, true) updates an existing reference's value, while offsetSet()
         // replaces the array bucket and breaks the reference. Keep offsetSet() for
@@ -68,41 +65,31 @@ trait AssignOpTrait
         // runtime array check because either representation is possible.
         $arrayType = $this->getVarType($array);
 
+        if ($arrayType !== Type::ARRAY) {
+            return $this->parseArrayDimAssignment($left, $right);
+        }
+        $value = $this->parseExprAsValue($right);
+
         if ($left->dim === null) {
             if ($resultUnused
-                && $arrayType === Type::ARRAY
                 && $this->canEmitDirectArrayWriteOperand($right)
             ) {
-                return $code . $array . '.appendValue(' . $value . ')';
+                return $array . '.appendValue(' . $value . ')';
             }
             $tmp = $this->addTmpVar(Type::VAR);
-            if ($arrayType === Type::ARRAY) {
-                return $code . '((' . $tmp . ' = ' . $value . ', ' . "{$array}.append({$tmp})" . '), ' . $tmp . ')';
-            }
-            return $code . '((' . $tmp . ' = ' . $value . ', ' . "{$array}.offsetSet(" . self::VALUE_NULL . ", {$tmp})" . '), ' . $tmp . ')';
+            return '((' . $tmp . ' = ' . $value . ', ' . "{$array}.append({$tmp})" . '), ' . $tmp . ')';
         }
         $dim = $this->parseIdentifier($left->dim);
 
         if ($resultUnused
-            && $arrayType === Type::ARRAY
             && !$this->shouldMaterializeOrderedOperand($left->dim)
             && $this->canEmitDirectArrayWriteOperand($right)
         ) {
-            return $code . $array . '.item(' . $dim . ', true) = ' . $value;
+            return $array . '.item(' . $dim . ', true) = ' . $value;
         }
 
         $tmp = $this->addTmpVar(Type::VAR);
-        if ($arrayType === Type::ARRAY) {
-            return $code . '((' . $tmp . ' = ' . $value . ', ' . "{$array}.item({$dim}, true) = {$tmp}" . '), ' . $tmp . ')';
-        }
-        if ($arrayType === Type::VAR || $arrayType === Type::REF) {
-            $writeArray = "static_cast<void>({$array}.item({$dim}, true) = {$tmp})";
-            $writeOther = "{$array}.offsetSet({$dim}, {$tmp})";
-            return $code . '((' . $tmp . ' = ' . $value . ', '
-                . "({$array}.isArray() ? {$writeArray} : {$writeOther})"
-                . '), ' . $tmp . ')';
-        }
-        return $code . '((' . $tmp . ' = ' . $value . ', ' . "{$array}.offsetSet({$dim}, {$tmp})" . '), ' . $tmp . ')';
+        return '((' . $tmp . ' = ' . $value . ', ' . "{$array}.item({$dim}, true) = {$tmp}" . '), ' . $tmp . ')';
     }
 
     protected function parseAssignPropertyFetch(
@@ -183,6 +170,18 @@ trait AssignOpTrait
         $left  = $v->var;
         $right = $v->expr;
         if ($this->isAssignExpr($right)) {
+            // Flattening evaluates the final RHS before any target. Dimension
+            // targets must instead evaluate their receiver/key before the RHS
+            // and retain the value returned by the inner assignment.
+            $next = $right;
+            while ($next instanceof Expr\Assign) {
+                if (($left instanceof Expr\ArrayDimFetch && !$this->isStdContainerExpr($left))
+                    || ($next->var instanceof Expr\ArrayDimFetch && !$this->isStdContainerExpr($next->var))
+                ) {
+                    return $this->parseAssignFinally($left, $right);
+                }
+                $next = $next->expr;
+            }
             return $this->parseRightAssociativeAssign($left, $right);
         }
         if ($left instanceof Expr\List_ && $v->getAttribute(self::ATTR_STATEMENT_EXPRESSION, false)) {
@@ -738,12 +737,10 @@ trait AssignOpTrait
         } elseif ($this->isArrayDimFetch($left) and $this->isPropertyFetch($left->var)) {
             return $this->parseAssignPropertyArrayDim($left, $right);
         } elseif ($this->isArrayDimFetch($left) and $this->isStaticPropertyFetch($left->var)) {
-            // Keep ordinary static-array writes on their established lowering
-            // path. Only typed-array properties need the specialized key/value plan below.
             $this->preparePropertyWriteTarget($left->var);
-            if ($this->getNativePropertyDef($left->var)?->typedArray !== null) {
-                return $this->parseAssignStaticPropertyArrayDim($left, $right);
-            }
+            return $this->parseAssignStaticPropertyArrayDim($left, $right);
+        } elseif ($left instanceof Expr\ArrayDimFetch) {
+            return $this->parseArrayDimAssignment($left, $right);
         }
 
         if ($propertyWriteTarget !== null) {
@@ -922,6 +919,8 @@ trait AssignOpTrait
             $this->fatalError($node, 'Typed array compound writes require an explicit checked element assignment');
         }
         if ($node->var instanceof Expr\ArrayDimFetch
+            && ($this->isStdContainerExpr($node->var)
+                || ($this->isVarExpr($node->var->var) && $node->var->var->name === 'GLOBALS'))
             && !$this->canUpdateKnownArraySlotInPlace($node, $op)
         ) {
             $node = clone $node;
@@ -1032,6 +1031,14 @@ trait AssignOpTrait
         $nativePropertyAssignOp = $this->parseNativePropertyAssignOp($node, $op);
         if ($nativePropertyAssignOp !== null) {
             return $nativePropertyAssignOp;
+        }
+
+        if ($node->var instanceof Expr\ArrayDimFetch
+            && !$this->isStdContainerExpr($node->var)
+            && !($this->isVarExpr($node->var->var) && $node->var->var->name === 'GLOBALS')
+            && !$this->canUpdateKnownArraySlotInPlace($node, $op)
+        ) {
+            return $this->parseArrayDimAssignment($node->var, $node->expr, $this->removeAssignOp($op));
         }
 
         $arrayDimFetch = $this->isArrayDimFetch($node->var);
@@ -1589,7 +1596,154 @@ trait AssignOpTrait
     {
         $id = $this->parseWritableIdentifier($array);
 
-        return $id . '.offsetSet(' . $dim . ', ' . $var . ')';
+        return $this->emitArrayDimStore($id, $dim, $var, $this->detectTypeOfExpr($array));
+    }
+
+    /**
+     * PHP array writes must retain the bucket lvalue (including references),
+     * whereas ArrayAccess writes must invoke write_dimension via offsetSet().
+     * The caller supplies a stable container evaluated once from its AST.
+     */
+    private function emitArrayDimStore(string $container, ?string $key, string $value, string $type): string
+    {
+        $offsetSet = $container . '.offsetSet(' . ($key ?? self::VALUE_NULL) . ', ' . $value . ')';
+        if ($type === Type::OBJECT || $type === Type::STR) {
+            return $offsetSet;
+        }
+        $arrayWrite = $key === null
+            ? $container . '.append(' . $value . ')'
+            : 'static_cast<void>(' . $container . '.item(' . $key . ', true) = ' . $value . ')';
+        if ($type === Type::ARRAY) {
+            return $arrayWrite;
+        }
+        return '(' . $container . '.isArray() ? ' . $arrayWrite . ' : ' . $offsetSet . ')';
+    }
+
+    /**
+     * Keep receiver, key and RHS evaluation inside the expression. Objects
+     * use distinct get/set operations; arrays keep their original writable
+     * storage so copying a container cannot detach a write or break references.
+     */
+    private function parseArrayDimAssignment(Expr\ArrayDimFetch $target, Expr $right, ?string $operator = null): string
+    {
+        if ($operator !== null && $target->dim === null) {
+            $this->fatalError($target, 'Cannot use [] for reading');
+        }
+        if ($target->dim !== null) {
+            $this->assertNotNativeObjectArrayKey($target->dim);
+        }
+        $type = $this->detectTypeOfExpr($target->var);
+        [$container, $containerBefore, $containerAfter] = $this->parseArrayDimWriteContainer($target->var);
+        if ($target->dim === null) {
+            $key = self::VALUE_NULL;
+            $keyBefore = $keyAfter = [];
+        } else {
+            [$key, $keyBefore, $keyAfter] = $this->parseExprWithCapturedStmts($target->dim);
+        }
+        [$value, $rightBefore, $rightAfter] = $this->parseExprWithCapturedStmts($right);
+        $this->assertExprCanBeUsedAsValue($right, 'array value');
+        $stableContainer = $this->genTmpVarName();
+        $stableKey = $this->genTmpVarName();
+        $stableValue = $this->genTmpVarName();
+
+        $code = '[&]() -> php::Var {' . PHP_EOL;
+        $code .= $this->formatCapturedStmtLines($containerBefore);
+        $code .= $this->getIndent() . 'auto&& ' . $stableContainer . ' = ' . $container . ';' . PHP_EOL;
+        $code .= $this->formatCapturedStmtLines($keyBefore);
+        $code .= $this->getIndent() . 'php::Var ' . $stableKey . ' = ' . $key . ';' . PHP_EOL;
+        $code .= $this->formatCapturedStmtLines($keyAfter);
+        $code .= $this->formatCapturedStmtLines($rightBefore);
+        $code .= $this->getIndent() . 'php::Var ' . $stableValue . ' = ' . $value . ';' . PHP_EOL;
+        $code .= $this->formatCapturedStmtLines($rightAfter);
+
+        if ($operator !== null) {
+            // Like Zend ASSIGN_DIM_OP, evaluate the RHS before offsetGet(),
+            // then perform the operation and call offsetSet() exactly once.
+            $currentValue = $this->genTmpVarName();
+            $read = $type === Type::OBJECT
+                ? $stableContainer . '.offsetGet(' . $stableKey . ')'
+                : '(' . $stableContainer . '.isObject() ? ' . $stableContainer . '.offsetGet(' . $stableKey . ')'
+                    . ' : ' . $stableContainer . '.item(' . $stableKey . ', false))';
+            $code .= $this->getIndent() . 'php::Var ' . $currentValue . ' = ' . $read . ';' . PHP_EOL;
+            $operation = $operator === '.'
+                ? 'php::concat(' . $currentValue . ', ' . $stableValue . ')'
+                : $this->emitDynamicBinaryOp($currentValue, $stableValue, $operator);
+            $code .= $this->getIndent() . $stableValue . ' = ' . $operation . ';' . PHP_EOL;
+        }
+        $code .= $this->getIndent() . $this->emitArrayDimStore(
+            $stableContainer,
+            $target->dim === null ? null : $stableKey,
+            $stableValue,
+            $type,
+        ) . ';' . PHP_EOL;
+        $code .= $this->formatCapturedStmtLines($containerAfter);
+        $code .= $this->getIndent() . 'return ' . $stableValue . ';' . PHP_EOL;
+        return $code . $this->getIndent() . '}()';
+    }
+
+    /**
+     * Resolve a writable container from the base outwards. Complete each key's
+     * reference writebacks before evaluating the next key, and keep property
+     * receivers alive while an indirect property/bucket wrapper is in use.
+     *
+     * @return array{string, array<string>, array<string>}
+     */
+    private function parseArrayDimWriteContainer(Expr $receiver): array
+    {
+        if ($receiver instanceof Expr\ArrayDimFetch) {
+            [$base, $before, $after] = $this->parseArrayDimWriteContainer($receiver->var);
+            $container = $this->genTmpVarName();
+            $before[] = 'auto&& ' . $container . ' = ' . $base . ';';
+            if ($receiver->dim === null) {
+                return [$container . '.newItem()', $before, $after];
+            }
+            $this->assertNotNativeObjectArrayKey($receiver->dim);
+            [$key, $keyBefore, $keyAfter] = $this->parseExprWithCapturedStmts($receiver->dim);
+            foreach ($keyBefore as $line) {
+                $before[] = $line;
+            }
+            $stableKey = $this->genTmpVarName();
+            $before[] = 'php::Var ' . $stableKey . ' = ' . $key . ';';
+            foreach ($keyAfter as $line) {
+                $before[] = $line;
+            }
+            return [$container . '.item(' . $stableKey . ', true)', $before, $after];
+        }
+        if ($receiver instanceof Expr\PropertyFetch) {
+            // $this is held by the current call frame. Keep its original AST
+            // identity, which also selects a trait's active property scope.
+            if ($receiver->var instanceof Variable && $receiver->var->name === 'this') {
+                return $this->parseExprWithCapturedStmts($receiver, writable: true);
+            }
+            [$object, $before, $after] = $this->parseExprWithCapturedStmts($receiver->var);
+            $class = $this->detectClassOfExpr($receiver->var);
+            if ($this->isNativeObjectClass($class)) {
+                $stableObject = $this->genTmpVarName();
+                $this->addLocalVar($stableObject, $this->getNativeObjectPointerType($class));
+                $this->addNativeObject($stableObject, $class);
+                $cleanup = $stableObject . ' = nullptr;';
+            } else {
+                $stableObject = $this->addTmpVar(Type::OBJECT);
+                if ($class !== '') {
+                    $this->addObject($stableObject, $class);
+                }
+                $object = 'php::toObject(' . $object . ')';
+                $cleanup = $stableObject . '.unset();';
+            }
+            $before[] = $stableObject . ' = ' . $object . ';';
+            foreach ($after as $line) {
+                $before[] = $line;
+            }
+            $property = clone $receiver;
+            $property->var = new Variable($stableObject, $receiver->var->getAttributes());
+            [$container, $propertyBefore, $propertyAfter] = $this->parseExprWithCapturedStmts($property, writable: true);
+            foreach ($propertyBefore as $line) {
+                $before[] = $line;
+            }
+            $propertyAfter[] = $cleanup;
+            return [$container, $before, $propertyAfter];
+        }
+        return $this->parseExprWithCapturedStmts($receiver, writable: true);
     }
 
     protected function parseAssignOpShiftLeft(Expr\AssignOp\ShiftLeft $node): string
@@ -1826,6 +1980,9 @@ trait AssignOpTrait
     {
         $this->assertNativePropertyHookDirectWriteTarget($left);
         $propertyWriteTarget = $this->preparePropertyWriteTarget($left->var);
+        if ($this->getNativePropertyDef($left->var)?->typedArray === null) {
+            return $this->parseArrayDimAssignment($left, $right);
+        }
         $code     = '';
         $value    = $this->parseExprAsValue($right);
         $typedArrayWrite = $this->prepareTypedArrayPropertyDirectWrite($left, $right, $value);
@@ -1846,6 +2003,9 @@ trait AssignOpTrait
 
     protected function parseAssignStaticPropertyArrayDim(Expr\ArrayDimFetch $left, Expr $right): string
     {
+        if ($this->getNativePropertyDef($left->var)?->typedArray === null) {
+            return $this->parseArrayDimAssignment($left, $right);
+        }
         $value = $this->parseExprAsValue($right);
         $typedArrayWrite = $this->prepareTypedArrayPropertyDirectWrite($left, $right, $value);
         $array = $this->parseWritableIdentifier($left->var);

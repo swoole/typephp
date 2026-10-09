@@ -21,10 +21,13 @@ function main(): void
     $map = std::map(Type::String, NativeContainerValue::class);
     $ordered = std::orderedMap(Type::Int, NativeContainerValue::class);
 
-    $array[0] = new NativeContainerValue(11);
-    $vector[] = new NativeContainerValue(22);
+    $first = ($array[0] = new NativeContainerValue(11));
+    $second = ($vector[] = new NativeContainerValue(22));
     $map['value'] = new NativeContainerValue(33);
     $ordered[4] = new NativeContainerValue(44);
+    var_dump($first->value, $second->value);
+    $first = null;
+    $second = null;
 
     // Make the container slots the only roots, then allocate enough objects
     // to force the Native heap to collect.
@@ -62,6 +65,8 @@ function main(): void
 
 ?>
 --EXPECT--
+int(11)
+int(22)
 int(11)
 int(22)
 int(33)

@@ -2145,11 +2145,13 @@ abstract class CompilerBase implements PropertyAccessContext
         return '';
     }
 
-    protected function parseExprWithCapturedStmts(NodeAbstract $expr, bool $asString = false): array
+    protected function parseExprWithCapturedStmts(NodeAbstract $expr, bool $asString = false, bool $writable = false): array
     {
         $beforeStmtCount = count($this->context->beforeStmtLines);
         $afterStmtCount = count($this->context->afterStmtLines);
-        $value = $asString ? $this->parseExprToString($expr) : $this->parseExprAsValue($expr);
+        $value = $writable
+            ? $this->parseWritableIdentifier($expr)
+            : ($asString ? $this->parseExprToString($expr) : $this->parseExprAsValue($expr));
         $beforeStmts = array_slice($this->context->beforeStmtLines, $beforeStmtCount);
         $afterStmts = array_slice($this->context->afterStmtLines, $afterStmtCount);
         $this->context->beforeStmtLines = array_slice($this->context->beforeStmtLines, 0, $beforeStmtCount);
@@ -3797,6 +3799,12 @@ abstract class CompilerBase implements PropertyAccessContext
             case 'Expr_AssignOp_BitwiseAnd':
             case 'Expr_AssignOp_BitwiseOr':
             case 'Expr_AssignOp_BitwiseXor':
+                // Dimension assignment evaluates to the written value, not
+                // the container. PHP/ArrayAccess stores return a Variant;
+                // std containers keep their existing specialized type handling.
+                if ($expr->var instanceof Expr\ArrayDimFetch && !$this->isStdContainerExpr($expr->var)) {
+                    return Type::VAR;
+                }
                 return $this->detectVarType($expr->var);
             case 'Expr_Variable':
                 return $this->detectVarType($expr);

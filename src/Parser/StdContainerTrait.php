@@ -474,6 +474,59 @@ trait StdContainerTrait
         return null;
     }
 
+    protected function assertStdContainerArithmeticOperands(NodeAbstract $left, NodeAbstract $right, string $operator): void
+    {
+        if (!in_array(rtrim($operator, '='), ['+', '-', '*', '/', '%', '**', '&', '|', '^', '<<', '>>'], true)) {
+            return;
+        }
+
+        foreach ([$left, $right] as $operand) {
+            $info = $this->getStdContainerOperatorInfo($operand);
+            if ($info === null) {
+                continue;
+            }
+            $container = match ($info['kind']) {
+                'array' => 'std::array',
+                'vector' => 'std::vector',
+                'map' => 'std::map',
+                'ordered_map' => 'std::orderedMap',
+            };
+            $this->fatalError($operand, "Operator '{$operator}' is not supported for {$container} containers; operate on individual elements instead");
+        }
+    }
+
+    private function getStdContainerOperatorInfo(NodeAbstract $expr): ?array
+    {
+        if ($expr instanceof Expr\ErrorSuppress) {
+            return $this->getStdContainerOperatorInfo($expr->expr);
+        }
+        if (($info = $this->getStdContainerExprInfo($expr)) !== null) {
+            return $info;
+        }
+        if ($expr instanceof Expr\ArrayDimFetch) {
+            $info = $this->getStdContainerOperatorInfo($expr->var);
+            return $info !== null && $info['kind'] === 'array'
+                ? $this->getNestedStdArrayInfo($info, 1)
+                : null;
+        }
+        if (($expr instanceof Expr\PropertyFetch || $expr instanceof Expr\NullsafePropertyFetch)
+            && $expr->name instanceof Node\Identifier
+        ) {
+            $class = $this->detectClassOfExpr($expr->var);
+            if ($class === '' && $expr->var instanceof Expr\Variable) {
+                $class = $this->getDeclaredObjectType($this->parseVariable($expr->var));
+            }
+            return $class !== ''
+                ? $this->resolveNativeInstanceProperty($expr, $expr->name->name, $class)?->propertyDef?->stdContainer
+                : null;
+        }
+        if ($expr instanceof Expr\StaticPropertyFetch && $expr->name instanceof Node\VarLikeIdentifier) {
+            $this->resolveNativeStaticPropertyFetch($expr);
+            return $this->getNativePropertyDef($expr)?->stdContainer;
+        }
+        return null;
+    }
+
     protected function parseStdContainerCopyExpr(NodeAbstract $expr): string
     {
         if ($this->isVarExpr($expr)) {

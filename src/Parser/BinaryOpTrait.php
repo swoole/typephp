@@ -21,6 +21,7 @@ trait BinaryOpTrait
 {
     protected function parseBinaryOp(NodeAbstract $left, NodeAbstract $right, string $op): string
     {
+        $this->assertStdContainerArithmeticOperands($left, $right, $op);
         $this->assertExprCanBeUsedAsValue($left, 'binary operand');
         $this->assertExprCanBeUsedAsValue($right, 'binary operand');
 
@@ -1187,6 +1188,7 @@ trait BinaryOpTrait
         if ($pythonOperator !== null) {
             return $pythonOperator;
         }
+        $this->assertStdContainerArithmeticOperands($expr->left, $expr->right, '**');
         $this->assertExprCanBeUsedAsValue($expr->left, 'binary operand');
         $this->assertExprCanBeUsedAsValue($expr->right, 'binary operand');
         $leftType = $this->detectTypeOfExpr($expr->left);

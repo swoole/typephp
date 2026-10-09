@@ -916,6 +916,7 @@ trait AssignOpTrait
     protected function parseAssignOp(Expr\AssignOp $node, string $op): string
     {
         $this->assertImmutableMutationTarget($node->var);
+        $this->assertStdContainerArithmeticOperands($node->var, $node->expr, $op);
         if ($this->getTypedArrayDefinition($node->var) !== null
             || $this->getTypedArrayAccessDefinition($node->var) !== null) {
             $this->fatalError($node, 'Typed array compound writes require an explicit checked element assignment');

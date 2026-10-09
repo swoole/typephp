@@ -305,8 +305,17 @@ trait CallArgumentGenerator
                     }
                 }
 
-                $variadicVar ??= $this->addTmpVar(Type::ARRAY);
-                if ($arg->unpack) {
+				if ($variadicVar === null) {
+					// Declare the aggregation array inline instead of hoisting it
+					// into the function preamble (addTmpVar). A preamble temp is
+					// constructed once and never reset, so a call site inside a
+					// loop would accumulate arguments across iterations. An inline
+					// declaration re-constructs an empty array every time the
+					// statement executes, matching ensureCallArrayArgs.
+					$variadicVar = $this->genTmpVarName();
+					$this->context->beforeStmtLines[] = Type::ARRAY . ' ' . $variadicVar . '{};';
+				}
+				if ($arg->unpack) {
                     $method = $argInfo->byRef ? 'mergeReferences' : 'merge';
                     $this->context->beforeStmtLines[] = $variadicVar . '.' . $method
                         . '(' . $this->parseArrayArg($arg) . ');';

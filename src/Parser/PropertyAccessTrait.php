@@ -870,14 +870,16 @@ trait PropertyAccessTrait
             return $rightExpr;
         }
 
-        if ($rightType !== Type::VAR && $this->canAssignStaticTypeToObjectProperty($def, $rightType)) {
+        $rightClass = $this->detectClassOfExpr($right);
+        // "object" matches any class by storage type alone; keep the runtime is-a check.
+        $unknownObjectIntoTypedProperty = $rightType === Type::OBJECT && $def->class !== '' && $rightClass === '';
+        if ($rightType !== Type::VAR && $this->canAssignStaticTypeToObjectProperty($def, $rightType) && !$unknownObjectIntoTypedProperty) {
             return $rightExpr;
         }
         if ($rightType === Type::VAR && ($helper = $this->getFixedPropertyTypeCheckHelper($def)) !== null) {
             return $helper . '(' . $rightExpr . ', ' . $this->genCharPtr($this->getObjectPropertyTypeCheckDisplayName($left), true) . ')';
         }
 
-        $rightClass = $this->detectClassOfExpr($right);
         if ($rightClass !== '' && $compositeRelation === null) {
             return $rightExpr;
         }

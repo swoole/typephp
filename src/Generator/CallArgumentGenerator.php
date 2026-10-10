@@ -314,6 +314,19 @@ trait CallArgumentGenerator
                     // iteration instead of accumulating arguments.
                     $variadicVar = $this->addTmpVar(Type::ARRAY);
                     $this->context->beforeStmtLines[] = $variadicVar . '.unset();';
+                    if ($argInfo->byRef) {
+                        // The aggregation array owns the second reference to
+                        // every caller slot, so queue its release before the
+                        // per-argument RefWrap::commit() lines are appended:
+                        // committing while the second reference is alive
+                        // trips the typed-reference escape check. The guard
+                        // also releases during C++ exception unwinding into
+                        // a PHP catch block.
+                        $cleanupGuard = $this->genTmpVarName();
+                        $this->context->beforeStmtLines[] = 'php::ArrayCleanupGuard ' . $cleanupGuard
+                            . '{' . $variadicVar . '};';
+                        $this->context->afterStmtLines[] = $cleanupGuard . '.cleanup();';
+                    }
                 }
                 if ($arg->unpack) {
                     $method = $argInfo->byRef ? 'mergeReferences' : 'merge';
@@ -338,15 +351,6 @@ trait CallArgumentGenerator
             }
             if ($variadicVar !== null) {
                 $resolvedArgs[$variadicArgIndex] = $variadicVar;
-                if ($functionDef->argInfoList[$variadicArgIndex]->byRef) {
-                    // The aggregation array owns the second reference to every
-                    // caller slot. Release it after the full PHP statement and
-                    // also during C++ exception unwinding into a PHP catch block.
-                    $cleanupGuard = $this->genTmpVarName();
-                    $this->context->beforeStmtLines[] = 'php::ArrayCleanupGuard ' . $cleanupGuard
-                        . '{' . $variadicVar . '};';
-                    $this->context->afterStmtLines[] = $cleanupGuard . '.cleanup();';
-                }
             }
             ksort($resolvedArgs);
             return implode(', ', $resolvedArgs);

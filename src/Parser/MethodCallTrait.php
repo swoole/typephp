@@ -281,7 +281,12 @@ trait MethodCallTrait
         }
 
         // Case 4: Typed object whose class has no known subclasses
-        if ($object !== 'this_' && $this->hasClass($class)) {
+        //
+        // A library build (`-m lib`) is consumed by code this compiler never
+        // sees, so "no subclass in this program" proves nothing: the consumer
+        // may extend the class and override the method. Only an exact class
+        // (final) is safe to devirtualize there.
+        if ($object !== 'this_' && $this->hasClass($class) && !$this->isBuildModeLib()) {
             $classLower = strtolower($class);
             if (!$this->hasSubClasses($classLower) && !$this->isInterface($class) && !$this->isAbstractClass($class)) {
                 return true;
@@ -326,8 +331,15 @@ trait MethodCallTrait
 
         $fullMethodName = $this->getOverrideMethodName($class, $method);
 
-        // A subclass declares a method with the same name, so try to devirtualize
-        if ($this->isOverrideMethod($fullMethodName)) {
+        // A subclass declares a method with the same name, so try to devirtualize.
+        //
+        // A library build (`-m lib`) is consumed by code this compiler never
+        // sees, so an override may exist that this program cannot observe.
+        // Treat that the same as a known override: let canDevirtualize() decide.
+        // It still keeps the direct call for final classes, final methods and
+        // private methods, and only falls back to dynamic dispatch for what a
+        // consumer could legitimately override.
+        if ($this->isOverrideMethod($fullMethodName) || $this->isBuildModeLib()) {
             if (!$this->canDevirtualize($object, $class, $method)) {
                 return false;
             }

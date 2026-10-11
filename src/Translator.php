@@ -1421,6 +1421,24 @@ class Translator extends Preprocessor
             . max(1, $this->getStableIdRegistry()->capacity('function-resolution')) . ']{};' . PHP_EOL;
         $code .= '};' . PHP_EOL;
         $code .= 'static THREAD_LOCAL php_request_cache_storage *php_request_cache = nullptr;' . PHP_EOL;
+        // The request-local cache is normally allocated by this module's RINIT.
+        // That is not guaranteed: when the module is compiled as a shared
+        // library (`-m lib`) and consumed by *another* TypePHP module, the
+        // consumer's `typephp_runtime_start()` only runs `module_init()` for its
+        // own module, so this library's RINIT never executes. The cache would
+        // stay nullptr and the first method dispatch would dereference it.
+        // Allocate it lazily instead: a zero-initialised storage already means
+        // "nothing resolved yet", so no request/module initialisation is needed
+        // here (the consumer's request is already active).
+        $code .= <<<'CODE'
+static php_request_cache_storage *typephp_request_cache_ensure() noexcept {
+    if (UNEXPECTED(php_request_cache == nullptr)) {
+        php_request_cache = new (std::nothrow) php_request_cache_storage{};
+    }
+    return php_request_cache;
+}
+CODE;
+        $code .= PHP_EOL;
 
         $code .= "// class entry \n";
         // Internal/compiled symbols have module lifetime. They are initialized
@@ -1442,7 +1460,7 @@ class Translator extends Preprocessor
         $code .= <<<'CODE'
 zend_class_entry *get_class(RequestClassId class_id, const php::Str &class_name) {
     const auto index = static_cast<uint32_t>(class_id);
-    auto &slot = php_request_cache->class_map[index];
+    auto &slot = typephp_request_cache_ensure()->class_map[index];
     if (UNEXPECTED(slot == nullptr)) {
         slot = php::getClassEntrySafe(class_name);
     }
@@ -1451,7 +1469,7 @@ zend_class_entry *get_class(RequestClassId class_id, const php::Str &class_name)
 
 zend_function *get_func(RequestFuncId func_id, const php::Str &func_name) {
     const auto index = static_cast<uint32_t>(func_id);
-    auto &slot = php_request_cache->func_map[index];
+    auto &slot = typephp_request_cache_ensure()->func_map[index];
     if (UNEXPECTED(slot == nullptr)) {
         slot = php::getFunction(func_name);
     }
@@ -1460,7 +1478,7 @@ zend_function *get_func(RequestFuncId func_id, const php::Str &func_name) {
 
 zend_function *get_method(RequestFuncId func_id, const php::Str &method_name, RequestClassId class_id, const php::Str &class_name) {
     const auto index = static_cast<uint32_t>(func_id);
-    auto &slot = php_request_cache->func_map[index];
+    auto &slot = typephp_request_cache_ensure()->func_map[index];
     if (UNEXPECTED(slot == nullptr)) {
         auto ce = get_class(class_id, class_name);
         slot = php::getMethod(ce, method_name);
@@ -1499,19 +1517,19 @@ uint32_t get_persistent_prop(PersistentPropertyId prop_id, const php::Str &prop_
 }
 
 php::PropertyCacheSlot &get_property_cache(PropertyCacheId cache_id) noexcept {
-    return php_request_cache->property_cache_map[static_cast<uint32_t>(cache_id)];
+    return typephp_request_cache_ensure()->property_cache_map[static_cast<uint32_t>(cache_id)];
 }
 
 php::MethodCallCacheSlot &get_method_call_cache(MethodCallCacheId cache_id) noexcept {
-    return php_request_cache->method_call_cache_map[static_cast<uint32_t>(cache_id)];
+    return typephp_request_cache_ensure()->method_call_cache_map[static_cast<uint32_t>(cache_id)];
 }
 
 php::FunctionCallCacheSlot &get_function_call_cache(FunctionCallCacheId cache_id) noexcept {
-    return php_request_cache->function_call_cache_map[static_cast<uint32_t>(cache_id)];
+    return typephp_request_cache_ensure()->function_call_cache_map[static_cast<uint32_t>(cache_id)];
 }
 
 uint8_t &get_function_resolution_cache(FunctionResolutionCacheId cache_id) noexcept {
-    return php_request_cache->function_resolution_cache_map[static_cast<uint32_t>(cache_id)];
+    return typephp_request_cache_ensure()->function_resolution_cache_map[static_cast<uint32_t>(cache_id)];
 }
 CODE;
         $code .= "\n\n";

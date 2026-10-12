@@ -126,6 +126,12 @@ trait CallArgumentGenerator
     ): string {
         $this->assertCallArgumentLimit($callArgs);
         $this->context->typedRefBridgeScopes[] = [];
+        // Pending after-lines that predate this call (short-circuit captures,
+        // assignment heads) mark the boundary of the region this call's
+        // cleanup must stay inside: helpers slice afterStmtLines by count,
+        // so a line before this baseline can be flushed in another scope
+        // than the guard declaration queued below.
+        $afterStmtStart = count($this->context->afterStmtLines);
         try {
             $functionDef = $this->getFunction($nativeFunc);
             $providedArgs = [];
@@ -321,14 +327,22 @@ trait CallArgumentGenerator
                         // already queued for fixed by-ref parameters lowered
                         // before the variadic. Committing while the second
                         // reference is alive trips the typed-reference escape
-                        // check. Insert at the front of the pending
-                        // after-lines: everything there runs after the call,
-                        // and the guard destructor still releases during C++
-                        // exception unwinding into a PHP catch block.
+                        // check. Splice at this call's entry baseline, not at
+                        // index 0: capture helpers split afterStmtLines by
+                        // count, and the cleanup must stay in the same region
+                        // as the guard declaration. Everything there still
+                        // runs after the call, and the guard destructor still
+                        // releases during C++ exception unwinding into a PHP
+                        // catch block.
                         $cleanupGuard = $this->genTmpVarName();
                         $this->context->beforeStmtLines[] = 'php::ArrayCleanupGuard ' . $cleanupGuard
                             . '{' . $variadicVar . '};';
-                        array_unshift($this->context->afterStmtLines, $cleanupGuard . '.cleanup();');
+                        array_splice(
+                            $this->context->afterStmtLines,
+                            $afterStmtStart,
+                            0,
+                            [$cleanupGuard . '.cleanup();'],
+                        );
                     }
                 }
                 if ($arg->unpack) {

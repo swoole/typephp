@@ -316,16 +316,19 @@ trait CallArgumentGenerator
                     $this->context->beforeStmtLines[] = $variadicVar . '.unset();';
                     if ($argInfo->byRef) {
                         // The aggregation array owns the second reference to
-                        // every caller slot, so queue its release before the
-                        // per-argument RefWrap::commit() lines are appended:
-                        // committing while the second reference is alive
-                        // trips the typed-reference escape check. The guard
-                        // also releases during C++ exception unwinding into
-                        // a PHP catch block.
+                        // every caller slot. Release it before every
+                        // RefWrap::commit() of this call — including bridges
+                        // already queued for fixed by-ref parameters lowered
+                        // before the variadic. Committing while the second
+                        // reference is alive trips the typed-reference escape
+                        // check. Insert at the front of the pending
+                        // after-lines: everything there runs after the call,
+                        // and the guard destructor still releases during C++
+                        // exception unwinding into a PHP catch block.
                         $cleanupGuard = $this->genTmpVarName();
                         $this->context->beforeStmtLines[] = 'php::ArrayCleanupGuard ' . $cleanupGuard
                             . '{' . $variadicVar . '};';
-                        $this->context->afterStmtLines[] = $cleanupGuard . '.cleanup();';
+                        array_unshift($this->context->afterStmtLines, $cleanupGuard . '.cleanup();');
                     }
                 }
                 if ($arg->unpack) {

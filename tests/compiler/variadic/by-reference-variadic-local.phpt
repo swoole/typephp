@@ -14,6 +14,12 @@ function bump(int &...$vals): void {
 function bumpu(&...$vals): void {
     foreach ($vals as &$v) { $v = $v + 10; }
 }
+function bumpShared(&$first, &...$rest): void {
+    $first += 10;
+    foreach ($rest as &$value) {
+        $value += 10;
+    }
+}
 function main(): void
 {
     $a = 1;
@@ -34,6 +40,9 @@ function main(): void
     $arr = [7];
     bump($arr[0]);
     var_dump($arr[0]);
+    $s = 1;
+    bumpShared($s, $s);
+    var_dump($s);
 }
 ?>
 --EXPECT--
@@ -43,3 +52,4 @@ int(12)
 int(51)
 int(15)
 int(17)
+int(21)

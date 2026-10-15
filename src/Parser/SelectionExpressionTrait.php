@@ -147,9 +147,13 @@ trait SelectionExpressionTrait
         $nativeSelection = $this->isNativeObjectClass($nativeClass);
         $conditionNativeClass = $this->detectClassOfExpr($expr->cond);
         $nativeCondition = $this->isNativeObjectClass($conditionNativeClass);
-        $returnType = $nativeSelection
-            ? $this->getNativeObjectPointerType($nativeClass)
-            : Type::VAR;
+        if ($nativeSelection) {
+            $returnType = $this->getNativeObjectPointerType($nativeClass);
+        } else {
+            $inferredType = $this->detectTypeOfExpr($expr);
+            $returnType = $this->getNormalAssignType($inferredType);
+        }
+        $expr->setAttribute(self::ATTR_LOWERED_TYPE, $returnType);
         $this->assertExprCanBeUsedAsValue($expr->cond, 'match condition');
         $var = $this->parseIdentifier($expr->cond);
         if ($this->isVarExpr($expr->cond)) {
@@ -224,7 +228,7 @@ trait SelectionExpressionTrait
             }
             $code .= $this->getIndent() . 'if (' . $matched . ') {' . PHP_EOL;
             $this->indentLevel++;
-            $code .= $this->formatMatchReturn($arm->body, $nativeClass);
+            $code .= $this->formatMatchReturn($arm->body, $nativeClass, $returnType);
             $this->indentLevel--;
             $code .= $this->getIndent() . '}' . PHP_EOL;
         }
@@ -232,16 +236,21 @@ trait SelectionExpressionTrait
         if ($default) {
             $code .= $this->getIndent() . '{' . PHP_EOL;
             $this->indentLevel++;
-            $code .= $this->formatMatchReturn($default, $nativeClass);
+            $code .= $this->formatMatchReturn($default, $nativeClass, $returnType);
             $this->indentLevel--;
             $code .= $this->getIndent() . '}' . PHP_EOL;
         } else {
             $code .= $this->getIndent() . '{' . PHP_EOL;
             $this->indentLevel++;
-            $code .= $nativeSelection
-                ? $this->getIndent() . 'php::throwException("UnhandledMatchError", "Unhandled match case");' . PHP_EOL
-                    . $this->getIndent() . 'return nullptr;' . PHP_EOL
-                : $this->getIndent() . 'return php::throwException("UnhandledMatchError", "Unhandled match case");' . PHP_EOL;
+            if ($nativeSelection) {
+                $code .= $this->getIndent() . 'php::throwException("UnhandledMatchError", "Unhandled match case");' . PHP_EOL
+                    . $this->getIndent() . 'return nullptr;' . PHP_EOL;
+            } elseif ($returnType === Type::VAR) {
+                $code .= $this->getIndent() . 'return php::throwException("UnhandledMatchError", "Unhandled match case");' . PHP_EOL;
+            } else {
+                $code .= $this->getIndent() . 'php::throwException("UnhandledMatchError", "Unhandled match case");' . PHP_EOL
+                    . $this->getIndent() . 'return {};' . PHP_EOL;
+            }
             $this->indentLevel--;
             $code .= $this->getIndent() . '}' . PHP_EOL;
         }
@@ -251,9 +260,24 @@ trait SelectionExpressionTrait
         return $code;
     }
 
-    protected function formatMatchReturn(NodeAbstract $body, string $nativeClass = ''): string
+    protected function formatMatchReturn(NodeAbstract $body, string $nativeClass = '', string $returnType = Type::VAR): string
     {
         $this->assertExprCanBeUsedAsValue($body, 'match arm');
+        if ($body instanceof Expr\Throw_) {
+            [$value, $beforeStmts, $afterStmts] = $this->parseExprWithCapturedStmts($body);
+            $code = $this->formatCapturedStmtLines($beforeStmts);
+            $code .= $this->formatCapturedStmtLines($afterStmts);
+            if ($nativeClass !== '') {
+                $code .= $this->getIndent() . $value . ';' . PHP_EOL;
+                $code .= $this->getIndent() . 'return nullptr;' . PHP_EOL;
+            } elseif ($returnType === Type::VAR) {
+                $code .= $this->getIndent() . 'return ' . $value . ';' . PHP_EOL;
+            } else {
+                $code .= $this->getIndent() . $value . ';' . PHP_EOL;
+                $code .= $this->getIndent() . 'return {};' . PHP_EOL;
+            }
+            return $code;
+        }
         [$value, $beforeStmts, $afterStmts] = $this->parseExprWithCapturedStmts($body);
         if ($nativeClass !== '' && $this->isNull($body)) {
             $value = 'nullptr';
@@ -265,7 +289,7 @@ trait SelectionExpressionTrait
                 $this->addLocalVar($tmpVar, $this->getNativeObjectPointerType($nativeClass));
                 $this->addNativeObject($tmpVar, $nativeClass);
             } else {
-                $tmpVar = $this->addTmpVar(Type::VAR);
+                $tmpVar = $this->addTmpVar($returnType);
             }
             $code .= $this->getIndent() . "{$tmpVar} = {$value};" . PHP_EOL;
             $code .= $this->formatCapturedStmtLines($afterStmts);

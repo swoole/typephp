@@ -595,7 +595,7 @@ trait ClassConstantValueTrait
         return '\\' . $this->getNamespacedClassName($raw, $scope->namespace);
     }
 
-    private function resolveCompileTimeEnumCaseBackingValue(NodeAbstract $origin, EnumCaseRef $case): int|string
+    public function resolveCompileTimeEnumCaseBackingValue(NodeAbstract $origin, EnumCaseRef $case): int|string
     {
         if ($this->isInternalClass($case->enumClass)) {
             $value = constant(ltrim($case->enumClass, '\\') . '::' . $case->caseName);

@@ -3560,7 +3560,11 @@ abstract class CompilerBase implements PropertyAccessContext
                     if ($arm->body instanceof Expr\Throw_) {
                         continue;
                     }
-                    $armTypes[] = Type::getReferencedType($this->detectTypeOfExpr($arm->body));
+                    $armType = Type::getReferencedType($this->detectTypeOfExpr($arm->body));
+                    if ($this->varIntTypes && $armType === Type::INT && $this->exprCanOverflowInt($arm->body)) {
+                        $armType = Type::VAR;
+                    }
+                    $armTypes[] = $armType;
                 }
                 if (empty($armTypes)) {
                     return Type::VAR;

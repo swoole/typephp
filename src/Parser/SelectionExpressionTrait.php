@@ -277,6 +277,14 @@ trait SelectionExpressionTrait
         [$value, $beforeStmts, $afterStmts] = $this->parseExprWithCapturedStmts($body);
         if ($nativeClass !== '' && $this->isNull($body)) {
             $value = 'nullptr';
+        } elseif ($nativeClass === '' && $returnType !== Type::VAR) {
+            $provenType = $this->getLoweredExpressionType($body);
+            if ($provenType === null && $this->isVarExpr($body) && is_string($body->name) && $this->hasVar($body->name)) {
+                $provenType = $this->getVarType($body->name);
+            }
+            if ($provenType !== $returnType) {
+                $value = $this->convertExprFromType($returnType, $value);
+            }
         }
         $code = $this->formatCapturedStmtLines($beforeStmts);
         if ($afterStmts) {

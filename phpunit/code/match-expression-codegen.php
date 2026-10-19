@@ -57,3 +57,42 @@ function testMatchLocalVariableAssignment(int $x): void
     };
     var_dump($result);
 }
+
+class MatchCodegenHolder
+{
+    public int $number = 42;
+}
+
+function testMatchArmPropertyRead(int $x, MatchCodegenHolder $obj): int
+{
+    return match ($x) {
+        1 => $obj->number,
+        default => 0,
+    };
+}
+
+function testMatchArmTernaryPropertyRead(int $x, MatchCodegenHolder $obj, bool $flag): int
+{
+    return match ($x) {
+        1 => ($flag ? $obj->number : 0),
+        default => 0,
+    };
+}
+
+function testMatchBigInt(int $flag)
+{
+    $value = match ($flag) {
+        1 => std::bigInt('123'),
+        default => std::bigInt('456'),
+    };
+    return $value;
+}
+
+function testMatchDecimal(int $flag)
+{
+    $value = match ($flag) {
+        1 => std::decimal('12.5'),
+        default => std::decimal('45.5'),
+    };
+    return $value;
+}

@@ -22,10 +22,10 @@ function testDecimal(int $flag)
 
 function main(): void
 {
-    var_dump(testBigInt(1)->toString());
-    var_dump(testBigInt(2)->toString());
-    var_dump(testDecimal(1)->toString());
-    var_dump(testDecimal(2)->toString());
+    var_dump(std::bigInt(testBigInt(1))->toString());
+    var_dump(std::bigInt(testBigInt(2))->toString());
+    var_dump(std::decimal(testDecimal(1))->toString());
+    var_dump(std::decimal(testDecimal(2))->toString());
 }
 ?>
 --EXPECT--

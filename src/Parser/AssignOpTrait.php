@@ -2445,16 +2445,7 @@ trait AssignOpTrait
 
     protected function getNormalAssignType(string $type): string
     {
-        return match ($type) {
-            Type::REF,
-            Type::VOID,
-            Type::BIGINT,
-            Type::BIGFLOAT,
-            Type::DECIMAL,
-            Type::STREAM,
-            Type::BOX => Type::VAR,
-            default => $type,
-        };
+        return $type === Type::REF || $type === Type::VOID ? Type::VAR : $type;
     }
 
 }

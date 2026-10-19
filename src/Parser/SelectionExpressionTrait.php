@@ -73,7 +73,7 @@ trait SelectionExpressionTrait
             // by-value result types for the materializing lambda.
             $ternaryType = $nativeSelection
                 ? $this->getNativeObjectPointerType($nativeClass)
-                : $this->getNormalAssignType($typeChanged ? Type::VAR : $ifType);
+                : $this->getSelectionStorageType($this->getNormalAssignType($typeChanged ? Type::VAR : $ifType));
             $expr->setAttribute(self::ATTR_LOWERED_TYPE, $ternaryType);
             $code = '[&]() -> ' . $ternaryType . ' {' . PHP_EOL;
             $this->indentLevel++;
@@ -147,7 +147,7 @@ trait SelectionExpressionTrait
             $returnType = $this->getNativeObjectPointerType($nativeClass);
         } else {
             $inferredType = $this->detectTypeOfExpr($expr);
-            $returnType = $this->getNormalAssignType($inferredType);
+            $returnType = $this->getSelectionStorageType($this->getNormalAssignType($inferredType));
         }
         $expr->setAttribute(self::ATTR_LOWERED_TYPE, $returnType);
         $this->assertExprCanBeUsedAsValue($expr->cond, 'match condition');
@@ -434,6 +434,18 @@ trait SelectionExpressionTrait
         $code .= $this->getIndent() . 'return ' . $rightValue . ';' . PHP_EOL;
         $this->indentLevel--;
         return $code . $this->getIndent() . '}()';
+    }
+
+    protected function getSelectionStorageType(string $type): string
+    {
+        return match ($type) {
+            Type::BIGINT,
+            Type::BIGFLOAT,
+            Type::DECIMAL,
+            Type::STREAM,
+            Type::BOX => Type::VAR,
+            default => $type,
+        };
     }
 
 }

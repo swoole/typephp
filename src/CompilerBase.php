@@ -3375,6 +3375,13 @@ abstract class CompilerBase implements PropertyAccessContext
                 if (!$interfaceConstDef->codegenFinalized) {
                     return false;
                 }
+                // Same materialize-temporary guard as the class-constant
+                // branch below: inlining a tmp_var_N initializer would
+                // reference locals that do not exist in the fetching function
+                // (C2065 / C2593).
+                if ($interfaceConstDef->arrayExpr !== '' || str_contains($interfaceConstDef->value, 'tmp_var_')) {
+                    return false;
+                }
                 $expr->setAttribute('nativeConst', $interfaceConstDef);
                 return $interfaceConstDef->value;
             }
@@ -3398,6 +3405,17 @@ abstract class CompilerBase implements PropertyAccessContext
             // Fall back to the Zend class-constant lookup instead of emitting
             // an incomplete value; the lookup is cached in the convert phase.
             if (!$constDef->codegenFinalized) {
+                return false;
+            }
+            // A constant initializer that parse lowered into materialize
+            // temporaries (tmp_var_N) cannot be inlined: those temporaries are
+            // declared and assigned only in arrayExpr's prelude, which is
+            // emitted together with array constants. Inlining the value string
+            // into the fetching function references locals that do not exist
+            // there (C2065 / C2593). Fall back to the Zend class-constant
+            // lookup instead: it reads the already-evaluated literal that was
+            // registered for the constant and is cached in the convert phase.
+            if ($constDef->arrayExpr !== '' || str_contains($constDef->value, 'tmp_var_')) {
                 return false;
             }
             $expr->setAttribute('nativeConst', $constDef);

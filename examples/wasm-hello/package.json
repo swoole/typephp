@@ -13,6 +13,6 @@
   },
   "devDependencies": {
     "@bytecodealliance/jco": "^1.27.0",
-    "vite": "^7.1.0"
+    "vite": "^7.3.7"
   }
 }

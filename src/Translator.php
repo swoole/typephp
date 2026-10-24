@@ -11,6 +11,8 @@ namespace TypePhp;
 use Ajaxray\AnsiKit\AnsiTerminal;
 use Ajaxray\AnsiKit\Components\Progressbar;
 use MJS\TopSort\Implementations\StringSort;
+use PhpParser\BuilderHelpers;
+use PhpParser\ConstExprEvaluator;
 use PhpParser\Modifiers;
 use PhpParser\Node;
 use PhpParser\Node\Expr;
@@ -1356,6 +1358,8 @@ class Translator extends Preprocessor
                 // The runtime still calls these hooks; keep empty builds in this translation unit.
                 $code .= 'extern "C" void typephp_opcode_table_install(void) {}' . PHP_EOL;
                 $code .= 'extern "C" void typephp_opcode_table_uninstall(void) {}' . PHP_EOL;
+                $code .= 'extern "C" void typephp_opcode_table_request_startup(void) {}' . PHP_EOL;
+                $code .= 'extern "C" void typephp_opcode_table_request_shutdown(void) {}' . PHP_EOL;
             }
         }
 
@@ -1817,7 +1821,8 @@ CODE;
                         . $this->genCharPtr($classDef->getNamespacedName(false), true) . ', '
                         . $this->genCharPtr($property->name) . ', '
                         . 'php::Var(' . $default . '));' . PHP_EOL;
-                    $code .= $statement;
+                    $plan = new \TypePhp\Entity\ArrayInitPlan($default, $property->defaultInit, $property->defaultClean);
+                    $code .= $this->wrapArrayInitPlan($plan, $statement);
                 }
             }
         }
@@ -3952,7 +3957,9 @@ CODE;
                             ? $this->convertFloatExpr($property->default)
                             : $property->default;
                         $init = "do {\n";
+                        $init .= $property->defaultInit;
                         $init .= "auto value = php::Var({$default});\n";
+                        $init .= $property->defaultClean;
                         $init .= 'target.attr(' . $property->runtimeDefaultOffset
                             . ", php::AttrMode::Update) = value;\n";
                         $init .= "} while (0);\n";
@@ -6085,7 +6092,11 @@ CODE;
             }
             $this->fatalError($type, 'Cannot use "parent" when current class scope has no parent');
         }
-        return new Node\Name\FullyQualified($resolved, $type->getAttributes());
+        // NameResolver's cached name still points at the original trait scope.
+        // Arginfo reads that attribute before the spelling of the new node.
+        $attributes = $type->getAttributes();
+        unset($attributes['resolvedName']);
+        return new Node\Name\FullyQualified($resolved, $attributes);
     }
 
     /**
@@ -6536,6 +6547,49 @@ CODE;
 
         $this->resetMethod();
         $this->resetFunction();
+    }
+
+    protected function finalizePreparedProperty(PropertyDef $property, Expr $expression): void
+    {
+        // Preprocessing cannot always resolve enum properties or constants
+        // declared in another file. Revisit that conservative classification
+        // after all declarations and Trait composition are available. Scalar
+        // and null results already live in gen_stub's class default table;
+        // lowering the original expression for create_object would duplicate
+        // initialization and can leave its captured temporaries out of scope.
+        if ($property->requiresRuntimeDefaultInit
+            && $this->classDef !== null
+            && !$this->classDef->nativeObject
+            && $this->classDef->trait === null
+            && !$expression instanceof Expr\Array_
+        ) {
+            $origin = (string) $property->node?->getAttribute(self::TRAIT_ORIGIN_ATTRIBUTE, '');
+            try {
+                $class = $this->classDef;
+                $evaluator = new ConstExprEvaluator(function (Expr $part) use ($origin, $class): mixed {
+                    $value = $this->evaluateTraitMemberExpression($part, $origin, $class);
+                    if (is_scalar($value) || $value === null) {
+                        return $value;
+                    }
+                    // EnumCaseRef is a compiler carrier, not a runtime case
+                    // singleton. Do not let PHP compare carrier identities or
+                    // otherwise consume an object while folding scalars.
+                    throw new \RuntimeException('Property default requires a runtime value');
+                });
+                $value = $evaluator->evaluateDirectly($expression);
+                if (is_scalar($value) || $value === null) {
+                    $property->requiresRuntimeDefaultInit = false;
+                    $expression = BuilderHelpers::normalizeValue($value);
+                }
+            } catch (TestError $error) {
+                throw $error;
+            } catch (\Throwable) {
+                // Expressions not understood by the declaration evaluator
+                // retain the existing runtime initialization path.
+            }
+        }
+
+        parent::finalizePreparedProperty($property, $expression);
     }
 
     /**

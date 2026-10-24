@@ -386,6 +386,25 @@ trait SsaTypeOptimizer
                 || $this->exprCanOverflowInt($expr->right);
         }
 
+        // Follow expressions that forward a value. A wrapper must not hide
+        // overflow from a match arm or a declared int return boundary.
+        if ($expr instanceof Node\Expr\Ternary) {
+            return $this->exprCanOverflowInt($expr->if ?? $expr->cond)
+                || $this->exprCanOverflowInt($expr->else);
+        }
+        if ($expr instanceof Node\Expr\Match_) {
+            foreach ($expr->arms as $arm) {
+                if ($this->exprCanOverflowInt($arm->body)) {
+                    return true;
+                }
+            }
+        }
+        if ($expr instanceof Node\Expr\ErrorSuppress
+            || $expr instanceof Node\Expr\UnaryPlus
+            || $expr instanceof Node\Expr\UnaryMinus) {
+            return $this->exprCanOverflowInt($expr->expr);
+        }
+
         return false;
     }
 

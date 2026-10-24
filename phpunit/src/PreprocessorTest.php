@@ -295,6 +295,36 @@ class PreprocessorTest extends TestCase
         $this->assertSame(['/b.php', '/a.php', '/consumer.php'], $files);
     }
 
+    public function testFunctionDependenciesRetainOnlyUnqualifiedGlobalFallback(): void
+    {
+        $file = $this->testDir . '/namespace-fallback.php';
+        file_put_contents($file, <<<'PHP'
+<?php
+namespace DependencyConsumer;
+use function Vendor\provider as imported;
+function invoke(): void {
+    bridge();
+    \explicit();
+    namespace\relative();
+    Other\qualified();
+    imported();
+    strlen('x');
+}
+PHP);
+        // Providers may be prepared later; collect lookup candidates from the
+        // resolved AST without depending on the current symbol table.
+        $this->compiler->prepareFile($file);
+        $this->assertSame([
+            'function:dependencyconsumer\\bridge',
+            'function:bridge',
+            'function:explicit',
+            'function:dependencyconsumer\\relative',
+            'function:dependencyconsumer\\other\\qualified',
+            'function:vendor\\provider',
+            'function:dependencyconsumer\\strlen',
+        ], $this->getProperty('symbolCallInFile')[$file]);
+    }
+
     public function testPrepareFileParsesInterfaceMembersAndTypeChecks(): void
     {
         $file = __DIR__ . '/../code/preprocessor/interface_members.php';

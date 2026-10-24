@@ -1,0 +1,6 @@
+name: typephp_thread_probe
+mode: ext
+sources:
+  - probe.php
+ext-deps:
+  - swoole

@@ -935,11 +935,16 @@ abstract class Preprocessor extends CompilerBase
     {
         $this->resetFunction();
         $property->arrayInitPlan = null;
+        $property->defaultInit = '';
+        $property->defaultClean = '';
         if ($expression instanceof Node\Expr\Array_) {
             $property->arrayInitPlan = $this->buildLiteralArrayInitPlan($expression);
             $property->default = $property->arrayInitPlan->expr;
         } else {
-            $property->default = $this->parseIdentifier($expression);
+            $plan = $this->buildExpressionInitPlan($expression);
+            $property->default = $plan->expr;
+            $property->defaultInit = $plan->init;
+            $property->defaultClean = $plan->clean;
         }
     }
 
@@ -1171,6 +1176,21 @@ abstract class Preprocessor extends CompilerBase
             $funcName = strtolower($resolvedName->toString());
             if (!$this->isInternalFunction($funcName)) {
                 $this->symbolCallInFile[$this->file][] = $this->getFunctionDependencySymbol($funcName);
+            }
+            // An unqualified call in a namespace also searches the global
+            // function table. Providers can be prepared later, so retain both
+            // AST lookup candidates for headers and incremental invalidation.
+            // Imports, qualified and namespace-relative names have no fallback.
+            if ($node->name->isUnqualified()
+                && !$node->name instanceof Node\Name\FullyQualified
+                && !$node->name instanceof Node\Name\Relative
+                && $node->name->getAttribute('resolvedName') === null
+                && $node->name->getAttribute('namespacedName') instanceof Node\Name
+            ) {
+                $globalName = strtolower($node->name->toString());
+                if (!$this->isInternalFunction($globalName)) {
+                    $this->symbolCallInFile[$this->file][] = $this->getFunctionDependencySymbol($globalName);
+                }
             }
         } elseif ($node instanceof Node\Expr\ConstFetch) {
             $resolvedName = $node->name->getAttribute('resolvedName')
@@ -2195,6 +2215,11 @@ abstract class Preprocessor extends CompilerBase
     }
 
     protected function buildLiteralArrayInitPlan(Node\Expr\Array_ $defaultNode): ArrayInitPlan
+    {
+        return $this->buildExpressionInitPlan($defaultNode);
+    }
+
+    protected function buildExpressionInitPlan(Node\Expr $defaultNode): ArrayInitPlan
     {
         $localVarCount = count($this->context->localVars);
         $beforeStmtCount = count($this->context->beforeStmtLines);

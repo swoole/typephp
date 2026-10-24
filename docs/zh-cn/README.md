@@ -14,6 +14,7 @@
 - [将 PHP 依赖嵌入可执行文件](EMBEDDED_FILES.md)：`embedded-files` 的发布配置、Composer autoload、构建依赖和缓存规则。
 - [编译期函数](COMPILE_TIME_FUNCTIONS.md)：`std::any()`、`std::ref()`、`std::expected()`、`std::unexpected()` 和关键词方法。
 - [原生类型](NATIVE_TYPES.md)、[高精度类型](HIGH_PRECISION_TYPES.md)、[Std 容器](STD_CONTAINERS.md)。
+- [varint_types 当前行为与实现边界](VARINT_TYPES.md)：文件模式对整数存储、算术、常量诊断、类型检查、容器与优化的完整影响范围。
 - [三套对象存储与传递模型](OBJECT_STORAGE_AND_PASSING_MODELS.md)：Zend Object、PHPX Box 与 Native Class Object 的职责、ABI 和不可替代边界。
 - [通用与扩展方法](UNIVERSAL_METHODS.md)、[Generator](YIELD_GENERATOR.md)。
 - [`#[Immutable]` 编译期只读契约](IMMUTABLE.md)：方法、参数、别名、调用边界与动态逃逸规则。

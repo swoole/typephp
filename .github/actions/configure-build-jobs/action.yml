@@ -1,0 +1,35 @@
+name: Configure CI build jobs
+description: Use the runner's available logical CPU count for native builds
+runs:
+  using: composite
+  steps:
+    - name: Detect Unix CPU count
+      if: runner.os != 'Windows'
+      shell: bash
+      run: |
+        if [[ "${RUNNER_OS}" == 'macOS' ]]; then
+          build_jobs="$(sysctl -n hw.logicalcpu)"
+        else
+          build_jobs="$(nproc)"
+        fi
+        [[ "${build_jobs}" =~ ^[1-9][0-9]*$ ]]
+        for name in BUILD_JOBS CMAKE_BUILD_PARALLEL_LEVEL PHP_COMPILER_JOBS CARGO_BUILD_JOBS; do
+          echo "${name}=${build_jobs}" >> "${GITHUB_ENV}"
+        done
+        echo "MAKEFLAGS=-j${build_jobs}" >> "${GITHUB_ENV}"
+        echo "MFLAGS=-j${build_jobs}" >> "${GITHUB_ENV}"
+        echo "CI build jobs: ${build_jobs}"
+
+    - name: Detect Windows CPU count
+      if: runner.os == 'Windows'
+      shell: pwsh
+      run: |
+        $buildJobs = [Environment]::ProcessorCount
+        if ($buildJobs -lt 1) { throw 'Cannot determine the runner CPU count' }
+        foreach ($name in @('BUILD_JOBS', 'CMAKE_BUILD_PARALLEL_LEVEL', 'PHP_COMPILER_JOBS', 'CARGO_BUILD_JOBS')) {
+            "$name=$buildJobs" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+        }
+        # NMake rejects GNU Make job flags. Ninja/CMake use the explicit count.
+        "MAKEFLAGS=" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+        "MFLAGS=" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+        Write-Output "CI build jobs: $buildJobs"

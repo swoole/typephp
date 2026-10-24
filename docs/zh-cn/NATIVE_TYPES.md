@@ -8,9 +8,11 @@
 `php::Int`、`php::Float`、`php::Bool` 原生存储。原有 `use native_types` 已移除，
 编译器也绝不会在后续流程中把原生局部变量静默提升为 `php::Var`。
 
-只有文件确实需要 Zend PHP 的整数扩展语义时才使用 `use varint_types`；它只装箱
-推断出的整数，不影响 float 和 bool。只有单个值需要动态或引用语义时，使用
-`std::any($value)`。
+只有文件确实需要 Zend PHP 的整数扩展语义时才使用 `use varint_types`。存储映射
+只装箱推断出的普通整数，float 和 bool 仍保持原生存储；该文件模式还影响算术
+分派（包括浮点除法）、常量诊断、类型检查和优化，完整范围见
+[varint_types 当前行为与实现边界](VARINT_TYPES.md)。只有单个值需要动态或引用
+语义时，使用 `std::any($value)`。
 
 ### 基础原生类型
 1. ✅ `std::int` - 原生整数类型 (zend_long, 8 字节)
@@ -508,7 +510,7 @@ BigFloat / Decimal / BigInt 参与
 ```php
 use varint_types;
 $a = 10;        // Var，存 int(10)
-$b = 2.5;       // php::Float（varint_types 只影响推断整数）
+$b = 2.5;       // php::Float（varint_types 的存储映射只装箱推断整数）
 $c = $a + $b;   // 两边为 Var → ZendVM 运算 → float(12.5)
 ```
 

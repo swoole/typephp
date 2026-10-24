@@ -24,6 +24,9 @@ inputs:
 runs:
   using: composite
   steps:
+    - name: Configure CI build jobs
+      uses: ./.github/actions/configure-build-jobs
+
     - name: Checkout PHPX master
       uses: actions/checkout@v4
       with:
@@ -122,17 +125,21 @@ runs:
           -D BUILD_EXT=OFF \
           -D GITHUB_ACTION=ON \
           -D php_dir="${PHP_HOME}"
-        cmake --build "${PHPX_HOME}/build" --target phpx --parallel 2
+        cmake --build "${PHPX_HOME}/build" --target phpx --parallel "${BUILD_JOBS}"
         test -f "${PHPX_HOME}/lib/libphpx.${{ inputs.library-extension }}"
 
     - name: Build tpc
       shell: bash
       run: |
-        php bin/tpc.php project.yml --job 2 --no-progress
+        php bin/tpc.php project.yml --job "${BUILD_JOBS}" --no-progress
         test -x ./tpc
         file ./tpc
         file ./tpc | grep -Eiq 'arm64|aarch64|ARM aarch64'
         ./tpc --version
+
+    - name: Test bootstrap signatures
+      shell: bash
+      run: php bin/test-bootstrap-signatures.php --compiler=./tpc
 
     - name: Diagnose tpc crash
       if: failure() && inputs.os == 'linux'
@@ -182,7 +189,7 @@ runs:
       shell: bash
       run: |
         smoke_root=".github/smoke/${{ inputs.smoke-directory }}"
-        ./tpc "${smoke_root}/project.yml" --job 1 --no-progress
+        ./tpc "${smoke_root}/project.yml" --job "${BUILD_JOBS}" --no-progress
         smoke_binary="${smoke_root}/${{ inputs.smoke-binary }}"
         test -x "${smoke_binary}"
         output="$("${smoke_binary}")"
@@ -202,7 +209,7 @@ runs:
       shell: bash
       run: |
         composer install --no-dev --prefer-dist --no-progress --classmap-authoritative
-        php bin/tpc.php project-release.yml --job 2 --no-progress
+        php bin/tpc.php project-release.yml --job "${BUILD_JOBS}" --no-progress
         test -x ./tpc
         ./tpc --version
         export TYPEPHP_PACKAGE_VERSION="${GITHUB_REF_NAME}"

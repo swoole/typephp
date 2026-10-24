@@ -3559,6 +3559,29 @@ abstract class CompilerBase implements PropertyAccessContext
                     : $this->detectTypeOfExpr($expr->if);
                 $elseType = $this->detectTypeOfExpr($expr->else);
                 return $ifType === $elseType ? $ifType : Type::VAR;
+            case 'Expr_Match':
+                if (empty($expr->arms)) {
+                    return Type::VAR;
+                }
+                $armTypes = [];
+                foreach ($expr->arms as $arm) {
+                    if ($arm->body instanceof Expr\Throw_) {
+                        continue;
+                    }
+                    $armType = Type::getReferencedType($this->detectTypeOfExpr($arm->body));
+                    if ($this->varIntTypes && $armType === Type::INT && $this->exprCanOverflowInt($arm->body)) {
+                        $armType = Type::VAR;
+                    }
+                    $armTypes[] = $armType;
+                }
+                if (empty($armTypes)) {
+                    return Type::VAR;
+                }
+                $uniqueTypes = array_unique($armTypes);
+                if (count($uniqueTypes) === 1) {
+                    return reset($uniqueTypes);
+                }
+                return Type::VAR;
             case 'Expr_BinaryOp_Plus':
             case 'Expr_BinaryOp_Minus':
             case 'Expr_BinaryOp_Mul':

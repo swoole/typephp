@@ -27,23 +27,27 @@ trait ExceptionControlFlowTrait
             $this->fatalError($expr, 'Native objects cannot be thrown as Zend exceptions');
         }
         $type = $this->detectTypeOfExpr($expr->expr);
-        if ($this->isNewExpr($expr->expr)) {
-            $ex = $this->parseExpr($expr->expr);
-            return 'php::throwException(' . $ex . ')';
-        } elseif ($this->isVarExpr($expr->expr)) {
-            $ex = $this->parseIdentifier($expr->expr);
-            if ($type == Type::OBJECT) {
-                return 'php::throwException(' . $ex . ')';
-            }
-        } else {
-            $ex = $this->parseExpr($expr->expr);
-        }
         // A method call with a class return declaration is represented by a
         // php::Variant on the dynamic path, but it is still statically known
         // to be an object. Let throwValue() preserve that runtime value and
         // perform Zend's ordinary Throwable validation.
         if ($type !== Type::VAR && $type !== Type::OBJECT && $class === '') {
             $this->fatalError($expr, 'Can only throw objects');
+        }
+
+        [$ex, $beforeStmts, $afterStmts] = $this->parseExprWithCapturedStmts($expr->expr);
+        $this->appendCapturedStmtLinesToContext($beforeStmts);
+        if ($afterStmts) {
+            // Evaluate and retain the exception before releasing its receiver
+            // or other operand temporaries. Cleanup after throw is unreachable.
+            $tmpVar = $this->addTmpVar(Type::VAR);
+            $this->context->beforeStmtLines[] = $tmpVar . ' = ' . $ex . ';';
+            $this->appendCapturedStmtLinesToContext($afterStmts);
+            return 'php::throwValue(php::takeValue(' . $tmpVar . '))';
+        }
+        if ($this->isNewExpr($expr->expr)
+            || ($this->isVarExpr($expr->expr) && $type === Type::OBJECT)) {
+            return 'php::throwException(' . $ex . ')';
         }
         return 'php::throwValue(' . $ex . ')';
     }

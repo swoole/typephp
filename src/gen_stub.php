@@ -2680,6 +2680,31 @@ class EvaluatedValue
                     };
                 }
 
+                // PHP 8.2+ constant expressions fetch `->value`/`->name` from
+                // enum cases. Mirror the declaration evaluator: fold the two
+                // backed properties; any other property fetch falls through
+                // to the shared diagnostic below.
+                if ($expr instanceof Expr\PropertyFetch || $expr instanceof Expr\NullsafePropertyFetch) {
+                    $object = $evaluator->instance->evaluateDirectly($expr->var);
+                    if ($object === null && $expr instanceof Expr\NullsafePropertyFetch) {
+                        return null;
+                    }
+                    if ($object instanceof \TypePhp\Entity\EnumCaseRef) {
+                        $property = $expr->name instanceof Node\Identifier
+                            ? $expr->name->toString()
+                            : $evaluator->instance->evaluateDirectly($expr->name);
+                        if ($property === 'name') {
+                            return $object->caseName;
+                        }
+                        if ($property === 'value') {
+                            return getTranslator()->resolveCompileTimeEnumCaseBackingValue($expr, $object);
+                        }
+                        throw new Exception(
+                            "Undefined enum case property `{$object->enumClass}::{$object->caseName}->{$property}`"
+                        );
+                    }
+                }
+
                 // $expr is a ConstFetch with a name of a C macro here
                 if (!($expr instanceof Expr\ConstFetch) and !($expr instanceof Expr\ClassConstFetch)) {
                     _error:

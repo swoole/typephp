@@ -16,42 +16,15 @@ final class IncrementalDeclarationTest extends TestCase
 
     protected function setUp(): void
     {
-        $this->directory = sys_get_temp_dir() . '/typephp_incremental_' . bin2hex(random_bytes(8));
+        $this->directory = dirname(rtrim(TYPEPHP_ROOT_PATH, '/')) . '/tmp/typephp_incremental_' . bin2hex(random_bytes(8));
         $this->buildDirectory = $this->directory . '/build';
         mkdir($this->directory, 0777, true);
         $this->provider = $this->directory . '/provider.php';
         $this->consumer = $this->directory . '/consumer.php';
         $this->independent = $this->directory . '/independent.php';
-        file_put_contents($this->provider, <<<'PHP'
-<?php
-namespace Incremental;
-
-const LIMIT = 42;
-
-function answer(): int
-{
-    global $shared;
-    $shared = LIMIT;
-    return LIMIT;
-}
-PHP);
-        file_put_contents($this->independent, <<<'PHP'
-<?php
-
-function independent(): string
-{
-    return 'stable literal';
-}
-PHP);
-        file_put_contents($this->consumer, <<<'PHP'
-<?php
-
-function main(): int
-{
-    global $shared;
-    return \Incremental\answer() + \Incremental\LIMIT;
-}
-PHP);
+        $this->copyFixture('default/provider.php', $this->provider);
+        $this->copyFixture('default/independent.php', $this->independent);
+        $this->copyFixture('default/consumer.php', $this->consumer);
     }
 
     protected function tearDown(): void
@@ -124,17 +97,9 @@ PHP);
 
     public function testGroupedDeclarationsPreserveHelpersAndFilesWithoutFunctions(): void
     {
-        file_put_contents($this->provider, <<<'PHP'
-<?php
-namespace Incremental;
-abstract class Base
-{
-    abstract public function amount(int $value = 5): int;
-}
-function answer(int $value = 42, string ...$labels): int { return $value; }
-PHP);
-        file_put_contents($this->consumer, "<?php\nfunction main(): int { return \\Incremental\\answer(); }\n");
-        file_put_contents($this->independent, "<?php\nconst MARKER = 1;\n");
+        $this->copyFixture('grouped/provider.php', $this->provider);
+        $this->copyFixture('grouped/consumer.php', $this->consumer);
+        $this->copyFixture('grouped/independent.php', $this->independent);
 
         $compiler = $this->convertProject();
         foreach ([$this->provider, $this->consumer, $this->independent] as $file) {
@@ -160,14 +125,8 @@ PHP);
 
     public function testSuperglobalsAreDeclaredInEachUsingSource(): void
     {
-        file_put_contents($this->provider, <<<'PHP'
-<?php
-function readGlobals(): array
-{
-    return [$_GET, $_POST, $_COOKIE, $_SERVER, $_FILES, $_SESSION, $_REQUEST, $_ENV, $GLOBALS];
-}
-PHP);
-        file_put_contents($this->consumer, "<?php\nfunction main(): void {}\n");
+        $this->copyFixture('superglobals/provider.php', $this->provider);
+        $this->copyFixture('superglobals/consumer.php', $this->consumer);
 
         foreach ([1, 2] as $_) {
             $compiler = $this->convertProject();
@@ -196,19 +155,8 @@ PHP);
 
     public function testStdContainerParameterContractsSurviveWarmConversionAndInvalidateCallers(): void
     {
-        file_put_contents($this->provider, <<<'PHP'
-<?php
-namespace Incremental;
-function answer(#[\StdVector(\Type::Int)] $vec): int { return $vec[0]; }
-PHP);
-        file_put_contents($this->consumer, <<<'PHP'
-<?php
-function main(): void {
-    $vec = \std::vector(\Type::Int);
-    $vec[] = 7;
-    var_dump(\Incremental\answer($vec));
-}
-PHP);
+        $this->copyFixture('std-container/provider.php', $this->provider);
+        $this->copyFixture('std-container/consumer.php', $this->consumer);
         $first = $this->convertProject();
         $providerCpp = $this->invoke($first, 'getCppFile', $this->provider);
         $coldCode = file_get_contents($providerCpp);
@@ -218,7 +166,7 @@ PHP);
         self::assertSame($coldCode, file_get_contents($providerCpp));
         $function = $this->invoke($second, 'getFunction', 'incremental__answer');
         self::assertSame('vector', $function->argInfoList[0]->stdContainer['kind']);
-        file_put_contents($this->provider, str_replace('Type::Int', 'Type::Float', file_get_contents($this->provider)));
+        $this->copyFixture('std-container/provider-float.php', $this->provider);
         $third = $this->convertProject();
         self::assertTrue($this->invoke($third, 'shouldRegeneratePhpFile', $this->consumer));
         self::assertStringContainsString('php::StdVector<php::Float>', file_get_contents($providerCpp));
@@ -244,15 +192,7 @@ PHP);
 
     public function testGlobalArrayConstantInitializersSurviveColdAndWarmConversion(): void
     {
-        file_put_contents($this->provider, <<<'PHP'
-<?php
-namespace Incremental;
-const LIMIT = 42;
-const FIRST = [[[LIMIT, 1]], [[2, 3]]];
-const ENABLED = true;
-const SECOND = [0 => ['left' => LIMIT], 'tail' => [2, [3]]];
-function answer(): int { return FIRST[0][0][0] + SECOND[0]['left']; }
-PHP);
+        $this->copyFixture('array-constants/provider.php', $this->provider);
         $first = $this->convertProject();
         $extension = $this->buildDirectory . '/extension-incremental.cc';
         $coldCode = file_get_contents($extension);
@@ -308,8 +248,7 @@ PHP);
         foreach ([$providerCpp, $providerHeader, $consumerCpp, $independentCpp] as $generatedFile) {
             touch($generatedFile, $oldTimestamp);
         }
-        $providerSource = (string) file_get_contents($this->provider);
-        file_put_contents($this->provider, str_replace('const LIMIT = 42;', 'const LIMIT = 43;', $providerSource));
+        $this->copyFixture('default/provider-updated.php', $this->provider);
         clearstatcache();
 
         $this->convertProject();
@@ -326,14 +265,7 @@ PHP);
 
     public function testCachedClassKeepsRuntimeArrayPropertyDefaultAllocator(): void
     {
-        file_put_contents($this->independent, <<<'PHP'
-<?php
-
-final class IncrementalDefaults
-{
-    protected array $values = ['ready'];
-}
-PHP);
+        $this->copyFixture('array-defaults/independent.php', $this->independent);
 
         $this->convertProject();
         $this->convertProject();
@@ -451,8 +383,8 @@ PHP);
         $stub = $this->directory . '/provider.stub.php';
         rename($this->provider, $stub);
         $this->provider = $stub;
-        file_put_contents($stub, '<?php namespace Incremental; function answer(int $value = 42): int {}');
-        file_put_contents($this->consumer, '<?php function main(): int { return \\Incremental\\answer(); }');
+        $this->copyFixture('native-stub/provider.stub.php', $stub);
+        $this->copyFixture('native-stub/consumer.php', $this->consumer);
     }
 
     public function testStubDeclarationsAreGeneratedWithoutConvertingStubBodies(): void
@@ -479,6 +411,33 @@ PHP);
         self::assertSame($extensionCode, file_get_contents($extension));
     }
 
+    public function testNamespacedGlobalStubCallIncludesProviderAndTracksInvalidation(): void
+    {
+        $this->prepareNativeStub();
+        file_put_contents($this->provider, '<?php function native_global_answer(): int {}');
+        file_put_contents($this->consumer, <<<'PHP'
+<?php
+namespace Consumer {
+    final class Reader {
+        public static function read(): int { return native_global_answer(); }
+    }
+}
+namespace {
+    function main(): int { return \Consumer\Reader::read(); }
+}
+PHP);
+        $compiler = $this->convertProject();
+        $providerHeader = $compiler->getDeclarationHeaderFile($this->provider);
+        $consumerCode = file_get_contents($this->invoke($compiler, 'getCppFile', $this->consumer));
+        self::assertStringContainsString('#include <' . basename($providerHeader) . '>', $consumerCode);
+        self::assertStringContainsString('php_native_global_answer()', $consumerCode);
+        $state = json_decode(file_get_contents($this->buildDirectory . '/cache/incremental/incremental/build-state.json'), true);
+        self::assertContains($this->provider, $state['files'][$this->consumer]['dependencies']);
+        file_put_contents($this->provider, '<?php function native_global_answer(int $value = 42): int {}');
+        $updated = $this->convertProject();
+        self::assertTrue($this->invoke($updated, 'shouldRegeneratePhpFile', $this->consumer));
+    }
+
     public function testStubChangePreservingMtimeInvalidatesTheConsumer(): void
     {
         $this->prepareNativeStub();
@@ -486,7 +445,7 @@ PHP);
         $extension = $this->buildDirectory . '/extension-incremental.cc';
         $oldCode = file_get_contents($extension);
         $mtime = filemtime($this->provider);
-        file_put_contents($this->provider, str_replace('42', '43', file_get_contents($this->provider)));
+        $this->copyFixture('native-stub/provider-updated.stub.php', $this->provider);
         touch($this->provider, $mtime);
         clearstatcache();
         $second = $this->convertProject();
@@ -519,25 +478,8 @@ PHP);
     public function testImportedClassMetadataAndCallbacksStayInTheExtension(): void
     {
         $this->prepareNativeStub();
-        file_put_contents($this->provider, <<<'PHP'
-<?php
-/** @import-library */
-namespace Incremental;
-function answer(int $value = 42): int {}
-final class Counter
-{
-    public int $value = 0;
-    public function add(int $delta): int {}
-}
-PHP);
-        file_put_contents($this->consumer, <<<'PHP'
-<?php
-function main(): int
-{
-    $counter = new \Incremental\Counter();
-    return $counter->add(1) + \Incremental\answer();
-}
-PHP);
+        $this->copyFixture('imported-class/provider.stub.php', $this->provider);
+        $this->copyFixture('imported-class/consumer.php', $this->consumer);
         $first = $this->convertProject();
         $arginfo = $first->getArgInfoHeaderFile($this->provider);
         $extension = $this->buildDirectory . '/extension-incremental.cc';
@@ -590,6 +532,55 @@ PHP);
         foreach ($contents as $path => $original) {
             self::assertSame($original, file_get_contents($path));
         }
+    }
+
+    public function testAddingAndRemovingChildOverrideInvalidatesBaseDispatch(): void
+    {
+        $this->copyFixture('child-override/provider.php', $this->provider);
+        $this->copyFixture('child-override/consumer.php', $this->consumer);
+        $first = $this->convertProject();
+        $baseCpp = $this->invoke($first, 'getCppFile', $this->provider);
+        self::assertStringContainsString('php::toInt(php_incremental__actor__face(this_))', file_get_contents($baseCpp));
+        $unchanged = $this->convertProject();
+        self::assertFalse($this->invoke($unchanged, 'shouldRegeneratePhpFile', $this->provider));
+
+        $this->copyFixture('child-override/consumer-overridden.php', $this->consumer);
+        $overridden = $this->convertProject();
+        self::assertTrue($this->invoke($overridden, 'shouldRegeneratePhpFile', $this->provider));
+        self::assertFalse($this->invoke($overridden, 'shouldRegeneratePhpFile', $this->independent));
+        self::assertStringNotContainsString('php::toInt(php_incremental__actor__face(this_))', file_get_contents($baseCpp));
+        self::assertStringContainsString('typephp_call_method_cached', file_get_contents($baseCpp));
+
+        $this->copyFixture('child-override/consumer.php', $this->consumer);
+        $removed = $this->convertProject();
+        self::assertTrue($this->invoke($removed, 'shouldRegeneratePhpFile', $this->provider));
+        self::assertStringContainsString('php::toInt(php_incremental__actor__face(this_))', file_get_contents($baseCpp));
+    }
+
+    public function testAddingAndRemovingDescendantInvalidatesTypedCallers(): void
+    {
+        $this->copyFixture('descendant/provider.php', $this->provider);
+        $this->copyFixture('descendant/consumer.php', $this->consumer);
+        $first = $this->convertProject();
+        $callerCpp = $this->invoke($first, 'getCppFile', $this->consumer);
+        self::assertStringContainsString('php::toInt(php_actor__face(actor))', file_get_contents($callerCpp));
+
+        $this->copyFixture('descendant/independent.php', $this->independent);
+        $added = $this->convertProject();
+        self::assertTrue($this->invoke($added, 'shouldRegeneratePhpFile', $this->provider));
+        self::assertTrue($this->invoke($added, 'shouldRegeneratePhpFile', $this->consumer));
+        self::assertStringNotContainsString('php::toInt(php_actor__face(actor))', file_get_contents($callerCpp));
+        self::assertStringContainsString('typephp_call_method_cached', file_get_contents($callerCpp));
+
+        $this->copyFixture('default/independent.php', $this->independent);
+        $removed = $this->convertProject();
+        self::assertTrue($this->invoke($removed, 'shouldRegeneratePhpFile', $this->consumer));
+        self::assertStringContainsString('php::toInt(php_actor__face(actor))', file_get_contents($callerCpp));
+    }
+
+    private function copyFixture(string $fixture, string $destination): void
+    {
+        copy(TYPEPHP_ROOT_PATH . '/phpunit/code/incremental-declarations/' . $fixture, $destination);
     }
 
     private function convertProject(string $target = 'incremental'): CompilerTest

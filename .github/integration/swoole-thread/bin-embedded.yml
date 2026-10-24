@@ -1,0 +1,9 @@
+name: typephp_thread_embedded
+mode: bin
+sources:
+  - probe.php
+  - bin-main.php
+embedded-files:
+  - request.txt
+ext-deps:
+  - swoole

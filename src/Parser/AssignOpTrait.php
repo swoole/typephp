@@ -780,6 +780,13 @@ trait AssignOpTrait
             $effectiveRightType = $rightExprType === Type::VAR && $this->getFixedPropertyTypeCheckHelper($propertyDef) !== null
                 ? $propertyDef->type
                 : $rightExprType;
+            if ($rightExprType !== Type::VAR
+                && ($right instanceof Expr\PropertyFetch || $right instanceof Expr\StaticPropertyFetch)) {
+                // A declared PHP scalar property can still be read through a
+                // Zend Variant. Use its lowered storage, not its declaration,
+                // when converting into the destination's native scalar slot.
+                $effectiveRightType = $this->getOrderedOperandTmpType($right, $rightExpr);
+            }
             return $var . ' = ' . $this->convertNativePropertyWriteExpr($propertyDef->type, $effectiveRightType, $rightExpr);
         }
         $rawAssignedType = $this->getRawVarType($var);

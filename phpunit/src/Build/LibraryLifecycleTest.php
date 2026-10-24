@@ -58,7 +58,7 @@ final class LibraryLifecycleTest extends TestCase
                 PHP_BINARY, TYPEPHP_ROOT_PATH . '/bin/tpc.php',
                 TYPEPHP_ROOT_PATH . '/examples/lib-demo/project.yml',
                 '--output', $directory . '/demo.so', '--build-dir', $directory . '/build',
-                '--job', '2', '--no-progress', '--no-color',
+                '--job', getenv('PHP_COMPILER_JOBS') ?: '1', '--no-progress', '--no-color',
             ], $directory);
             self::assertSame(0, $result['status'], $result['output']);
             $result = $this->execute([
@@ -155,7 +155,7 @@ final class LibraryLifecycleTest extends TestCase
         ]);
         file_put_contents($directory . '/' . $name . '.yml', $yaml);
         $result = $this->execute(
-            [PHP_BINARY, TYPEPHP_ROOT_PATH . '/bin/tpc.php', $name . '.yml', '--job', '2', '--no-progress', '--no-color'],
+            [PHP_BINARY, TYPEPHP_ROOT_PATH . '/bin/tpc.php', $name . '.yml', '--job', getenv('PHP_COMPILER_JOBS') ?: '1', '--no-progress', '--no-color'],
             $directory,
         );
         self::assertSame(0, $result['status'], $result['output']);

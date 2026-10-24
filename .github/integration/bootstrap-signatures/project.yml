@@ -1,0 +1,5 @@
+name: bootstrap_signatures
+mode: bin
+sources:
+  - ../../../src/Resolver/PropertyAccessContext.php
+  - main.php

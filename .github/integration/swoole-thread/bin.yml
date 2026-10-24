@@ -1,0 +1,7 @@
+name: typephp_thread_bin
+mode: bin
+sources:
+  - probe.php
+  - bin-main.php
+ext-deps:
+  - swoole

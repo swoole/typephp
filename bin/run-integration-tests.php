@@ -485,7 +485,7 @@ function runFpmIntegration(array $options, string $temporaryRoot): void
         $options['compiler'], $project . '/project.yml',
         '--php-version', $options['fpm_php_version'],
         '--output', $binary, '--build-dir', $temporaryRoot . '/fpm-build',
-        '--job', '8', '--no-progress',
+        '--job', getenv('PHP_COMPILER_JOBS') ?: '1', '--no-progress',
     ], environment: integrationCompilerEnvironment($options), timeout: 1800);
 
     // FPM requires a physical primary-script path before calling the compile hook.
@@ -557,7 +557,7 @@ function runExtIntegration(array $options, string $temporaryRoot): void
             '--mode', 'ext',
             '--output', $extension,
             '--build-dir', $temporaryRoot . '/ext-build-' . $name,
-            '--job', '1',
+            '--job', getenv('PHP_COMPILER_JOBS') ?: '1',
             '--no-progress',
         ], environment: integrationCompilerEnvironment($options));
         assertIntegrationTrue(is_file($extension), 'Extension artifact was not generated: ' . $extension);
@@ -698,7 +698,7 @@ function runLibIntegration(array $options, string $temporaryRoot): void
         runIntegrationCommand([
             $options['compiler'], $providerRoot . '/project.yml',
             '--output', $providerRoot . '/' . $target . '.' . PHP_SHLIB_SUFFIX,
-            '--build-dir', $providerRoot . '/build', '--job', '1', '--no-progress',
+            '--build-dir', $providerRoot . '/build', '--job', getenv('PHP_COMPILER_JOBS') ?: '1', '--no-progress',
         ], environment: integrationCompilerEnvironment($options));
 
         $library = $providerRoot . '/' . $target . '.' . PHP_SHLIB_SUFFIX;
@@ -745,7 +745,7 @@ function runLibIntegration(array $options, string $temporaryRoot): void
         '--mode', 'bin', '--output', $consumer,
         '--build-dir', $consumerRoot . '/build',
         '--link-path', $linkRoot,
-        '--job', '1', '--no-progress',
+        '--job', getenv('PHP_COMPILER_JOBS') ?: '1', '--no-progress',
     ], environment: integrationCompilerEnvironment($options));
     $libraryPath = $linkRoot;
     $environment = PHP_OS_FAMILY === 'Darwin'

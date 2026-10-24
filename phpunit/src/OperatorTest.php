@@ -177,10 +177,9 @@ class OperatorTest extends \BaseTest
         $this->assertStringContainsString('ZVAL_DOUBLE(&const_CONST_ONE_POINT_FIVE_value, 1.5);', $arginfo);
         $this->assertStringNotContainsString('2.718281828459);', $arginfo);
 
-        $this->assertStringContainsString('php::toFloat(2.7182818284590451)', $extension);
-        $this->assertStringContainsString('php::toFloat(std::numeric_limits<double>::infinity())', $extension);
-        $this->assertStringContainsString('php::toFloat(std::numeric_limits<double>::quiet_NaN())', $extension);
-        $this->assertStringNotContainsString('2.718281828459)', $extension);
+        // Folded scalar defaults are already stored exactly in the class
+        // table; they no longer need a per-object initializer.
+        $this->assertStringNotContainsString('create_object_FloatDeclarationContainer', $extension);
     }
 
     public function testFloatLiteralEmissionIsLocaleIndependent(): void

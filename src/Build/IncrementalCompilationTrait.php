@@ -326,9 +326,27 @@ trait IncrementalCompilationTrait
     private function buildPhpFileDependencyGraph(array $files): array
     {
         $known = array_fill_keys($files, true);
+        $hierarchyDependencies = [];
+        // Dispatch in a base class (and its typed callers) depends on whether
+        // descendants override its methods. Keep these reverse inheritance
+        // edges even before an override exists, so adding/removing one cannot
+        // leave a cached direct call to the base implementation behind.
+        // Direct children suffice: dirty propagation walks the whole graph.
+        foreach ($this->classSubClasses as $class => $children) {
+            $parentFile = $this->symbolDeclInFile[$this->getClassDependencySymbol($class)] ?? null;
+            if (!is_string($parentFile) || !isset($known[$parentFile])) {
+                continue;
+            }
+            foreach ($children as $child) {
+                $childFile = $this->symbolDeclInFile[$this->getClassDependencySymbol($child)] ?? null;
+                if (is_string($childFile) && $childFile !== $parentFile && isset($known[$childFile])) {
+                    $hierarchyDependencies[$parentFile][$childFile] = true;
+                }
+            }
+        }
         $dependencies = [];
         foreach ($files as $file) {
-            $requirements = [];
+            $requirements = $hierarchyDependencies[$file] ?? [];
             foreach ($this->symbolCallInFile[$file] ?? [] as $symbol) {
                 $dependency = $this->symbolDeclInFile[$symbol] ?? null;
                 if (is_string($dependency)

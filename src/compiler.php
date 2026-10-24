@@ -22,10 +22,10 @@ function runCompiler(int $argc, array $argv, CompilerRuntime $runtime): void
     // memory. The default CLI limit (commonly 128M) is too small for larger builds.
     ini_set('memory_limit', '-1');
 
-    // The late-loaded embed module is unloaded before PHP's object store. Drop
-    // cached reflector wrappers while their referenced internal symbols are
-    // still alive. Embed serves one request per compiler process; never add
-    // this traversal to an extension/CLI/FPM request-shutdown path.
+    // Drop cached reflector wrappers during shutdown while PHPX request state
+    // and their referenced internal symbols are still available. Embed serves
+    // one request per compiler process; keep this traversal out of the
+    // extension/CLI/FPM request-shutdown path.
     if (php_sapi_name() === 'embed') {
         register_shutdown_function([ReflectionResolver::class, 'clearCaches']);
     }

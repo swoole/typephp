@@ -73,7 +73,7 @@ trait SelectionExpressionTrait
             // by-value result types for the materializing lambda.
             $ternaryType = $nativeSelection
                 ? $this->getNativeObjectPointerType($nativeClass)
-                : $this->getNormalAssignType($typeChanged ? Type::VAR : $ifType);
+                : $this->getSelectionStorageType($this->getNormalAssignType($typeChanged ? Type::VAR : $ifType));
             $expr->setAttribute(self::ATTR_LOWERED_TYPE, $ternaryType);
             $code = '[&]() -> ' . $ternaryType . ' {' . PHP_EOL;
             $this->indentLevel++;
@@ -147,9 +147,13 @@ trait SelectionExpressionTrait
         $nativeSelection = $this->isNativeObjectClass($nativeClass);
         $conditionNativeClass = $this->detectClassOfExpr($expr->cond);
         $nativeCondition = $this->isNativeObjectClass($conditionNativeClass);
-        $returnType = $nativeSelection
-            ? $this->getNativeObjectPointerType($nativeClass)
-            : Type::VAR;
+        if ($nativeSelection) {
+            $returnType = $this->getNativeObjectPointerType($nativeClass);
+        } else {
+            $inferredType = $this->detectTypeOfExpr($expr);
+            $returnType = $this->getSelectionStorageType($this->getNormalAssignType($inferredType));
+        }
+        $expr->setAttribute(self::ATTR_LOWERED_TYPE, $returnType);
         $this->assertExprCanBeUsedAsValue($expr->cond, 'match condition');
         $var = $this->parseIdentifier($expr->cond);
         if ($this->isVarExpr($expr->cond)) {
@@ -224,7 +228,7 @@ trait SelectionExpressionTrait
             }
             $code .= $this->getIndent() . 'if (' . $matched . ') {' . PHP_EOL;
             $this->indentLevel++;
-            $code .= $this->formatMatchReturn($arm->body, $nativeClass);
+            $code .= $this->formatMatchReturn($arm->body, $nativeClass, $returnType);
             $this->indentLevel--;
             $code .= $this->getIndent() . '}' . PHP_EOL;
         }
@@ -232,16 +236,21 @@ trait SelectionExpressionTrait
         if ($default) {
             $code .= $this->getIndent() . '{' . PHP_EOL;
             $this->indentLevel++;
-            $code .= $this->formatMatchReturn($default, $nativeClass);
+            $code .= $this->formatMatchReturn($default, $nativeClass, $returnType);
             $this->indentLevel--;
             $code .= $this->getIndent() . '}' . PHP_EOL;
         } else {
             $code .= $this->getIndent() . '{' . PHP_EOL;
             $this->indentLevel++;
-            $code .= $nativeSelection
-                ? $this->getIndent() . 'php::throwException("UnhandledMatchError", "Unhandled match case");' . PHP_EOL
-                    . $this->getIndent() . 'return nullptr;' . PHP_EOL
-                : $this->getIndent() . 'return php::throwException("UnhandledMatchError", "Unhandled match case");' . PHP_EOL;
+            if ($nativeSelection) {
+                $code .= $this->getIndent() . 'php::throwException("UnhandledMatchError", "Unhandled match case");' . PHP_EOL
+                    . $this->getIndent() . 'return nullptr;' . PHP_EOL;
+            } elseif ($returnType === Type::VAR) {
+                $code .= $this->getIndent() . 'return php::throwException("UnhandledMatchError", "Unhandled match case");' . PHP_EOL;
+            } else {
+                $code .= $this->getIndent() . 'php::throwException("UnhandledMatchError", "Unhandled match case");' . PHP_EOL
+                    . $this->getIndent() . 'return {};' . PHP_EOL;
+            }
             $this->indentLevel--;
             $code .= $this->getIndent() . '}' . PHP_EOL;
         }
@@ -251,12 +260,35 @@ trait SelectionExpressionTrait
         return $code;
     }
 
-    protected function formatMatchReturn(NodeAbstract $body, string $nativeClass = ''): string
+    protected function formatMatchReturn(NodeAbstract $body, string $nativeClass = '', string $returnType = Type::VAR): string
     {
         $this->assertExprCanBeUsedAsValue($body, 'match arm');
+        if ($body instanceof Expr\Throw_) {
+            // parseThrow materializes its operand before cleaning up temporaries.
+            [$value, $beforeStmts] = $this->parseExprWithCapturedStmts($body);
+            $code = $this->formatCapturedStmtLines($beforeStmts);
+            if ($nativeClass !== '') {
+                $code .= $this->getIndent() . $value . ';' . PHP_EOL;
+                $code .= $this->getIndent() . 'return nullptr;' . PHP_EOL;
+            } elseif ($returnType === Type::VAR) {
+                $code .= $this->getIndent() . 'return ' . $value . ';' . PHP_EOL;
+            } else {
+                $code .= $this->getIndent() . $value . ';' . PHP_EOL;
+                $code .= $this->getIndent() . 'return {};' . PHP_EOL;
+            }
+            return $code;
+        }
         [$value, $beforeStmts, $afterStmts] = $this->parseExprWithCapturedStmts($body);
         if ($nativeClass !== '' && $this->isNull($body)) {
             $value = 'nullptr';
+        } elseif ($nativeClass === '' && $returnType !== Type::VAR) {
+            $provenType = $this->getLoweredExpressionType($body);
+            if ($provenType === null && $this->isVarExpr($body) && is_string($body->name) && $this->hasVar($body->name)) {
+                $provenType = $this->getVarType($body->name);
+            }
+            if ($provenType !== $returnType) {
+                $value = $this->convertExprFromType($returnType, $value);
+            }
         }
         $code = $this->formatCapturedStmtLines($beforeStmts);
         if ($afterStmts) {
@@ -265,7 +297,7 @@ trait SelectionExpressionTrait
                 $this->addLocalVar($tmpVar, $this->getNativeObjectPointerType($nativeClass));
                 $this->addNativeObject($tmpVar, $nativeClass);
             } else {
-                $tmpVar = $this->addTmpVar(Type::VAR);
+                $tmpVar = $this->addTmpVar($returnType);
             }
             $code .= $this->getIndent() . "{$tmpVar} = {$value};" . PHP_EOL;
             $code .= $this->formatCapturedStmtLines($afterStmts);
@@ -410,6 +442,18 @@ trait SelectionExpressionTrait
         $code .= $this->getIndent() . 'return ' . $rightValue . ';' . PHP_EOL;
         $this->indentLevel--;
         return $code . $this->getIndent() . '}()';
+    }
+
+    protected function getSelectionStorageType(string $type): string
+    {
+        return match ($type) {
+            Type::BIGINT,
+            Type::BIGFLOAT,
+            Type::DECIMAL,
+            Type::STREAM,
+            Type::BOX => Type::VAR,
+            default => $type,
+        };
     }
 
 }

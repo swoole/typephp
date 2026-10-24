@@ -30,9 +30,11 @@ function main()
     var_dump($result instanceof TestClass);
     var_dump($result === $test);
     var_dump($result instanceof TestInterface);
+    var_dump((string) (new ReflectionMethod(TestClass::class, 'test'))->getReturnType());
 }
 ?>
 --EXPECT--
 bool(true)
 bool(true)
 bool(true)
+string(9) "TestClass"

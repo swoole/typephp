@@ -30,6 +30,9 @@ jobs:
       - name: Checkout TypePHP
         uses: actions/checkout@v4
 
+      - name: Configure CI build jobs
+        uses: ./.github/actions/configure-build-jobs
+
       - name: Checkout PHPX master
         uses: actions/checkout@v4
         with:
@@ -320,7 +323,7 @@ jobs:
               throw "PHPX configuration failed with exit code $LASTEXITCODE"
           }
 
-          cmake --build $phpxBuild --target phpx --parallel 2
+          cmake --build $phpxBuild --target phpx --parallel $env:BUILD_JOBS
           if ($LASTEXITCODE -ne 0) {
               throw "PHPX build failed with exit code $LASTEXITCODE"
           }
@@ -337,13 +340,22 @@ jobs:
       - name: Build tpc.exe
         shell: pwsh
         run: |
-          php bin\tpc.php project.yml --job 1 --no-progress
+          php bin\tpc.php project.yml --job $env:BUILD_JOBS --no-progress
           if ($LASTEXITCODE -ne 0) {
               throw "TypePHP build failed with exit code $LASTEXITCODE"
           }
           if (-not (Test-Path 'tpc.exe')) {
               throw 'The compiler did not produce tpc.exe'
           }
+
+      - name: Test bootstrap signatures
+        shell: pwsh
+        run: |
+          $env:PHPRC = Join-Path $env:PHP_HOME 'php.ini'
+          $env:PATH = "$env:PHPX_HOME\build;$env:PATH"
+          php bin/test-bootstrap-signatures.php --compiler=./tpc.exe
+          if ($LASTEXITCODE -ne 0) { throw 'Bootstrap signature regression failed' }
+          Remove-Item Env:PHPRC
 
       - name: Run Windows smoke tests
         shell: pwsh
@@ -352,7 +364,7 @@ jobs:
 
           $env:PHPRC = Join-Path $env:PHP_HOME 'php.ini'
           $env:PATH = "$env:PHPX_HOME\build;$env:PATH"
-          & .\tpc.exe tests\windows\smoke\project.yml --job 1 --no-progress
+          & .\tpc.exe tests\windows\smoke\project.yml --job $env:BUILD_JOBS --no-progress
           if ($LASTEXITCODE -ne 0) {
               throw "Windows smoke project compilation failed with exit code $LASTEXITCODE"
           }
@@ -398,7 +410,7 @@ jobs:
           $env:PATH = "$env:PHPX_HOME\build;$env:PATH"
           $nanoExe = Join-Path '${{ github.workspace }}' 'tests\windows\smoke\windows_nano_smoke.exe'
           $nanoBuildDir = Join-Path $env:RUNNER_TEMP 'typephp-windows-nano-console-build'
-          & .\tpc.exe tests\windows\smoke\project.yml --nano --build-dir $nanoBuildDir --output $nanoExe --job 1 --no-progress
+          & .\tpc.exe tests\windows\smoke\project.yml --nano --build-dir $nanoBuildDir --output $nanoExe --job $env:BUILD_JOBS --no-progress
           if ($LASTEXITCODE -ne 0) {
               throw "Windows Nano smoke project compilation failed with exit code $LASTEXITCODE"
           }
@@ -483,7 +495,7 @@ jobs:
           $nanoGuiExe = Join-Path '${{ github.workspace }}' 'tests\windows\smoke\windows_nano_gui_smoke.exe'
           $nanoGuiBuildDir = Join-Path $env:RUNNER_TEMP 'typephp-windows-nano-gui-build'
           $env:PHPRC = Join-Path $env:PHP_HOME 'php.ini'
-          & .\tpc.exe tests\windows\smoke\project.yml --nano --no-console --build-dir $nanoGuiBuildDir --output $nanoGuiExe --job 1 --no-progress
+          & .\tpc.exe tests\windows\smoke\project.yml --nano --no-console --build-dir $nanoGuiBuildDir --output $nanoGuiExe --job $env:BUILD_JOBS --no-progress
           if ($LASTEXITCODE -ne 0) {
               throw "Windows Nano GUI project compilation failed with exit code $LASTEXITCODE"
           }
@@ -512,7 +524,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) {
               throw "Production Composer install failed with exit code $LASTEXITCODE"
           }
-          php bin\tpc.php project-release.yml --job 1 --no-progress
+          php bin\tpc.php project-release.yml --job $env:BUILD_JOBS --no-progress
           if ($LASTEXITCODE -ne 0) {
               throw "Standalone TypePHP release build failed with exit code $LASTEXITCODE"
           }

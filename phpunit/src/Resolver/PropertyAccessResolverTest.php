@@ -2,7 +2,7 @@
 
 namespace TypePhp\Tests\Resolver;
 
-use PhpParser\NodeAbstract;
+use PhpParser\Node;
 use PHPUnit\Framework\TestCase;
 use TypePhp\Entity\ClassDef;
 use TypePhp\Resolver\PropertyAccessContext;
@@ -30,7 +30,7 @@ final class PropertyAccessResolverTest extends TestCase
                 return $this->parents[strtolower(ltrim($class, '\\'))] ?? '';
             }
 
-            public function fatalError(NodeAbstract $node, string $msg): never
+            public function fatalError(Node $node, string $msg): never
             {
                 throw new \LogicException($msg);
             }
@@ -62,7 +62,7 @@ final class PropertyAccessResolverTest extends TestCase
                 return '';
             }
 
-            public function fatalError(NodeAbstract $node, string $msg): never
+            public function fatalError(Node $node, string $msg): never
             {
                 throw new \LogicException($msg);
             }

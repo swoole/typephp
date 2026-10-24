@@ -101,6 +101,10 @@ function main(): void {
 
     $deferred = new DeferredImplementation();
     var_dump($deferred->deferred(null) === $deferred);
+
+    var_dump((string) (new ReflectionMethod(NestedSelfConsumer::class, 'copy'))->getReturnType());
+    var_dump((string) (new ReflectionMethod(NestedParentMethodConsumer::class, 'parentFromNestedTrait'))->getReturnType());
+    var_dump((string) (new ReflectionMethod(DeferredBase::class, 'deferred'))->getReturnType());
 }
 ?>
 --EXPECT--
@@ -110,3 +114,6 @@ bool(true)
 bool(true)
 bool(true)
 bool(true)
+string(18) "NestedSelfConsumer"
+string(13) "LateBoundBase"
+string(13) "?DeferredBase"

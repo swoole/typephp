@@ -33,6 +33,9 @@ jobs:
       - name: Checkout TypePHP
         uses: actions/checkout@v4
 
+      - name: Configure CI build jobs
+        uses: ./.github/actions/configure-build-jobs
+
       - name: Checkout PHPX master
         uses: actions/checkout@v4
         with:
@@ -105,7 +108,7 @@ jobs:
             -D BUILD_EXT=OFF \
             -D GITHUB_ACTION=ON \
             -D php_dir="${PHP_HOME}"
-          cmake --build "${PHPX_HOME}/build" --target phpx --parallel 2
+          cmake --build "${PHPX_HOME}/build" --target phpx --parallel "${BUILD_JOBS}"
           test -f "${PHPX_HOME}/lib/libphpx.so"
 
       - name: Build phpy
@@ -113,7 +116,7 @@ jobs:
         run: |
           phpize
           ./configure
-          make -j2
+          make -j"${BUILD_JOBS}"
           test -f modules/phpy.so
 
       - name: Enable phpy extension
@@ -134,11 +137,15 @@ jobs:
       - name: Build tpc
         shell: bash
         run: |
-          php bin/tpc.php project.yml --job 2 --no-progress
+          php bin/tpc.php project.yml --job "${BUILD_JOBS}" --no-progress
           test -x ./tpc
           file ./tpc
           file ./tpc | grep -Eiq 'x86-64|x86_64|amd64'
           ./tpc --version
+
+      - name: Test bootstrap signatures
+        shell: bash
+        run: php bin/test-bootstrap-signatures.php --compiler=./tpc
 
       - name: Upload Linux x64 build outputs
         uses: actions/upload-artifact@v4
@@ -172,6 +179,9 @@ jobs:
     steps:
       - name: Checkout TypePHP
         uses: actions/checkout@v4
+
+      - name: Configure CI build jobs
+        uses: ./.github/actions/configure-build-jobs
 
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
@@ -263,6 +273,9 @@ jobs:
     steps:
       - name: Checkout TypePHP
         uses: actions/checkout@v4
+
+      - name: Configure CI build jobs
+        uses: ./.github/actions/configure-build-jobs
 
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
@@ -387,6 +400,9 @@ jobs:
       - name: Checkout TypePHP
         uses: actions/checkout@v4
 
+      - name: Configure CI build jobs
+        uses: ./.github/actions/configure-build-jobs
+
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
@@ -488,7 +504,7 @@ jobs:
         run: |
           mkdir -p build/phpt-metrics
           .github/scripts/observe-command.sh build/phpt-metrics -- \
-            php run-tests.php -q -j8 --compiler .github/scripts/observe-tpc.sh \
+            php run-tests.php -q -j"${BUILD_JOBS}" --compiler .github/scripts/observe-tpc.sh \
             -w build/failed-tests.txt -W build/test-results.txt tests/compiler
 
       - name: Summarize PHPT compiler metrics
@@ -513,7 +529,7 @@ jobs:
         shell: bash
         run: |
           composer install --no-dev --prefer-dist --no-progress --classmap-authoritative
-          php bin/tpc.php project-release.yml --job 2 --no-progress
+          php bin/tpc.php project-release.yml --job "${BUILD_JOBS}" --no-progress
           test -x ./tpc
           ./tpc --version
           export TYPEPHP_PACKAGE_VERSION="${GITHUB_REF_NAME}"

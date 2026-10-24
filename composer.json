@@ -22,7 +22,7 @@
     "marcj/topsort": "^2.0",
     "symfony/var-dumper": "^8.0",
     "symfony/yaml": "^8.0",
-    "swoole/phpx": "~2.9.4",
+    "swoole/phpx": "dev-master",
     "ajaxray/ansikit": "^0.3"
   },
   "require-dev": {

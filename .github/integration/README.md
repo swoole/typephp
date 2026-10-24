@@ -1,5 +1,12 @@
 # EXT/LIB/FPM integration tests
 
+The [bootstrap signature regression](bootstrap-signatures/README.md) checks
+the compiler's real diagnostic interface before request-time autoloading.
+
+Swoole Thread has a separate [three-platform compatibility suite](swoole-thread/README.md)
+and [recorded results](swoole-thread/RESULTS.md), including interpreted controls,
+extension builds and embedded executables.
+
 This suite lives below `.github` because repository test fixtures with a `.php`
 suffix are intentionally ignored below `tests/`. It protects build-mode
 boundaries rather than duplicating the PHP syntax coverage in `tests/compiler`.

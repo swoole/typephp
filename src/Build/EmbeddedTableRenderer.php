@@ -45,6 +45,8 @@ final class EmbeddedTableRenderer
         if ($archive->isEmpty() && $emitEmptyRuntimeHooks) {
             $code .= 'extern "C" void typephp_opcode_table_install(void) {}' . PHP_EOL;
             $code .= 'extern "C" void typephp_opcode_table_uninstall(void) {}' . PHP_EOL;
+            $code .= 'extern "C" void typephp_opcode_table_request_startup(void) {}' . PHP_EOL;
+            $code .= 'extern "C" void typephp_opcode_table_request_shutdown(void) {}' . PHP_EOL;
         }
         return $code;
     }

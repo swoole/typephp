@@ -1,0 +1,1 @@
+thread-request-embedded-resource

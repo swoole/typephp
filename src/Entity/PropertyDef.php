@@ -17,6 +17,9 @@ class PropertyDef
     public string $type;
     public int $flags;
     public ?string $default = null;
+    /** Declarations and statements captured while lowering a runtime default. */
+    public string $defaultInit = '';
+    public string $defaultClean = '';
     public ?ArrayInitPlan $arrayInitPlan = null;
     /** Original declaration AST; lowered to $default only in the convert phase. */
     public ?NodeAbstract $defaultExpr = null;

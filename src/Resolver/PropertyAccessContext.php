@@ -9,7 +9,7 @@
 namespace TypePhp\Resolver;
 
 use TypePhp\Entity\ClassDef;
-use PhpParser\NodeAbstract;
+use PhpParser\Node;
 
 interface PropertyAccessContext
 {
@@ -17,5 +17,7 @@ interface PropertyAccessContext
 
     public function getParentClass(string $class): string;
 
-    public function fatalError(NodeAbstract $node, string $msg): never;
+    // Match CompilerDiagnosticTrait: MINIT cannot autoload PhpParser classes
+    // to prove contravariance between NodeAbstract and Node.
+    public function fatalError(Node $node, string $msg): never;
 }

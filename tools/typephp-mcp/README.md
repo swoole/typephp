@@ -32,6 +32,8 @@
 
 ## 构建
 
+### Windows
+
 前置：VS 2022 BuildTools（`vcvars64.bat`，经 vswhere 自动定位）与一个 tpc 包。
 
 ```bat
@@ -52,6 +54,29 @@ tools\typephp-mcp\build.bat
 产物 `typephp_mcp.exe` 及运行时 DLL（phpx/php8ts/gmp/mpfr/mpdec）都在本目录，
 **不需要改 PATH**。
 
+### macOS / Linux
+
+```bash
+tools/typephp-mcp/build.sh
+```
+
+Windows 有一个 tpc 发行包目录装着 phpx/PHP SDK，Unix 侧没有，所以 `build.sh` 改为定位
+**宿主 embed 运行时**（顺序：显式 `PHP_HOME`/`PHPX_HOME` → `~/.typephp/php-builder/php-*/install`
+里最新的私有运行时 → 仓库 `vendor/swoole/phpx`）：
+
+| 前置 | 要求 | 实测踩坑 |
+|---|---|---|
+| clang | `xcode-select --install` | tpc 启动即打印 `Initialized platform/backend: macOS + Clang` |
+| `PHP_HOME` | `lib/libphp.{a,dylib}` | Homebrew 的 php 只建 cli SAPI，**没有 libphp**；`--dry` 也会直接 Fatal |
+| `PHPX_HOME` | `include/phpx.h` + `lib/libphpx.{a,dylib}` | 编译器现在生成 `php::empty_string`，phpx 需 ≥ 该 API（`composer update swoole/phpx`），`build.sh` 会先校验再报错 |
+| 链接库 | — | 私有运行时的扩展集通常比本项目声明的多，`libphp.a` 于是引用 tpc 不认识的 `-lonig/-lxml2/-lsqlite3/-lz/-lresolv/-lcurl/-lssl -lcrypto/-liconv`；`build.sh` 用 `ar -t` 探测实际对象后补齐，iconv/openssl 是 brew keg-only 还要带 `-L` |
+
+产物是本目录的 `typephp_mcp`（无 `.exe` 后缀，Mach-O arm64，约 25 MB），依赖 gmp/mpfr/oniguruma
+等 brew dylib 的绝对路径，换机需重装同样的 brew 包。
+
+以上 macOS 路径为实测；`build.sh` 同时按 Linux 写（`uname` 分支只影响 libiconv 那条），
+**Linux 侧尚未实跑验证**。
+
 ## 运行 / 接入 MCP 客户端
 
 ```bat
@@ -59,12 +84,23 @@ set TYPEPHP_MCP_ROOT=D:\git\php\aot-compiler
 tools\typephp-mcp\typephp_mcp.exe
 ```
 
+macOS / Linux（`check_code` 要调编译器，所以 `PHP_HOME`/`PHPX_HOME` 与构建时同一套）：
+
+```bash
+export TYPEPHP_MCP_ROOT=/Volumes/data/git/php/typephp-compiler
+export PHP_HOME=$HOME/.typephp/php-builder/php-8.5.11-<hash>/install
+export PHPX_HOME=<phpx 树：include/phpx.h + lib/libphpx.a>
+tools/typephp-mcp/typephp_mcp
+```
+
 环境变量：
 
 | 变量 | 默认 | 说明 |
 |---|---|---|
-| `TYPEPHP_MCP_ROOT` | 从 cwd 向上找 `bin/tpc.php` + `docs/`，再退到构建期默认值 | 仓库根 |
+| `TYPEPHP_MCP_ROOT` | 从 cwd 向上找 `bin/tpc.php` + `docs/`，再退到构建期默认值 | 仓库根。兜底常量 `TYPEPHP_MCP_DEFAULT_ROOT` 是 Windows 开发机路径，**在 mac 上永远命中不到**，客户端从别处拉起 server 时必须显式设置 |
 | `TYPEPHP_MCP_PHP` | `php`（PATH 查找） | `check_code` / `get_index_info` 调编译器用的 PHP |
+| `PHP_HOME` / `PHPX_HOME` | 继承调用方环境 | 这两个只被 `check_code`/`get_index_info` 间接使用（tpc 自己读）；mac 上不设就是 `The host PHP embed library is missing`，工具会如实回报成 `FAILED (exit 255)` |
+| `TYPEPHP_MCP_PROJECT_ROOT` | 未设 | 客户端不发 MCP roots 时，手动把 TypePHP 项目路径并入默认检索集（分隔符 `;` 或 `:` 都认） |
 
 Finch（`~/.finch/mcp/servers.json`，对象数组）：
 
@@ -122,7 +158,22 @@ php vendor/bin/phpunit tools/typephp-mcp/tests/
 - `McpServerTest`：协议分发 + 12 个工具的逻辑单测（普通 PHP 直接跑；
   源码刻意保持在 stock PHP 与 TypePHP 的交集内，解释执行与 AOT 编译跑同一份代码）。
 - `McpBinaryTest`：驱动编译产物跑真实 stdio 会话，含逐条 flush 超时校验
-  （未构建时自动 skip）。
+  （未构建时自动 skip）。二进制按平台取 `typephp_mcp.exe` / `typephp_mcp`，
+  也可用 `TYPEPHP_MCP_BINARY=<path>` 指定。
+
+`check_code` 相关断言（两个测试文件里共 3 条）要求调用方环境里有一个能跑 `tpc --dry`
+的 embed 运行时；Windows 靠 tpc 包，macOS/Linux 靠 `PHP_HOME`/`PHPX_HOME`（见"构建"）。
+没设这些变量时它们会红，报的是编译器那句 `The host PHP embed library is missing`，
+不是本项目的问题。
+
+macOS 实测（2026-10-24，Apple Silicon，PHP 8.5.7 + 私有 8.5.11 embed 运行时 + phpx 2.9.4）：
+`php vendor/bin/phpunit tools/typephp-mcp/tests/` → 36 用例 / 383 断言全绿，
+唯一 skip 是 `testMsvcBinDirDiscovery`（vswhere 只在 Windows 存在）。
+AOT 产物 25 MB，真实 stdio 会话里 12 个工具与两条 `exec()` 通路
+（`get_index_info` 的 tpc+git、`check_code` 的 tpc --dry）均正常。
+逐个工具比对 AOT 产物与解释执行同一份代码：12 条回复逐字节相同，唯一差异是 `check_code`
+里那个 `uniqid()` 临时构建目录名。反向对照：把 `PHP_HOME` 指向没有 embed 库的目录，
+三条 `check_code` 断言（两个单测 + 产物会话各一）一起变红，说明这几条断言真的在管编译器通路。
 
 ## 已知问题（编译器侧，非本项目 bug）
 
@@ -131,3 +182,9 @@ php vendor/bin/phpunit tools/typephp-mcp/tests/
 `src/Parser/ConstantExpressionTrait.php::parseConstFetch()` 的常量折叠路径），
 运行时 `fwrite()/fgets()` 会抛 `TypeError`。规避：`main.php` 统一用
 `fopen('php://stdin'/'php://stdout'/'php://stderr')` 打开标准流。
+
+macOS 链接期缺扩展依赖：走私有 embed **静态** `libphp.a` 时，tpc 不按运行时的实际扩展集推导
+系统库，除 gmp/mpfr/c++ 外的 `-lonig -lxml2 -lsqlite3 -lz -lresolv -lcurl -lssl -lcrypto -liconv`
+都要应用侧补上，`build.sh` 用 `ar -t` 探测归档对象后补全（iconv/openssl 还是 brew keg-only，
+要带 `-L`）。CI 的 macos-arm64 作业没踩到，因为它用 setup-php 的**共享** `libphp.dylib`
+（依赖由 dyld 解析），只有静态 embed 运行时才需要这一串 `-l`。

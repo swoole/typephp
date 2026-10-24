@@ -2,6 +2,8 @@
 
 use PHPUnit\Framework\TestCase;
 
+require_once __DIR__ . '/../src/CompilerOracle.php';
+
 /**
  * Integration test: drives the compiled typephp_mcp.exe over a real stdio
  * session, including a live per-message flush check (the reply must arrive
@@ -9,18 +11,39 @@ use PHPUnit\Framework\TestCase;
  */
 final class McpBinaryTest extends TestCase
 {
-    private const EXECUTABLE = __DIR__ . '/../typephp_mcp.exe';
+    private const BUILD_DIR = __DIR__ . '/..';
 
     private const REPO_ROOT = __DIR__ . '/../../..';
 
+    /**
+     * The compiled binary is `typephp_mcp.exe` on Windows and `typephp_mcp`
+     * elsewhere; TYPEPHP_MCP_BINARY points the test at a specific artifact.
+     */
+    private static function executable(): string
+    {
+        $override = getenv('TYPEPHP_MCP_BINARY');
+        if (is_string($override) && $override !== '') {
+            return $override;
+        }
+        $suffix = PHP_OS_FAMILY === 'Windows' ? '.exe' : '';
+        return self::BUILD_DIR . '/typephp_mcp' . $suffix;
+    }
+
+    private static function buildHint(): string
+    {
+        $script = PHP_OS_FAMILY === 'Windows' ? 'build.bat' : './build.sh';
+        return 'typephp_mcp not built; run tools/typephp-mcp/' . $script;
+    }
+
     public function testStdioMcpSession(): void
     {
-        if (!is_file(self::EXECUTABLE)) {
-            self::markTestSkipped('typephp_mcp.exe not built; run tools/typephp-mcp/build.bat');
+        $executable = self::executable();
+        if (!is_file($executable)) {
+            self::markTestSkipped(self::buildHint());
         }
 
         $process = proc_open(
-            [self::EXECUTABLE],
+            [$executable],
             [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']],
             $pipes,
             self::REPO_ROOT
@@ -70,6 +93,34 @@ final class McpBinaryTest extends TestCase
             self::assertNotNull($reply);
             self::assertSame(JSON_ERROR_NONE, json_last_error());
             self::assertStringContainsString('docs/zh-cn/', $reply['result']['content'][0]['text']);
+
+            // The two tools that shell out. Reading them from the compiled
+            // process is what proves exec() works in the AOT binary; the
+            // interpreted suite cannot cover that on any platform.
+            $call = [
+                'jsonrpc' => '2.0',
+                'id' => 5,
+                'method' => 'tools/call',
+                'params' => ['name' => 'get_index_info', 'arguments' => []],
+            ];
+            self::assertNotFalse(fwrite($pipes[0], (string) json_encode($call) . "\n"));
+            $reply = $this->readReply($pipes[1], 30.0);
+            self::assertNotNull($reply);
+            self::assertStringContainsString('git_commit: ', $reply['result']['content'][0]['text']);
+            self::assertStringContainsString('tpc_version: ', $reply['result']['content'][0]['text']);
+
+            if (CompilerOracle::phpBinary() !== '') {
+                $call = [
+                    'jsonrpc' => '2.0',
+                    'id' => 6,
+                    'method' => 'tools/call',
+                    'params' => ['name' => 'check_code', 'arguments' => ['path' => 'examples/hello.php']],
+                ];
+                self::assertNotFalse(fwrite($pipes[0], (string) json_encode($call) . "\n"));
+                $reply = $this->readReply($pipes[1], 60.0);
+                self::assertNotNull($reply, 'no check_code reply within timeout');
+                self::assertStringStartsWith('OK:', $reply['result']['content'][0]['text']);
+            }
         } finally {
             fclose($pipes[0]);
             fclose($pipes[1]);

@@ -352,8 +352,11 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          # phpx.dll lives in the PHPX build directory; without it on PATH the
-          # compiler exits with STATUS_DLL_NOT_FOUND (0xC0000135).
+          # The compiled compiler declares ZEND_MOD_REQUIRED for mbstring and
+          # links phpx.dll from the PHPX build directory, so it needs both the
+          # packaged php.ini and that directory on PATH - the same setup every
+          # other step that runs tpc.exe uses.
+          $env:PHPRC = Join-Path $env:PHP_HOME 'php.ini'
           $env:PATH = "$env:PHPX_HOME\build;$env:PATH"
           & .\tpc.exe tools\typephp-mcp\project.yml --job $env:BUILD_JOBS --no-progress
           if ($LASTEXITCODE -ne 0) {

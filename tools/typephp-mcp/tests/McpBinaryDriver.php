@@ -160,12 +160,27 @@ final class McpBinaryDriver
             @fclose($pipes[1]);
             @fclose($pipes[2]);
             $status = @proc_get_status($process);
-            if (is_array($status) && $status['running']) {
-                @proc_terminate($process, 9);
+            if (is_array($status) && $status['running'] && isset($status['pid'])) {
+                self::killTree((int) $status['pid']);
             }
             @proc_close($process);
         }
         return $checks;
+    }
+
+    /**
+     * Terminate the process tree. Windows needs taskkill /T because
+     * proc_terminate only signals the direct child, leaving the compiler
+     * grandchildren (and their inherited handles) alive.
+     */
+    private static function killTree(int $pid): void
+    {
+        if (stripos(PHP_OS, 'WIN') === 0) {
+            $discard = [];
+            @exec('taskkill /PID ' . $pid . ' /T /F 2>nul', $discard, $discardCode);
+            return;
+        }
+        @exec('kill -9 ' . $pid . ' 2>/dev/null', $discard, $discardCode);
     }
 
     private static function write($stream, array $payload): void

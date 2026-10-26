@@ -205,6 +205,9 @@ runs:
     - name: Run typephp-mcp native smoke
       shell: bash
       run: |
+        # Point check_code at the compiler this job just built, so it never
+        # depends on the auto-detection order.
+        export TYPEPHP_MCP_TPC="${PWD}/tpc"
         php tools/typephp-mcp/tests/mcp-binary-smoke.php tools/typephp-mcp/typephp_mcp "${{ github.workspace }}"
         php tools/typephp-mcp/tests/mcp-binary-smoke.php --interpreted "${{ github.workspace }}"
 

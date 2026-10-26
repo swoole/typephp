@@ -262,6 +262,9 @@ jobs:
           export PHP_HOME="${php_home}"
           bash tools/typephp-mcp/build.sh
           test -x tools/typephp-mcp/typephp_mcp
+          # Pin check_code to the compiler built above rather than relying on
+          # the auto-detection order (the repository also ships bin/tpc.php).
+          echo "TYPEPHP_MCP_TPC=${PWD}/tpc" >> "${GITHUB_ENV}"
 
       - name: Run PHPUnit
         run: vendor/bin/phpunit

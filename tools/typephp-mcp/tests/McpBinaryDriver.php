@@ -139,17 +139,24 @@ final class McpBinaryDriver
             $text = is_array($reply) ? ($reply['result']['content'][0]['text'] ?? '') : '';
             $checks[] = self::check('get_index_info reports repo root', str_contains($text, 'repo_root:'), substr($text, 0, 200));
 
-            // 8. A notification (no id) is never answered.
+            // 8. A notification (no id) is never answered, and the server
+            // stays responsive afterwards. Send the notification and a ping
+            // back to back: the next reply must be the ping's (id 8). If the
+            // notification were answered, that stray reply (with a null or
+            // missing id) would arrive first. Probing this way avoids waiting
+            // for a "quiet window", which needs a readable-with-timeout pipe
+            // and PHP on Windows cannot provide one.
             self::write($pipes[0], ['jsonrpc' => '2.0', 'method' => 'tools/list']);
-            $spurious = self::readReply($pipes[1], self::NOTIFICATION_WAIT_SECONDS);
-            $checks[] = self::check('notification without id is not answered', $spurious === null, (string) json_encode($spurious));
-
-            // 9. The server stays responsive after the notification (ping).
             self::write($pipes[0], ['jsonrpc' => '2.0', 'id' => 8, 'method' => 'ping']);
             $reply = self::readReply($pipes[1], self::REPLY_TIMEOUT_SECONDS);
             $checks[] = self::check(
+                'notification without id is not answered',
+                is_array($reply) && ($reply['id'] ?? null) === 8,
+                (string) json_encode($reply)
+            );
+            $checks[] = self::check(
                 'server responsive after notification',
-                $reply !== null && array_key_exists('result', $reply),
+                is_array($reply) && array_key_exists('result', $reply),
                 (string) json_encode($reply)
             );
         } finally {
@@ -205,34 +212,24 @@ final class McpBinaryDriver
      */
     private static function readReply($stream, float $seconds): ?array
     {
-        $deadline = microtime(true) + $seconds;
-        if (self::$deadline !== null && self::$deadline < $deadline) {
-            $deadline = self::$deadline;
+        // Every read here follows a request the server must answer, and the
+        // server writes one line and flushes per request, so a plain blocking
+        // read is enough. Polling or select() on a pipe is not portable to
+        // Windows (a non-blocking read there still blocks, and select() can
+        // block forever once the peer closes), which is what stalled the CI
+        // smoke run for ten minutes after every check had passed.
+        stream_set_blocking($stream, true);
+        @stream_set_timeout($stream, (int) $seconds);
+        $line = @fgets($stream);
+        if (!is_string($line) || $line === '') {
+            return null;
         }
-        $buffer = '';
-        while (microtime(true) < $deadline) {
-            $read = [$stream];
-            $write = null;
-            $except = null;
-            $ready = stream_select($read, $write, $except, 0, 200000);
-            if ($ready === false) {
-                return null;
-            }
-            if ($ready > 0) {
-                $chunk = (string) fread($stream, 8192);
-                if ($chunk === '') {
-                    return null;
-                }
-                $buffer .= $chunk;
-                $position = strpos($buffer, "\n");
-                if ($position !== false) {
-                    $line = substr($buffer, 0, $position);
-                    $decoded = json_decode($line, true);
-                    return is_array($decoded) ? $decoded : null;
-                }
-            }
+        $meta = @stream_get_meta_data($stream);
+        if (is_array($meta) && !empty($meta['timed_out'])) {
+            return null;
         }
-        return null;
+        $decoded = json_decode(trim($line), true);
+        return is_array($decoded) ? $decoded : null;
     }
 
     /**

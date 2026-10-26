@@ -208,8 +208,10 @@ runs:
         # Point check_code at the compiler this job just built, so it never
         # depends on the auto-detection order.
         export TYPEPHP_MCP_TPC="${PWD}/tpc"
-        php tools/typephp-mcp/tests/mcp-binary-smoke.php tools/typephp-mcp/typephp_mcp "${{ github.workspace }}"
-        php tools/typephp-mcp/tests/mcp-binary-smoke.php --interpreted "${{ github.workspace }}"
+        # 10 minute wall-clock limit: a wedged process must fail the stage
+        # rather than hold the job open.
+        timeout 600 php tools/typephp-mcp/tests/mcp-binary-smoke.php tools/typephp-mcp/typephp_mcp "${{ github.workspace }}"
+        timeout 600 php tools/typephp-mcp/tests/mcp-binary-smoke.php --interpreted "${{ github.workspace }}"
 
     - name: Show native dependencies
       shell: bash

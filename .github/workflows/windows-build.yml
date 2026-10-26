@@ -383,9 +383,33 @@ jobs:
           # the phpy extension this runner does not install.
           $env:TYPEPHP_MCP_TPC = Join-Path '${{ github.workspace }}' 'tpc.exe'
           $binary = Join-Path '${{ github.workspace }}' 'tools\typephp-mcp\typephp_mcp.exe'
-          php tools\typephp-mcp\tests\mcp-binary-smoke.php $binary '${{ github.workspace }}'
-          if ($LASTEXITCODE -ne 0) {
-              throw "typephp-mcp native smoke failed with exit code $LASTEXITCODE"
+          # Hard wall-clock limit: the driver bounds itself, but a wedged
+          # process must not hold the job open for tens of minutes.
+          $psi = [Diagnostics.ProcessStartInfo]::new()
+          $psi.FileName = (Get-Command php).Source
+          $psi.ArgumentList.Add('tools\typephp-mcp\tests\mcp-binary-smoke.php')
+          $psi.ArgumentList.Add($binary)
+          $psi.ArgumentList.Add('${{ github.workspace }}')
+          $psi.UseShellExecute = $false
+          $psi.WorkingDirectory = '${{ github.workspace }}'
+          $psi.RedirectStandardOutput = $true
+          $psi.RedirectStandardError = $true
+          $process = [Diagnostics.Process]::new()
+          $process.StartInfo = $psi
+          if (-not $process.Start()) { throw 'Unable to start the typephp-mcp smoke driver' }
+          $stdout = $process.StandardOutput.ReadToEndAsync()
+          $stderr = $process.StandardError.ReadToEndAsync()
+          if (-not $process.WaitForExit(600000)) {
+              $process.Kill($true)
+              $process.WaitForExit()
+              Write-Host $stdout.Result
+              Write-Host $stderr.Result
+              throw 'typephp-mcp native smoke exceeded its 10 minute limit'
+          }
+          Write-Host $stdout.Result
+          Write-Host $stderr.Result
+          if ($process.ExitCode -ne 0) {
+              throw "typephp-mcp native smoke failed with exit code $($process.ExitCode)"
           }
 
       - name: Test bootstrap signatures

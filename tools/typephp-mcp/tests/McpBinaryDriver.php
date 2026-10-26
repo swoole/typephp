@@ -226,6 +226,9 @@ final class McpBinaryDriver
      */
     private static function check(string $name, bool $ok, string $detail): array
     {
+        // Report progress immediately: if a later step wedges the process,
+        // the job log still shows which checks completed and which one hung.
+        fwrite(STDERR, sprintf("[driver] %s %s\n", $ok ? 'ok  ' : 'fail', $name));
         return ['name' => $name, 'ok' => $ok, 'detail' => $detail];
     }
 }

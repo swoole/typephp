@@ -4,6 +4,8 @@ use TypePhp\CompilerTest;
 
 final class ClassConstantExpressionInlineTest extends \BaseTest
 {
+    private ?CompilerTest $compiler = null;
+
     public function testLeafConstantIsInlinedButExpressionConstantUsesZendLookup(): void
     {
         $code = $this->compileFixture();
@@ -29,12 +31,40 @@ final class ClassConstantExpressionInlineTest extends \BaseTest
         self::assertDoesNotMatchRegularExpression('/php::Var\(tmp_var_\d+\)/', $combined);
     }
 
-    private function compileFixture(): string
+    public function testInterfaceConstantDefaultParameterEvaluatesAtCompileTime(): void
+    {
+        $this->compileFixture();
+
+        // The default-parameter (arginfo) path resolves the constant through
+        // getClassConstValue, which must stay independent of the method-body
+        // inline-eligibility gate: an expression-valued interface constant
+        // fetched on the implementing class must still evaluate to 3.
+        $default = $this->compiler->getClassConstValue(
+            new \PhpParser\Node\Expr\ClassConstFetch(
+                new \PhpParser\Node\Name('ClassConstantExpressionInlineFlagUser'),
+                'COMBINED',
+            ),
+            'ClassConstantExpressionInlineFlagUser',
+            'COMBINED',
+        );
+
+        self::assertSame(3, $default);
+    }
+
+    /**
+     * @param array{noLiteralStrings?: bool} $options
+     */
+    private function compileFixture(array $options = []): string
     {
         global $translator;
 
         $compiler = CompilerTest::create(TYPEPHP_ROOT_PATH);
         $translator = $compiler;
+        if (isset($options['noLiteralStrings'])) {
+            $property = new \ReflectionProperty(\TypePhp\CompilerBase::class, 'noLiteralStrings');
+            $property->setValue($compiler, $options['noLiteralStrings']);
+        }
+        $this->compiler = $compiler;
         $source = TYPEPHP_ROOT_PATH . '/phpunit/code/class-constant-expression-inline.php';
         $compiler->addFiles([$source]);
         $compiler->prepareFile($source);

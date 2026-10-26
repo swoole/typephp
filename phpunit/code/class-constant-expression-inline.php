@@ -32,4 +32,9 @@ class ClassConstantExpressionInlineFlagUser implements ClassConstantExpressionIn
     {
         return self::COMBINED;
     }
+
+    public function readCombinedDefault(int $value = self::COMBINED): int
+    {
+        return $value;
+    }
 }

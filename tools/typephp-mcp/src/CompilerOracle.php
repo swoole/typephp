@@ -86,7 +86,7 @@ final class CompilerOracle
 
         self::ensureHostToolchain();
 
-        $buildDir = self::buildDir($resolved);
+        $buildDir = self::buildDir($resolved, $root);
         if (!mkdir($buildDir, 0777, true)) {
             // sys_get_temp_dir() can resolve to an unusable location when a
             // client strips TMP/TEMP; retry under the OS temp constant.
@@ -645,11 +645,24 @@ final class CompilerOracle
      * from the source directory and appending the remainder, so a build
      * directory on another volume (C: temp vs D: project, or the reverse)
      * makes it append the whole absolute path instead - a path that can never
-     * be created. Placing the directory next to the file keeps the two on one
-     * volume on every platform; check() removes it in a finally block.
+     * be created.
+     *
+     * It must also stay OUT of the source tree: a directory created next to
+     * the file gets picked up while the compiler enumerates sources, and
+     * scanning its own generated .cc files recursed until the process died
+     * (0xC0000005 on Windows CI). The repository's build/ directory has both
+     * properties for files in the checkout; anything else falls back to the
+     * file's directory. check() removes it in a finally block.
      */
-    private static function buildDir(string $sourceFile): string
+    private static function buildDir(string $sourceFile, RepoRoot $root): string
     {
+        $relative = $root->relativeFrom($sourceFile);
+        if ($relative !== $sourceFile) {
+            $buildRoot = $root->path() . '/build';
+            if ((is_dir($buildRoot) || mkdir($buildRoot, 0777, true)) && is_writable($buildRoot)) {
+                return $buildRoot . '/.typephp-mcp-dry-' . uniqid();
+            }
+        }
         $dir = dirname($sourceFile);
         if (is_dir($dir) && is_writable($dir)) {
             return $dir . '/.typephp-mcp-dry-' . uniqid();

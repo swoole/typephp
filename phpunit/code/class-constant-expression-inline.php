@@ -38,3 +38,14 @@ class ClassConstantExpressionInlineFlagUser implements ClassConstantExpressionIn
         return $value;
     }
 }
+
+#[Native]
+class ClassConstantExpressionInlineNativeMarker
+{
+    public const LABEL = 'tmp_var_label';
+
+    public function label(): string
+    {
+        return self::LABEL;
+    }
+}

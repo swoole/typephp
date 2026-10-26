@@ -51,6 +51,20 @@ final class ClassConstantExpressionInlineTest extends \BaseTest
         self::assertSame(3, $default);
     }
 
+    public function testNativeLiteralContainingTmpVarNameIsInlinedWithNoLiteralStrings(): void
+    {
+        $code = $this->compileFixture(['noLiteralStrings' => true]);
+
+        // Native classes emit their methods as C++ member functions, so the
+        // body selector uses the qualified `Class::method` name.
+        $label = $this->methodBody(
+            $code,
+            'php_classconstantexpressioninlinenativemarker::label'
+        );
+        self::assertStringContainsString('ZEND_STRL("tmp_var_label")', $label);
+        self::assertDoesNotMatchRegularExpression('/php::(constant|classConstant)\(/', $label);
+    }
+
     /**
      * @param array{noLiteralStrings?: bool} $options
      */

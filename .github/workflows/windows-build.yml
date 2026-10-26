@@ -350,6 +350,9 @@ jobs:
 
       - name: Build typephp-mcp
         shell: pwsh
+        # Build from the tool directory like build.bat does: tpc writes the
+        # executable next to project.yml, not next to the caller's cwd.
+        working-directory: tools/typephp-mcp
         run: |
           $ErrorActionPreference = 'Stop'
           # The compiled compiler declares ZEND_MOD_REQUIRED for mbstring and
@@ -358,7 +361,7 @@ jobs:
           # other step that runs tpc.exe uses.
           $env:PHPRC = Join-Path $env:PHP_HOME 'php.ini'
           $env:PATH = "$env:PHPX_HOME\build;$env:PATH"
-          & .\tpc.exe tools\typephp-mcp\project.yml --job $env:BUILD_JOBS --no-progress
+          & ..\..\tpc.exe project.yml --job $env:BUILD_JOBS --no-progress
           if ($LASTEXITCODE -ne 0) {
               throw "typephp-mcp build failed with exit code $LASTEXITCODE"
           }

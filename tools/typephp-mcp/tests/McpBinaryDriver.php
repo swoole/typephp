@@ -12,9 +12,28 @@
  */
 final class McpBinaryDriver
 {
-    private const REPLY_TIMEOUT_SECONDS = 30.0;
+    /**
+     * Per-reply deadline. Must exceed the server's own compiler timeout
+     * (TYPEPHP_MCP_COMPILE_TIMEOUT, default 120 s) so a slow check_code is
+     * reported as its own result instead of a driver timeout.
+     */
+    private const REPLY_TIMEOUT_SECONDS = 180.0;
 
     private const NOTIFICATION_WAIT_SECONDS = 2.0;
+
+    /**
+     * Hard ceiling for the whole session. A wedged server is killed instead of
+     * hanging the job: CI hung for over half an hour once because a stuck
+     * check_code never answered and nothing bounded the total run.
+     */
+    private const SESSION_BUDGET_SECONDS = 360.0;
+
+    /**
+     * Absolute deadline for the current session, enforced by readReply().
+     *
+     * @var float|null
+     */
+    private static $deadline = null;
 
     /**
      * @param array<int, string>|string $command executable (and arguments)
@@ -45,6 +64,7 @@ final class McpBinaryDriver
         }
 
         $checks = [];
+        self::$deadline = microtime(true) + self::SESSION_BUDGET_SECONDS;
         try {
             stream_set_blocking($pipes[0], false);
             stream_set_blocking($pipes[1], false);
@@ -171,6 +191,9 @@ final class McpBinaryDriver
     private static function readReply($stream, float $seconds): ?array
     {
         $deadline = microtime(true) + $seconds;
+        if (self::$deadline !== null && self::$deadline < $deadline) {
+            $deadline = self::$deadline;
+        }
         $buffer = '';
         while (microtime(true) < $deadline) {
             $read = [$stream];

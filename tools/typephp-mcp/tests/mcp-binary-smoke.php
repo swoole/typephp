@@ -73,6 +73,8 @@ $checks = McpBinaryDriver::run($command, $repoRoot, $cwd);
 $failures = 0;
 foreach ($checks as $check) {
     printf("[smoke] %s %s - %s\n", $check['ok'] ? 'PASS' : 'FAIL', $check['name'], $check['detail']);
+    // Flush per line so a stage that wedges still shows how far it got.
+    fflush(STDOUT);
     if (!$check['ok']) {
         $failures++;
     }

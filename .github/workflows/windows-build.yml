@@ -352,6 +352,9 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
+          # phpx.dll lives in the PHPX build directory; without it on PATH the
+          # compiler exits with STATUS_DLL_NOT_FOUND (0xC0000135).
+          $env:PATH = "$env:PHPX_HOME\build;$env:PATH"
           & .\tpc.exe tools\typephp-mcp\project.yml --job $env:BUILD_JOBS --no-progress
           if ($LASTEXITCODE -ne 0) {
               throw "typephp-mcp build failed with exit code $LASTEXITCODE"
@@ -366,6 +369,9 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $env:PHPRC = Join-Path $env:PHP_HOME 'php.ini'
+          # The AOT binary links PHPX and the PHP runtime; the dev-machine
+          # build script copies their DLLs next to the exe, CI uses PATH.
+          $env:PATH = "$env:PHPX_HOME\build;$env:PATH"
           $binary = Join-Path '${{ github.workspace }}' 'tools\typephp-mcp\typephp_mcp.exe'
           php tools\typephp-mcp\tests\mcp-binary-smoke.php $binary '${{ github.workspace }}'
           if ($LASTEXITCODE -ne 0) {

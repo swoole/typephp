@@ -1,7 +1,12 @@
 <?php
 
 /**
- * L3 compiler oracle: run `php bin/tpc.php --dry` on a file.
+ * L3 compiler oracle: run `tpc --dry` on a file.
+ *
+ * The compiler is a compiled tpc binary when one is available
+ * (TYPEPHP_MCP_TPC, or tpc/tpc.exe in the repository root), otherwise the
+ * interpreted `php bin/tpc.php`. The compiled form is preferred because it
+ * needs neither a PHP interpreter nor the phpy extension.
  *
  * --dry only generates C++, so it validates the TypePHP subset (the #1 AI
  * failure mode) without compiling or linking. The result names the stage that
@@ -46,6 +51,13 @@ final class CompilerOracle
     private const PROBE_TIMEOUT_SECONDS = 10;
 
     /**
+     * Cached compiler command prefix, resolved once per process.
+     *
+     * @var string|null
+     */
+    private static $compilerPrefix = null;
+
+    /**
      * @return array{code: int, output: string, timedOut: bool}
      */
     public static function check(string $file, RepoRoot $root): string
@@ -61,13 +73,9 @@ final class CompilerOracle
             );
         }
 
-        $php = self::phpBinary();
-        if ($php === '') {
-            throw new CompilerOracleToolFailure(
-                "No PHP binary found on PATH. Set TYPEPHP_MCP_PHP to a php executable.\n"
-                . 'check_code needs `php bin/tpc.php --dry` to run the compiler oracle.'
-            );
-        }
+        // Resolving the compiler also validates that one is reachable at all
+        // (a compiled tpc, or PHP able to run bin/tpc.php).
+        self::compilerPrefix($root);
 
         self::ensureHostToolchain();
 
@@ -107,13 +115,11 @@ final class CompilerOracle
      */
     public static function runTpc(RepoRoot $root, array $args, ?int $timeoutSeconds = null): array
     {
-        $php = self::phpBinary();
-        if ($php === '') {
-            throw new CompilerOracleToolFailure(
-                "No PHP binary found on PATH. Set TYPEPHP_MCP_PHP to a php executable."
-            );
-        }
-        return self::runProcess(self::buildCommand($php, $root, $args), self::timeoutSeconds($timeoutSeconds), self::outputLimit());
+        return self::runProcess(
+            self::buildCommand($root, $args),
+            self::timeoutSeconds($timeoutSeconds),
+            self::outputLimit()
+        );
     }
 
     /**
@@ -144,9 +150,9 @@ final class CompilerOracle
      * serial Make/CMake jobs (see AGENTS.md) - this tool intentionally does
      * not provide such a tier.
      */
-    private static function buildCommand(string $php, RepoRoot $root, array $args): string
+    private static function buildCommand(RepoRoot $root, array $args): string
     {
-        $parts = [escapeshellarg($php), escapeshellarg($root->path() . '/bin/tpc.php')];
+        $parts = [self::compilerPrefix($root)];
         foreach ($args as $arg) {
             $parts[] = escapeshellarg($arg);
         }
@@ -158,6 +164,85 @@ final class CompilerOracle
             );
         }
         return $command;
+    }
+
+    /**
+     * Command prefix that runs the compiler.
+     *
+     * A compiled tpc binary is preferred when one is available (TYPEPHP_MCP_TPC,
+     * or tpc/tpc.exe in the repository root): it needs neither a PHP
+     * interpreter nor the phpy extension. That matters on Windows, where the
+     * release package ships tpc.exe while the interpreted `php bin/tpc.php`
+     * only works with phpy loaded. Falls back to the interpreted compiler.
+     */
+    private static function compilerPrefix(RepoRoot $root): string
+    {
+        if (self::$compilerPrefix !== null) {
+            return self::$compilerPrefix;
+        }
+        self::$compilerPrefix = self::resolveCompilerPrefix($root);
+        return self::$compilerPrefix;
+    }
+
+    private static function resolveCompilerPrefix(RepoRoot $root): string
+    {
+        $override = getenv('TYPEPHP_MCP_TPC');
+        if (is_string($override) && $override !== '' && is_file($override)) {
+            return escapeshellarg($override);
+        }
+        // Prefer a compiled tpc, but only when it actually runs: a binary that
+        // cannot start (missing runtime DLLs, missing mbstring) must not be
+        // preferred over a working interpreted compiler. One bounded --version
+        // probe per process decides it.
+        foreach (self::tpcBinaryNames() as $name) {
+            $candidate = $root->path() . '/' . $name;
+            if (!is_file($candidate)) {
+                continue;
+            }
+            try {
+                $probe = self::runProcess(
+                    escapeshellarg($candidate) . ' --version --no-color',
+                    self::PROBE_TIMEOUT_SECONDS,
+                    8192
+                );
+            } catch (CompilerOracleToolFailure $error) {
+                continue;
+            }
+            if ($probe['code'] === 0) {
+                return escapeshellarg($candidate);
+            }
+        }
+        $php = self::phpBinary();
+        if ($php === '') {
+            throw new CompilerOracleToolFailure(
+                "No TypePHP compiler found: no runnable tpc/tpc.exe in the repository root and no PHP on PATH.\n"
+                . 'check_code needs `tpc --dry`, or `php bin/tpc.php --dry` (which needs the phpy extension).'
+                . "\nSet TYPEPHP_MCP_TPC to a tpc binary, or TYPEPHP_MCP_PHP to a php executable."
+            );
+        }
+        return escapeshellarg($php) . ' ' . escapeshellarg($root->path() . '/bin/tpc.php');
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private static function tpcBinaryNames(): array
+    {
+        return stripos(PHP_OS, 'WIN') === 0 ? ['tpc.exe', 'tpc'] : ['tpc', 'tpc.exe'];
+    }
+
+    /**
+     * Whether any compiler invocation is possible (a compiled tpc, or PHP able
+     * to run bin/tpc.php). Lets callers skip cleanly instead of failing.
+     */
+    public static function hasCompiler(RepoRoot $root): bool
+    {
+        try {
+            self::compilerPrefix($root);
+        } catch (CompilerOracleToolFailure $error) {
+            return false;
+        }
+        return true;
     }
 
     /**

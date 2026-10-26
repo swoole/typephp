@@ -106,7 +106,9 @@ final class McpBinaryDriver
             ]);
             $reply = self::readReply($pipes[1], self::REPLY_TIMEOUT_SECONDS);
             $text = is_array($reply) ? ($reply['result']['content'][0]['text'] ?? '') : '';
-            $checks[] = self::check('check_code valid file reports stage=generate', str_starts_with($text, 'OK stage=generate'), substr($text, 0, 200));
+            // Keep enough of the compiler output to see the real failure:
+            // a 200-character excerpt hides everything past the first lines.
+            $checks[] = self::check('check_code valid file reports stage=generate', str_starts_with($text, 'OK stage=generate'), substr($text, 0, 1200));
 
             // 7. get_index_info reports the repo root (the tpc+git path).
             self::write($pipes[0], [

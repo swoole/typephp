@@ -169,8 +169,8 @@ final class McpServerTest extends TestCase
 
     public function testCheckCodeAcceptsAValidFile(): void
     {
-        if (CompilerOracle::phpBinary() === '') {
-            self::markTestSkipped('no php executable on PATH');
+        if (!CompilerOracle::hasCompiler($this->root)) {
+            self::markTestSkipped('no TypePHP compiler available (no tpc binary and no php on PATH)');
         }
         $text = $this->toolText('check_code', ['path' => 'examples/hello.php']);
         self::assertStringStartsWith('OK stage=generate', $text);
@@ -194,8 +194,8 @@ final class McpServerTest extends TestCase
 
     public function testCheckCodeRejectsAnIllegalGlobalStatement(): void
     {
-        if (CompilerOracle::phpBinary() === '') {
-            self::markTestSkipped('no php executable on PATH');
+        if (!CompilerOracle::hasCompiler($this->root)) {
+            self::markTestSkipped('no TypePHP compiler available (no tpc binary and no php on PATH)');
         }
         $file = sys_get_temp_dir() . '/typephp-mcp-test-' . bin2hex(random_bytes(4)) . '.php';
         self::assertNotFalse(file_put_contents($file, "<?php\necho \"illegal at global scope\";\n"));

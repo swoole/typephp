@@ -86,7 +86,7 @@ final class CompilerOracle
 
         self::ensureHostToolchain();
 
-        $buildDir = self::buildDir();
+        $buildDir = self::buildDir($resolved);
         if (!mkdir($buildDir, 0777, true)) {
             // sys_get_temp_dir() can resolve to an unusable location when a
             // client strips TMP/TEMP; retry under the OS temp constant.
@@ -638,12 +638,22 @@ final class CompilerOracle
     }
 
     /**
-     * Temporary build directory for a --dry run. sys_get_temp_dir() can
-     * resolve to an unusable location when a client strips TMP/TEMP; the
-     * writability check plus the mkdir retry in check() cover that.
+     * Temporary build directory for a --dry run.
+     *
+     * It must live on the same volume as the source file: tpc derives each
+     * generated .cc path by stripping the build directory's common prefix
+     * from the source directory and appending the remainder, so a build
+     * directory on another volume (C: temp vs D: project, or the reverse)
+     * makes it append the whole absolute path instead - a path that can never
+     * be created. Placing the directory next to the file keeps the two on one
+     * volume on every platform; check() removes it in a finally block.
      */
-    private static function buildDir(): string
+    private static function buildDir(string $sourceFile): string
     {
+        $dir = dirname($sourceFile);
+        if (is_dir($dir) && is_writable($dir)) {
+            return $dir . '/.typephp-mcp-dry-' . uniqid();
+        }
         $base = sys_get_temp_dir();
         if (!is_dir($base) || !is_writable($base)) {
             $base = self::fallbackTempDir();

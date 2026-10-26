@@ -5,10 +5,39 @@
  *
  * Supported: initialize, ping, tools/list, tools/call, and notifications
  * (messages without an id are never answered).
+ *
+ * Protocol negotiation follows the MCP versioning spec: the server answers
+ * `initialize` with a protocolVersion it actually implements. The client's
+ * requested version is echoed only when it is one of the supported versions;
+ * any other value gets the server's latest supported version instead of a
+ * pretend-agreement (echoing an arbitrary version back would claim support
+ * for a spec the server does not implement).
+ *
+ * Capability notes: `roots` is a client capability of the 2024-11-05 /
+ * 2025-03-26 revisions and was deprecated in newer revisions; it is only
+ * advertised for versions where it exists. Workspace discovery never depends
+ * on roots alone - TYPEPHP_MCP_PROJECT_ROOT and cwd-based auto-detection are
+ * always available, and roots is kept as a compatibility path.
  */
 final class McpServer
 {
     public const PROTOCOL_VERSION = '2024-11-05';
+
+    /**
+     * Protocol revisions this server implements. The tool capability and the
+     * JSON-RPC surface are stable across revisions, but only these versions
+     * are claimed; anything else is answered with PROTOCOL_VERSION.
+     *
+     * @var array<int, string>
+     */
+    public const SUPPORTED_PROTOCOL_VERSIONS = ['2024-11-05'];
+
+    /**
+     * Revisions where the roots capability exists (not deprecated).
+     *
+     * @var array<int, string>
+     */
+    private const ROOTS_CAPABILITY_VERSIONS = ['2024-11-05', '2025-03-26'];
 
     private RepoRoot $root;
 
@@ -149,20 +178,38 @@ final class McpServer
             return $this->error($id, -32600, 'Invalid Request: missing method');
         }
 
+        // JSON-RPC notifications (no id) are never answered, even when they
+        // name a request method: a client sending tools/list without an id is
+        // not waiting for a reply, and answering would corrupt its reply
+        // stream. Notifications are neither executed nor answered.
+        if (!$hasId && in_array($method, [
+            'initialize', 'ping', 'tools/list', 'tools/call',
+            'prompts/list', 'resources/list', 'resources/templates/list',
+            'logging/setLevel',
+        ], true)) {
+            return null;
+        }
+
         if ($method === 'initialize') {
-            // Echo the client's requested protocol version when it offers one;
-            // this server only implements the tools capability, which is
-            // version-independent. Picky clients reject a downgrade answer.
-            $requested = '';
             $params = isset($decoded['params']) && is_array($decoded['params']) ? $decoded['params'] : [];
-            if (isset($params['protocolVersion']) && is_string($params['protocolVersion']) && $params['protocolVersion'] !== '') {
-                $requested = $params['protocolVersion'];
-            }
+            $requested = isset($params['protocolVersion']) && is_string($params['protocolVersion']) && $params['protocolVersion'] !== ''
+                ? $params['protocolVersion']
+                : '';
             $clientCaps = isset($params['capabilities']) && is_array($params['capabilities']) ? $params['capabilities'] : [];
             $this->clientSupportsRoots = isset($clientCaps['roots']);
+            // Negotiate per the MCP versioning spec: answer with a version we
+            // actually implement. Echo the client's version only when it is
+            // supported; never pretend to support an arbitrary newer one.
+            $negotiated = $requested !== '' && in_array($requested, self::SUPPORTED_PROTOCOL_VERSIONS, true)
+                ? $requested
+                : self::PROTOCOL_VERSION;
+            $capabilities = ['tools' => (object)[]];
+            if (in_array($negotiated, self::ROOTS_CAPABILITY_VERSIONS, true)) {
+                $capabilities['roots'] = (object)[];
+            }
             return $this->result($id, [
-                'protocolVersion' => $requested !== '' ? $requested : self::PROTOCOL_VERSION,
-                'capabilities' => ['tools' => (object)[], 'roots' => (object)[]],
+                'protocolVersion' => $negotiated,
+                'capabilities' => $capabilities,
                 'serverInfo' => [
                     'name' => 'typephp-mcp',
                     'version' => ToolDefinitions::SERVER_VERSION,
@@ -176,7 +223,8 @@ final class McpServer
         if ($method === 'notifications/initialized') {
             // The client is ready: ask it for the open workspace so we can
             // auto-detect TypePHP projects. Only if the client advertised the
-            // roots capability.
+            // roots capability. Workspace discovery also works without roots
+            // via TYPEPHP_MCP_PROJECT_ROOT and cwd-based detection.
             if ($this->clientSupportsRoots) {
                 $this->enqueueRootsList();
             }

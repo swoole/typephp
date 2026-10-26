@@ -46,7 +46,10 @@ if %errorlevel% neq 0 exit /b 1
 
 REM --- build -----------------------------------------------------------------
 echo [build] tpc package: "%TPC_PACKAGE%"
-"%PHP_HOME%\php.exe" "%REPO_ROOT%\bin\tpc.php" project.yml -O2 --build-dir build --no-color --no-progress
+REM --job 1: user-managed machines build serially (AGENTS.md resource safety).
+REM CI builds the MCP binary with its own step, which passes --job %BUILD_JOBS%
+REM because a dedicated runner may use its available CPU count.
+"%PHP_HOME%\php.exe" "%REPO_ROOT%\bin\tpc.php" project.yml -O2 --job 1 --build-dir build --no-color --no-progress
 if %errorlevel% neq 0 exit /b 1
 
 REM Deploy the PHP runtime DLLs next to the executable so it runs without

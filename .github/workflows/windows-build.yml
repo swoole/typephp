@@ -348,6 +348,30 @@ jobs:
               throw 'The compiler did not produce tpc.exe'
           }
 
+      - name: Build typephp-mcp
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & .\tpc.exe tools\typephp-mcp\project.yml --job $env:BUILD_JOBS --no-progress
+          if ($LASTEXITCODE -ne 0) {
+              throw "typephp-mcp build failed with exit code $LASTEXITCODE"
+          }
+          $binary = Join-Path '${{ github.workspace }}' 'tools\typephp-mcp\typephp_mcp.exe'
+          if (-not (Test-Path $binary)) {
+              throw "typephp_mcp.exe was not generated: $binary"
+          }
+
+      - name: Run typephp-mcp native smoke
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $env:PHPRC = Join-Path $env:PHP_HOME 'php.ini'
+          $binary = Join-Path '${{ github.workspace }}' 'tools\typephp-mcp\typephp_mcp.exe'
+          php tools\typephp-mcp\tests\mcp-binary-smoke.php $binary '${{ github.workspace }}'
+          if ($LASTEXITCODE -ne 0) {
+              throw "typephp-mcp native smoke failed with exit code $LASTEXITCODE"
+          }
+
       - name: Test bootstrap signatures
         shell: pwsh
         run: |

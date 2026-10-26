@@ -35,23 +35,10 @@ final class IndexInfo
 
     private static function tpcVersion(RepoRoot $root): string
     {
-        $php = CompilerOracle::phpBinary();
-        if ($php === '') {
+        if (CompilerOracle::phpBinary() === '') {
             return 'unknown (no php on PATH; set TYPEPHP_MCP_PHP)';
         }
-        $output = [];
-        $code = -1;
-        exec(escapeshellarg($php) . ' ' . escapeshellarg($root->path() . '/bin/tpc.php')
-            . ' --version --no-color 2>&1', $output, $code);
-        if ($code !== 0) {
-            return 'unknown';
-        }
-        foreach ($output as $line) {
-            if (is_string($line) && preg_match('/v\d+\.\d+\.\d+/', $line, $m) === 1) {
-                return $m[0];
-            }
-        }
-        return 'unknown';
+        return CompilerOracle::tpcVersion($root);
     }
 
     private static function gitCommit(RepoRoot $root): string

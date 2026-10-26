@@ -18,7 +18,22 @@ final class CodeIndex
 {
     private const MAX_FILES = 3000;
 
-    private const MAX_FILE_BYTES = 262144;
+    /**
+     * Per-file scan cap. Files larger than this are scanned up to the cap and
+     * reported as truncated - never silently skipped, so a symbol that exists
+     * in a large file (e.g. src/Translator.php, ~400 KB) is still found and
+     * the caller learns that coverage was partial.
+     */
+    private const SCAN_FILE_MAX_BYTES = 8 * 1024 * 1024;
+
+    /**
+     * Global scan budget per call (bytes read across all files). Bounds the
+     * cost of one search on huge trees; hitting it reports coverage limits
+     * instead of scanning forever.
+     */
+    private const SCAN_BUDGET_BYTES = 64 * 1024 * 1024;
+
+    private const MAX_DEPTH = 32;
 
     // Always ignored: VCS / build / cache junk, never source.
     private const ALWAYS_SKIP = ['.git', 'build', '.phpunit.cache', '.idea'];
@@ -75,12 +90,24 @@ final class CodeIndex
 
         $files = $this->collectFilesFrom($skip, $keep);
         $hits = [];
+        $unscanned = [];
+        $scannedBytes = 0;
         foreach ($files as $file) {
             if (count($hits) >= $limit) {
                 break;
             }
+            if ($scannedBytes >= self::SCAN_BUDGET_BYTES) {
+                $unscanned[] = 'scan budget of ' . self::SCAN_BUDGET_BYTES . ' bytes exhausted';
+                break;
+            }
+            $read = $this->readLines($file);
+            $scannedBytes += $read['bytes'];
+            if ($read['truncated']) {
+                $unscanned[] = $this->displayPath($roots, $file, $userMode)
+                    . ' (truncated at ' . self::SCAN_FILE_MAX_BYTES . ' bytes)';
+            }
+            $lines = $read['lines'];
             $perFile = 0;
-            $lines = $this->readLines($file);
             foreach ($lines as $index => $line) {
                 if (!TextUtil::contains($line, $query)) {
                     continue;
@@ -95,20 +122,40 @@ final class CodeIndex
             }
         }
         if (count($hits) === 0) {
-            return 'No code matches for: ' . $query;
+            return 'No code matches for: ' . $query . self::coverageNote($unscanned);
         }
-        return TextUtil::clip(implode("\n", $hits), 4000);
+        return TextUtil::clip(implode("\n", $hits) . self::coverageNote($unscanned), 4000);
     }
 
     public function getSymbol(string $name, array $dirs = []): string
     {
         $name = trim($name);
-        if ($name === '' || preg_match('/^[A-Za-z_][A-Za-z0-9_]*$/', $name) !== 1) {
-            return 'Invalid symbol name (expected [A-Za-z_][A-Za-z0-9_]*): ' . $name;
+        if ($name === '') {
+            return 'Invalid symbol name (expected [A-Za-z_][A-Za-z0-9_\\]* or Class::method): (empty)';
         }
-        $pattern = '/^\s*(?:(?:public|private|protected)\s+)?(?:(?:static|final|abstract|readonly)\s+)*'
-            . '(?:function|class|interface|trait|enum)\s+' . preg_quote($name, '/') . '\b/';
-        $constPattern = '/^\s*const\s+' . preg_quote($name, '/') . '\b/';
+
+        // Accept Class::method qualifiers and namespaced names (Foo\Bar).
+        $method = null;
+        $class = $name;
+        $separator = strrpos($name, '::');
+        if ($separator !== false) {
+            $class = substr($name, 0, $separator);
+            $method = substr($name, $separator + 2);
+            if (!preg_match('/^[A-Za-z_][A-Za-z0-9_]*$/', $method)) {
+                return 'Invalid method name (expected [A-Za-z_][A-Za-z0-9_]*): ' . $method;
+            }
+        }
+        $class = ltrim($class, '\\');
+        if (!preg_match('/^[A-Za-z_][A-Za-z0-9_\\\\]*$/', $class)) {
+            return 'Invalid symbol name (expected [A-Za-z_][A-Za-z0-9_\\\\]* or Class::method): ' . $name;
+        }
+        $namespace = '';
+        $shortName = $class;
+        $lastSlash = strrpos($class, '\\');
+        if ($lastSlash !== false) {
+            $namespace = substr($class, 0, $lastSlash);
+            $shortName = substr($class, $lastSlash + 1);
+        }
 
         $userDirs = $this->validateDirs($dirs);
         $userMode = $userDirs !== [];
@@ -124,30 +171,188 @@ final class CodeIndex
 
         $files = $this->collectFilesFrom($skip, $keep);
         $hits = [];
+        $unscanned = [];
+        $scannedBytes = 0;
         foreach ($files as $file) {
             if (count($hits) >= 15) {
                 break;
             }
-            $lines = $this->readLines($file);
-            foreach ($lines as $index => $line) {
-                if (preg_match($pattern, $line) !== 1 && preg_match($constPattern, $line) !== 1) {
-                    continue;
-                }
-                $signature = trim($line);
-                if (strlen($signature) > 200) {
-                    $signature = TextUtil::clip($signature, 200);
-                }
-                $hits[] = $this->displayPath($roots, $file, $userMode) . ':' . ($index + 1) . '  ' . $signature;
-                if (count($hits) >= 15) {
-                    break;
-                }
+            if ($scannedBytes >= self::SCAN_BUDGET_BYTES) {
+                $unscanned[] = 'scan budget of ' . self::SCAN_BUDGET_BYTES . ' bytes exhausted';
+                break;
+            }
+            $read = $this->readLines($file);
+            $scannedBytes += $read['bytes'];
+            if ($read['truncated']) {
+                $unscanned[] = $this->displayPath($roots, $file, $userMode)
+                    . ' (truncated at ' . self::SCAN_FILE_MAX_BYTES . ' bytes)';
+            }
+            $lines = $read['lines'];
+            if ($method === null) {
+                $hits = array_merge($hits, $this->findDeclaration($lines, $shortName, $namespace, $file, $roots, $userMode));
+            } else {
+                $hits = array_merge($hits, $this->findClassMethod($lines, $shortName, $method, $namespace, $file, $roots, $userMode));
+            }
+            if (count($hits) >= 15) {
+                break;
             }
         }
         if (count($hits) === 0) {
             return 'No symbol found for: ' . $name
-                . ($userMode ? ' (searched provided dirs)' : ' (searched src/, examples/, tests/std/)');
+                . ($userMode ? ' (searched provided dirs)' : ' (searched src/, examples/, tests/std/)')
+                . self::coverageNote($unscanned);
         }
-        return TextUtil::clip(implode("\n", $hits), 4000);
+        return TextUtil::clip(implode("\n", $hits) . self::coverageNote($unscanned), 4000);
+    }
+
+    /**
+     * Find function/class/interface/trait/enum/const declarations of a short
+     * name, honoring the file's namespace context.
+     *
+     * @param array<int, string> $lines
+     * @param array<int, string> $roots
+     * @return array<int, string>
+     */
+    private function findDeclaration(array $lines, string $shortName, string $namespace, string $file, array $roots, bool $userMode): array
+    {
+        $pattern = '/^\s*(?:(?:public|private|protected)\s+)?(?:(?:static|final|abstract|readonly)\s+)*'
+            . '(?:function|class|interface|trait|enum)\s+' . preg_quote($shortName, '/') . '\b/';
+        $constPattern = '/^\s*const\s+' . preg_quote($shortName, '/') . '\b/';
+        $namespaces = self::namespacesPerLine($lines);
+        $hits = [];
+        foreach ($lines as $index => $line) {
+            if (preg_match($pattern, $line) !== 1 && preg_match($constPattern, $line) !== 1) {
+                continue;
+            }
+            if ($namespace !== '' && $namespaces[$index] !== $namespace) {
+                continue;
+            }
+            $signature = trim($line);
+            if (strlen($signature) > 200) {
+                $signature = TextUtil::clip($signature, 200);
+            }
+            $hits[] = $this->displayPath($roots, $file, $userMode) . ':' . ($index + 1) . '  ' . $signature;
+            if (count($hits) >= 15) {
+                break;
+            }
+        }
+        return $hits;
+    }
+
+    /**
+     * Find a method inside a class body: locate the class declaration (with
+     * namespace context) and scan its brace-delimited body for the method.
+     *
+     * @param array<int, string> $lines
+     * @param array<int, string> $roots
+     * @return array<int, string>
+     */
+    private function findClassMethod(array $lines, string $className, string $methodName, string $namespace, string $file, array $roots, bool $userMode): array
+    {
+        $classPattern = '/^\s*(?:(?:abstract|final|readonly)\s+)?class\s+' . preg_quote($className, '/') . '\b/';
+        $methodPattern = '/^\s*(?:(?:public|private|protected)\s+)?(?:(?:static|final|abstract)\s+)*function\s+' . preg_quote($methodName, '/') . '\b/';
+        $namespaces = self::namespacesPerLine($lines);
+        $hits = [];
+        foreach ($lines as $index => $line) {
+            if (preg_match($classPattern, $line) !== 1) {
+                continue;
+            }
+            if ($namespace !== '' && $namespaces[$index] !== $namespace) {
+                continue;
+            }
+            $end = self::classBodyEnd($lines, $index);
+            for ($i = $index + 1; $i < $end; $i++) {
+                if (preg_match($methodPattern, $lines[$i]) !== 1) {
+                    continue;
+                }
+                $signature = trim($lines[$i]);
+                if (strlen($signature) > 200) {
+                    $signature = TextUtil::clip($signature, 200);
+                }
+                $hits[] = $this->displayPath($roots, $file, $userMode) . ':' . ($i + 1) . '  ' . $signature
+                    . '  (in class ' . $className . ')';
+                break;
+            }
+            if (count($hits) >= 15) {
+                break;
+            }
+        }
+        return $hits;
+    }
+
+    /**
+     * Index the namespace context of every line: the file-level namespace
+     * (`namespace X;`) applies until the next namespace declaration; braced
+     * blocks (`namespace X { ... }`) apply only inside their braces. Textual
+     * heuristic - good enough for the common single-namespace layout.
+     *
+     * @param array<int, string> $lines
+     * @return array<int, string>
+     */
+    private static function namespacesPerLine(array $lines): array
+    {
+        $result = array_fill(0, count($lines), '');
+        $current = '';
+        $braceDepth = 0;
+        $blockDepth = -1;
+        foreach ($lines as $index => $line) {
+            $result[$index] = $current;
+            if (preg_match('/^\s*namespace\s+([A-Za-z_][A-Za-z0-9_\\\\]*)\s*[;{]/', $line, $matches) === 1) {
+                $current = $matches[1];
+                $blockDepth = substr(rtrim($line), -1) === '{' ? $braceDepth : -1;
+            }
+            $braceDepth += substr_count($line, '{') - substr_count($line, '}');
+            if ($blockDepth >= 0 && $braceDepth <= $blockDepth) {
+                $current = '';
+                $blockDepth = -1;
+            }
+        }
+        return $result;
+    }
+
+    /**
+     * Index of the line where the class body opened at $classIndex ends.
+     *
+     * Naive brace counting is not robust here: braces inside strings and
+     * comments unbalance the count (src/Translator.php closes "early" around
+     * line 2090 by that measure). Instead, the body ends at the next
+     * top-level declaration at or before the class's own indentation -
+     * methods and properties are always more indented, and the class's
+     * closing brace alone does not match a declaration pattern.
+     *
+     * @param array<int, string> $lines
+     */
+    private static function classBodyEnd(array $lines, int $classIndex): int
+    {
+        $classLine = $lines[$classIndex];
+        $indent = strlen($classLine) - strlen(ltrim($classLine));
+        $count = count($lines);
+        for ($i = $classIndex + 1; $i < $count; $i++) {
+            $trimmed = ltrim($lines[$i]);
+            if ($trimmed === '' || $trimmed[0] === '#' || $trimmed[0] === '/') {
+                continue;
+            }
+            $lineIndent = strlen($lines[$i]) - strlen($trimmed);
+            if ($lineIndent > $indent) {
+                continue;
+            }
+            if (preg_match('/^(?:(?:abstract|final|readonly)\s+)?(?:class|interface|trait|enum|function)\s|^namespace\s|^use\s|^const\s|^declare\s/', $trimmed) === 1) {
+                return $i;
+            }
+        }
+        return $count;
+    }
+
+    /**
+     * @param array<int, string> $unscanned
+     */
+    private static function coverageNote(array $unscanned): string
+    {
+        if ($unscanned === []) {
+            return '';
+        }
+        return "\nCoverage: " . count($unscanned) . ' item(s) not fully scanned: '
+            . implode('; ', $unscanned);
     }
 
     public function getExample(string $name, array $dirs = []): string
@@ -206,7 +411,8 @@ final class CodeIndex
                     $lines[] = $this->displayPath([], $file, false);
                 }
                 foreach ($this->autoDirs as $dir) {
-                    foreach ($this->collectDir($dir, false) as $file) {
+                    $visited = [];
+                    foreach ($this->collectDir($dir, false, 0, $visited) as $file) {
                         if (str_ends_with($file, '.stub.php')) {
                             $lines[] = $this->displayPath([], $file, false);
                         }
@@ -406,8 +612,9 @@ final class CodeIndex
     private function collectFilesFrom(array $skip, array $keep): array
     {
         $files = [];
+        $visited = [];
         foreach ($skip as $dir) {
-            foreach ($this->collectDir($dir, true) as $file) {
+            foreach ($this->collectDir($dir, true, 0, $visited) as $file) {
                 $files[] = $file;
             }
             if (count($files) >= self::MAX_FILES) {
@@ -415,7 +622,7 @@ final class CodeIndex
             }
         }
         foreach ($keep as $dir) {
-            foreach ($this->collectDir($dir, false) as $file) {
+            foreach ($this->collectDir($dir, false, 0, $visited) as $file) {
                 $files[] = $file;
             }
             if (count($files) >= self::MAX_FILES) {
@@ -429,12 +636,24 @@ final class CodeIndex
     /**
      * @return array<int, string>
      */
-    private function collectDir(string $dir, bool $skipPackages): array
+    private function collectDir(string $dir, bool $skipPackages, int $depth, array $visited): array
     {
         $result = [];
-        if (!is_dir($dir)) {
+        if ($depth > self::MAX_DEPTH || !is_dir($dir)) {
             return $result;
         }
+        // Canonicalize for dedup: symlink loops and overlapping roots must not
+        // be traversed twice (the returned paths keep their original spelling
+        // so displayPath() prefix matching is unchanged).
+        $real = realpath($dir);
+        if (!is_string($real) || $real === '') {
+            return $result;
+        }
+        $key = strtolower(str_replace('\\', '/', $real));
+        if (isset($visited[$key])) {
+            return $result;
+        }
+        $visited[$key] = true;
         $entries = scandir($dir);
         if (!is_array($entries)) {
             return $result;
@@ -454,7 +673,7 @@ final class CodeIndex
             }
             $path = $dir . '/' . $entry;
             if (is_dir($path)) {
-                $nested = $this->collectDir($path, $skipPackages);
+                $nested = $this->collectDir($path, $skipPackages, $depth + 1, $visited);
                 foreach ($nested as $file) {
                     $result[] = $file;
                 }
@@ -472,8 +691,9 @@ final class CodeIndex
     private function collectStubFiles(array $roots, bool $skipPackages): array
     {
         $files = [];
+        $visited = [];
         foreach ($roots as $root) {
-            foreach ($this->collectDir($root, $skipPackages) as $file) {
+            foreach ($this->collectDir($root, $skipPackages, 0, $visited) as $file) {
                 if (str_ends_with($file, '.stub.php')) {
                     $files[] = $file;
                 }
@@ -483,19 +703,47 @@ final class CodeIndex
     }
 
     /**
-     * @return array<int, string>
+     * Read a file line by line in 1 MiB chunks. Files larger than
+     * SCAN_FILE_MAX_BYTES are scanned up to the cap and flagged truncated so
+     * the caller can report coverage instead of silently pretending the
+     * file does not exist (the previous 256 KiB cutoff made get_symbol miss
+     * real symbols in src/Translator.php).
+     *
+     * @return array{lines: array<int, string>, bytes: int, truncated: bool}
      */
     private function readLines(string $path): array
     {
-        $size = filesize($path);
-        if (!is_int($size) || $size <= 0 || $size > self::MAX_FILE_BYTES) {
-            return [];
+        $handle = @fopen($path, 'rb');
+        if (!is_resource($handle)) {
+            return ['lines' => [], 'bytes' => 0, 'truncated' => false];
         }
-        $content = file_get_contents($path);
-        if (!is_string($content)) {
-            return [];
+        $lines = [];
+        $buffer = '';
+        $total = 0;
+        $truncated = false;
+        while (!feof($handle)) {
+            if ($total >= self::SCAN_FILE_MAX_BYTES) {
+                $truncated = true;
+                break;
+            }
+            $chunk = fread($handle, min(1048576, self::SCAN_FILE_MAX_BYTES - $total));
+            if (!is_string($chunk) || $chunk === '') {
+                break;
+            }
+            $total += strlen($chunk);
+            $buffer .= $chunk;
+            $position = strpos($buffer, "\n");
+            while ($position !== false) {
+                $lines[] = substr($buffer, 0, $position);
+                $buffer = substr($buffer, $position + 1);
+                $position = strpos($buffer, "\n");
+            }
         }
-        return explode("\n", $content);
+        fclose($handle);
+        if ($buffer !== '') {
+            $lines[] = $buffer;
+        }
+        return ['lines' => $lines, 'bytes' => $total, 'truncated' => $truncated];
     }
 
     /**
@@ -532,7 +780,7 @@ final class CodeIndex
 
     private function phptTitle(string $path): string
     {
-        $lines = $this->readLines($path);
+        $lines = $this->readLines($path)['lines'];
         if (count($lines) < 2) {
             return '';
         }
@@ -559,7 +807,7 @@ final class CodeIndex
 
     private function renderExampleDir(string $name, string $dir, string $base = ''): string
     {
-        $files = $this->collectDir($dir, $base !== '');
+        $files = $this->collectDir($dir, $base !== '', 0, []);
         $relOf = function (string $f) use ($base): string {
             if ($base !== '' && str_starts_with($f, $base . '/')) {
                 return substr($f, strlen($base) + 1);

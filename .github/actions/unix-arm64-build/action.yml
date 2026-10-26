@@ -195,6 +195,19 @@ runs:
         output="$("${smoke_binary}")"
         test "${output}" = '${{ inputs.smoke-output }}'
 
+    - name: Build typephp-mcp
+      shell: bash
+      run: |
+        export PHP_HOME="$(php-config --prefix)"
+        bash tools/typephp-mcp/build.sh
+        test -x tools/typephp-mcp/typephp_mcp
+
+    - name: Run typephp-mcp native smoke
+      shell: bash
+      run: |
+        php tools/typephp-mcp/tests/mcp-binary-smoke.php tools/typephp-mcp/typephp_mcp "${{ github.workspace }}"
+        php tools/typephp-mcp/tests/mcp-binary-smoke.php --interpreted "${{ github.workspace }}"
+
     - name: Show native dependencies
       shell: bash
       run: |

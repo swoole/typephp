@@ -13,11 +13,21 @@
 #   PHPX_HOME  phpx tree providing include/phpx.h and lib/libphpx.{a,dylib}
 #
 # Resolution order: explicit environment, then the newest private runtime that
-# tpc's php-builder left under ~/.typephp/php-builder. When neither is available,
-# build one (compiles php-src plus a static phpx; tpc only offers php-builder
-# interactively, so the flag has to be explicit in a scripted shell):
+# tpc's php-builder left under ~/.typephp/php-builder. When neither is
+# available, build one (compiles php-src plus a static phpx; tpc only offers
+# php-builder interactively, so the flag has to be explicit in a scripted
+# shell):
 #
 #   php bin/tpc.php tools/typephp-mcp/project.yml --php-builder='extensions: []'
+#
+# The compiler is the built ./tpc when the repository already has one (CI
+# builds it first), otherwise the interpreted `php bin/tpc.php`, which needs
+# the phpy extension that only the Linux x64 workflow enables.
+#
+# Resource safety (AGENTS.md): user-managed machines build serially under the
+# shared user-wide build lock (Linux) with a virtual memory cap for the whole
+# build tree. Dedicated CI runners instead build with their available CPU
+# count, so nothing here serializes a CI build.
 set -euo pipefail
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
@@ -29,7 +39,7 @@ phpx_home=${PHPX_HOME:-}
 
 if [[ -z "$php_home" ]]; then
     for candidate in $(ls -1d "${HOME}"/.typephp/php-builder/php-*/install 2>/dev/null | sort -r); do
-        if [[ -f "$candidate/lib/libphp.a" || -f "$candidate/lib/libphp.dylib" ]]; then
+        if [[ -f "$candidate/lib/libphp.a" || -f "$candidate/lib/libphp.dylib" || -f "$candidate/lib/libphp.so" ]]; then
             php_home=$candidate
             break
         fi
@@ -39,7 +49,7 @@ fi
 if [[ -z "$phpx_home" ]]; then
     for candidate in "${REPO_ROOT}/vendor/swoole/phpx" "${php_home}/phpx" "$php_home"; do
         if [[ -f "$candidate/include/phpx.h" ]] \
-            && { [[ -f "$candidate/lib/libphpx.a" ]] || [[ -f "$candidate/lib/libphpx.dylib" ]]; }; then
+            && { [[ -f "$candidate/lib/libphpx.a" ]] || [[ -f "$candidate/lib/libphpx.dylib" ]] || [[ -f "$candidate/lib/libphpx.so" ]]; }; then
             phpx_home=$candidate
             break
         fi
@@ -48,8 +58,8 @@ fi
 
 if [[ -z "$php_home" || -z "$phpx_home" ]]; then
     echo "[build] ERROR: no usable PHP/PHPX runtime found."
-    echo "[build]   PHP_HOME needs lib/libphp.a (or .dylib);"
-    echo "[build]   PHPX_HOME needs include/phpx.h plus lib/libphpx.a (or .dylib)."
+    echo "[build]   PHP_HOME needs lib/libphp.a, .so or .dylib (the embed SAPI);"
+    echo "[build]   PHPX_HOME needs include/phpx.h plus lib/libphpx.a, .so or .dylib."
     echo "[build] Export them, or build a private runtime once with --php-builder"
     echo "[build] (see the header of this script)."
     exit 1
@@ -122,10 +132,55 @@ if [[ ${#LINK_FLAGS[@]} -gt 0 ]]; then
     echo "[build] extra link flags: ${LINK_FLAGS[*]}"
 fi
 
+# CI runners are dedicated: build with the available logical CPU count.
+# User-managed machines stay serial (AGENTS.md).
+if [[ "${CI:-}" == "true" || "${GITHUB_ACTION:-}" == "true" ]]; then
+    JOBS="${BUILD_JOBS:-$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 1)}"
+else
+    JOBS=1
+fi
+
+TPC=(php "${REPO_ROOT}/bin/tpc.php")
+if [[ -x "${REPO_ROOT}/tpc" ]]; then
+    TPC=("${REPO_ROOT}/tpc")
+fi
+
 rm -rf build
-echo "[build] Compiling typephp-mcp"
-php "${REPO_ROOT}/bin/tpc.php" project.yml -O2 --job 1 --build-dir build \
-    --no-color --no-progress -o typephp_mcp ${LINK_FLAGS[@]+"${LINK_FLAGS[@]}"}
+
+BUILD_CMD=("${TPC[@]}" project.yml -O2 --job "$JOBS" --build-dir build \
+    --no-color --no-progress -o typephp_mcp ${LINK_FLAGS[@]+"${LINK_FLAGS[@]}"})
+
+if [[ "${CI:-}" != "true" && "${GITHUB_ACTION:-}" != "true" ]]; then
+    # Hard virtual-memory cap for the whole build tree: 8 GiB or half of the
+    # memory available at startup, whichever is smaller.
+    limit_mb=8192
+    if [[ "$(uname)" == "Linux" && -r /proc/meminfo ]]; then
+        avail_kb=$(awk '/MemAvailable/{print $2}' /proc/meminfo 2>/dev/null || true)
+        if [[ -n "$avail_kb" && "$avail_kb" -gt 0 ]]; then
+            half_mb=$((avail_kb / 2048))
+            [[ "$half_mb" -lt "$limit_mb" ]] && limit_mb="$half_mb"
+        fi
+    elif [[ "$(uname)" == "Darwin" ]]; then
+        mem_mb=$(sysctl -n hw.memsize 2>/dev/null | awk '{print int($1/1048576)}' || true)
+        if [[ -n "$mem_mb" && "$mem_mb" -gt 0 ]]; then
+            half_mb=$((mem_mb / 2))
+            [[ "$half_mb" -lt "$limit_mb" ]] && limit_mb="$half_mb"
+        fi
+    fi
+    ulimit -v "$((limit_mb * 1024))" 2>/dev/null || true
+    echo "[build] memory cap: ${limit_mb} MiB virtual, jobs: ${JOBS}"
+
+    if [[ "$(uname)" == "Linux" ]] && command -v flock >/dev/null 2>&1; then
+        lock_file="${XDG_RUNTIME_DIR:-/tmp}/codex-build-$(id -u).lock"
+        echo "[build] acquiring build lock: ${lock_file}"
+        flock -n "$lock_file" "${BUILD_CMD[@]}" \
+            || { echo "[build] ERROR: another build holds ${lock_file}; wait for it to finish" >&2; exit 1; }
+    else
+        "${BUILD_CMD[@]}"
+    fi
+else
+    "${BUILD_CMD[@]}"
+fi
 
 BINARY="${SCRIPT_DIR}/typephp_mcp"
 if [[ ! -x "$BINARY" ]]; then
@@ -133,5 +188,7 @@ if [[ ! -x "$BINARY" ]]; then
     exit 1
 fi
 file "$BINARY"
-otool -L "$BINARY" | sed -n '2,20p'
+if [[ "$(uname)" == "Darwin" ]]; then
+    otool -L "$BINARY" | sed -n '2,20p'
+fi
 echo "[build] Done: $BINARY"

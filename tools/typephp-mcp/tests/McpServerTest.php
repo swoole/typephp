@@ -117,14 +117,36 @@ final class McpServerTest extends TestCase
         );
     }
 
-    public function testInitializeEchoesClientProtocolVersion(): void
+    public function testInitializeNegotiatesProtocolVersion(): void
     {
-        $reply = $this->request('{"jsonrpc":"2.0","id":6,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"x","version":"1"}}}');
-        self::assertSame('2025-06-18', $reply['result']['protocolVersion']);
+        // The server answers with a version it actually implements. A
+        // supported version is echoed; an unsupported one is answered with
+        // the server's latest supported version instead of a pretend-agreement.
+        $reply = $this->request('{"jsonrpc":"2.0","id":6,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"x","version":"1"}}}');
+        self::assertSame('2024-11-05', $reply['result']['protocolVersion']);
+
+        $reply = $this->request('{"jsonrpc":"2.0","id":7,"method":"initialize","params":{"protocolVersion":"1900-01-01","capabilities":{},"clientInfo":{"name":"x","version":"1"}}}');
+        self::assertSame('2024-11-05', $reply['result']['protocolVersion']);
+        self::assertSame([], (array) $reply['result']['capabilities']['tools']);
+        // roots is a client capability of the supported revision only.
+        self::assertArrayHasKey('roots', $reply['result']['capabilities']);
 
         // No version offered by the client -> fall back to ours.
-        $reply = $this->request('{"jsonrpc":"2.0","id":7,"method":"initialize","params":{}}');
+        $reply = $this->request('{"jsonrpc":"2.0","id":8,"method":"initialize","params":{}}');
         self::assertSame('2024-11-05', $reply['result']['protocolVersion']);
+
+        // Garbage params must not break the handshake.
+        $reply = $this->request('{"jsonrpc":"2.0","id":9,"method":"initialize","params":"not-an-object"}');
+        self::assertSame('2024-11-05', $reply['result']['protocolVersion']);
+    }
+
+    public function testRequestNotificationsAreNotAnswered(): void
+    {
+        // A request method sent without an id is a JSON-RPC notification and
+        // must never be answered - not even with an error.
+        self::assertNull($this->server->handleLine('{"jsonrpc":"2.0","method":"tools/list"}'));
+        self::assertNull($this->server->handleLine('{"jsonrpc":"2.0","method":"ping"}'));
+        self::assertNull($this->server->handleLine('{"jsonrpc":"2.0","method":"tools/call","params":{"name":"list_topics","arguments":{}}}'));
     }
 
     public function testOptionalCapabilityListsReturnEmptyResults(): void
@@ -151,8 +173,8 @@ final class McpServerTest extends TestCase
             self::markTestSkipped('no php executable on PATH');
         }
         $text = $this->toolText('check_code', ['path' => 'examples/hello.php']);
-        self::assertStringStartsWith('OK:', $text);
-        self::assertStringContainsString('link-time errors are not checked', $text);
+        self::assertStringStartsWith('OK stage=generate', $text);
+        self::assertStringContainsString('compile and link stages are not run', $text);
     }
 
     public function testMsvcBinDirDiscovery(): void
@@ -186,12 +208,35 @@ final class McpServerTest extends TestCase
         }
     }
 
+    public function testCheckCodeMissingFileIsAToolError(): void
+    {
+        // A missing path is a tool-execution failure, not a check result:
+        // the MCP reply must carry isError: true so clients can tell the
+        // difference between "your code failed" and "the tool could not run".
+        $reply = $this->request((string) json_encode([
+            'jsonrpc' => '2.0',
+            'id' => 1,
+            'method' => 'tools/call',
+            'params' => ['name' => 'check_code', 'arguments' => ['path' => 'no/such/file.php']],
+        ]));
+        self::assertTrue($reply['result']['isError'] ?? false);
+        self::assertStringContainsString('File not found', $reply['result']['content'][0]['text']);
+    }
+
     public function testListRestrictionsCoversMainSignatureAndScope(): void
     {
         $text = $this->toolText('list_restrictions', ['topic' => 'structure']);
         self::assertStringContainsString('main()', $text);
         self::assertStringContainsString('全局作用域', $text);
         self::assertStringContainsString('[structure]', $text);
+
+        // Inheritance rules must match the compiler's real behavior (v0.9.5):
+        // Zend internal classes CAN be inherited; only runtime-only (autoload)
+        // user classes cannot. See tests/compiler/class/class_extends.phpt.
+        $text = $this->toolText('list_restrictions', ['topic' => 'objects']);
+        self::assertStringContainsString('可以继承内置类', $text);
+        self::assertStringContainsString('autoload', $text);
+        self::assertStringContainsString('Native', $text);
 
         $text = $this->toolText('list_restrictions', ['topic' => 'does-not-exist']);
         self::assertStringContainsString('Available topics:', $text);
@@ -224,6 +269,62 @@ final class McpServerTest extends TestCase
 
         $text = $this->toolText('get_symbol', ['name' => 'definitely_not_a_symbol_xyz']);
         self::assertStringContainsString('No symbol found', $text);
+    }
+
+    public function testGetSymbolScansLargeFiles(): void
+    {
+        // src/Translator.php is ~400 KB, far above the old 256 KiB silent
+        // cutoff. The symbol must be found, and no coverage truncation may
+        // be reported for it.
+        $text = $this->toolText('get_symbol', ['name' => 'genClassPropertyInit']);
+        self::assertStringContainsString('src/Translator.php:', $text);
+        self::assertStringContainsString('genClassPropertyInit', $text);
+        self::assertStringNotContainsString('truncated', $text);
+    }
+
+    public function testGetSymbolSupportsNamespaceAndClassMethod(): void
+    {
+        // Full namespace path resolves against the file's namespace context.
+        $text = $this->toolText('get_symbol', ['name' => 'TypePhp\Translator']);
+        self::assertStringContainsString('class Translator', $text);
+        self::assertStringContainsString('src/Translator.php:', $text);
+
+        // Class::method finds the method inside the class body.
+        $text = $this->toolText('get_symbol', ['name' => 'Translator::genClassPropertyInit']);
+        self::assertStringContainsString('function genClassPropertyInit', $text);
+        self::assertStringContainsString('in class Translator', $text);
+
+        $text = $this->toolText('get_symbol', ['name' => 'Translator::no_such_method_xyz']);
+        self::assertStringContainsString('No symbol found', $text);
+    }
+
+    public function testGetSymbolReturnsDuplicateDefinitions(): void
+    {
+        // The same short name defined in several files yields one hit per
+        // definition (duplicate symbols are not silently deduped).
+        $text = $this->toolText('get_symbol', ['name' => 'main']);
+        $lines = explode("\n", $text);
+        $declarationLines = array_values(array_filter($lines, static function (string $line): bool {
+            return str_contains($line, 'function main');
+        }));
+        self::assertGreaterThanOrEqual(2, count($declarationLines), $text);
+    }
+
+    public function testGetSymbolScansLargeSyntheticFile(): void
+    {
+        // A file above the old cutoff, passed via dirs, must be scanned.
+        $dir = sys_get_temp_dir() . '/typephp-mcp-big-' . bin2hex(random_bytes(4));
+        self::assertNotFalse(mkdir($dir, 0777, true));
+        $file = $dir . '/Big.php';
+        try {
+            $filler = "<?php\n// " . str_repeat('x', 100) . "\n";
+            self::assertNotFalse(file_put_contents($file, $filler . str_repeat($filler, 3000) . "<?php\nfunction bigFileSymbol() {}\n"));
+            $text = $this->toolText('get_symbol', ['name' => 'bigFileSymbol', 'dirs' => [$dir]]);
+            self::assertStringContainsString('bigFileSymbol', $text);
+            self::assertStringNotContainsString('No symbol found', $text);
+        } finally {
+            self::removeDir($dir);
+        }
     }
 
     public function testGetExampleReturnsFileAndDirectory(): void
@@ -353,6 +454,34 @@ final class McpServerTest extends TestCase
             }
         }
         @rmdir($dir);
+    }
+
+    public function testRepoRootDetectsFromOutsideRepo(): void
+    {
+        // Launching from a directory outside the repository must still locate
+        // the tool resource root: first via TYPEPHP_MCP_ROOT, then via the
+        // source-relative default (this test file lives inside the checkout).
+        $sandbox = $this->makeSandbox();
+        $previousRoot = getenv('TYPEPHP_MCP_ROOT');
+        $previousCwd = getcwd();
+        try {
+            putenv('TYPEPHP_MCP_ROOT=' . $this->root->path());
+            chdir($sandbox);
+            $root = RepoRoot::detect();
+            self::assertSame($this->root->path(), $root->path());
+
+            putenv('TYPEPHP_MCP_ROOT');
+            $root = RepoRoot::detect();
+            self::assertSame($this->root->path(), $root->path());
+        } finally {
+            if ($previousRoot === false) {
+                putenv('TYPEPHP_MCP_ROOT');
+            } else {
+                putenv('TYPEPHP_MCP_ROOT=' . $previousRoot);
+            }
+            chdir((string) $previousCwd);
+            $this->removeDir($sandbox);
+        }
     }
 
     public function testGetStubApiListsUserProjectDirs(): void

@@ -2,167 +2,122 @@
 
 use PHPUnit\Framework\TestCase;
 
-require_once __DIR__ . '/../src/CompilerOracle.php';
+require_once __DIR__ . '/../src/Config.php';
+require_once __DIR__ . '/../src/TextUtil.php';
+require_once __DIR__ . '/../src/RepoRoot.php';
+require_once __DIR__ . '/McpBinaryDriver.php';
 
 /**
- * Integration test: drives the compiled typephp_mcp.exe over a real stdio
- * session, including a live per-message flush check (the reply must arrive
- * while stdin is still open). Skips when the binary has not been built.
+ * Integration test: drives the compiled typephp_mcp binary over a real stdio
+ * session (shared wire checks with the CI smoke driver). Skips when the
+ * binary has not been built unless TYPEPHP_MCP_REQUIRE_BINARY=1, which CI
+ * sets so a missing artifact fails the stage instead of silently passing.
  */
 final class McpBinaryTest extends TestCase
 {
-    private const BUILD_DIR = __DIR__ . '/..';
-
     private const REPO_ROOT = __DIR__ . '/../../..';
-
-    /**
-     * The compiled binary is `typephp_mcp.exe` on Windows and `typephp_mcp`
-     * elsewhere; TYPEPHP_MCP_BINARY points the test at a specific artifact.
-     */
-    private static function executable(): string
-    {
-        $override = getenv('TYPEPHP_MCP_BINARY');
-        if (is_string($override) && $override !== '') {
-            return $override;
-        }
-        $suffix = PHP_OS_FAMILY === 'Windows' ? '.exe' : '';
-        return self::BUILD_DIR . '/typephp_mcp' . $suffix;
-    }
-
-    private static function buildHint(): string
-    {
-        $script = PHP_OS_FAMILY === 'Windows' ? 'build.bat' : './build.sh';
-        return 'typephp_mcp not built; run tools/typephp-mcp/' . $script;
-    }
 
     public function testStdioMcpSession(): void
     {
-        $executable = self::executable();
-        if (!is_file($executable)) {
-            self::markTestSkipped(self::buildHint());
+        $binary = self::binaryPath();
+        if ($binary === null) {
+            if (getenv('TYPEPHP_MCP_REQUIRE_BINARY') === '1') {
+                self::fail('typephp_mcp binary missing; CI must build it (tools/typephp-mcp/build.sh or build.bat)');
+            }
+            self::markTestSkipped('typephp_mcp binary not built; run tools/typephp-mcp/build.sh (Unix) or build.bat (Windows)');
         }
 
-        $process = proc_open(
-            [$executable],
-            [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']],
-            $pipes,
-            self::REPO_ROOT
-        );
-        self::assertIsResource($process);
-
-        try {
-            stream_set_blocking($pipes[0], false);
-            $initialize = ['jsonrpc' => '2.0', 'id' => 1, 'method' => 'initialize', 'params' => []];
-            self::assertNotFalse(fwrite($pipes[0], (string) json_encode($initialize) . "\n"));
-
-            $reply = $this->readReply($pipes[1], 20.0);
-            self::assertNotNull($reply, 'no initialize reply within timeout');
-            self::assertSame('typephp-mcp', $reply['result']['serverInfo']['name']);
-            self::assertSame('2024-11-05', $reply['result']['protocolVersion']);
-
-            $notification = ['jsonrpc' => '2.0', 'method' => 'notifications/initialized'];
-            self::assertNotFalse(fwrite($pipes[0], (string) json_encode($notification) . "\n"));
-
-            $list = ['jsonrpc' => '2.0', 'id' => 2, 'method' => 'tools/list'];
-            self::assertNotFalse(fwrite($pipes[0], (string) json_encode($list) . "\n"));
-            $reply = $this->readReply($pipes[1], 20.0);
-            self::assertNotNull($reply);
-            self::assertCount(12, $reply['result']['tools']);
-
-            $call = [
-                'jsonrpc' => '2.0',
-                'id' => 3,
-                'method' => 'tools/call',
-                'params' => ['name' => 'list_restrictions', 'arguments' => ['topic' => 'structure']],
-            ];
-            self::assertNotFalse(fwrite($pipes[0], (string) json_encode($call) . "\n"));
-            $reply = $this->readReply($pipes[1], 20.0);
-            self::assertNotNull($reply);
-            self::assertStringContainsString('main()', $reply['result']['content'][0]['text']);
-
-            // A CJK-heavy query: the reply must be valid JSON even though the
-            // excerpt is cut on a byte budget (UTF-8 boundary safety).
-            $call = [
-                'jsonrpc' => '2.0',
-                'id' => 4,
-                'method' => 'tools/call',
-                'params' => ['name' => 'search_docs', 'arguments' => ['query' => 'bigInt', 'lang' => 'zh-cn', 'limit' => 3]],
-            ];
-            self::assertNotFalse(fwrite($pipes[0], (string) json_encode($call) . "\n"));
-            $reply = $this->readReply($pipes[1], 20.0);
-            self::assertNotNull($reply);
-            self::assertSame(JSON_ERROR_NONE, json_last_error());
-            self::assertStringContainsString('docs/zh-cn/', $reply['result']['content'][0]['text']);
-
-            // The two tools that shell out. Reading them from the compiled
-            // process is what proves exec() works in the AOT binary; the
-            // interpreted suite cannot cover that on any platform.
-            $call = [
-                'jsonrpc' => '2.0',
-                'id' => 5,
-                'method' => 'tools/call',
-                'params' => ['name' => 'get_index_info', 'arguments' => []],
-            ];
-            self::assertNotFalse(fwrite($pipes[0], (string) json_encode($call) . "\n"));
-            $reply = $this->readReply($pipes[1], 30.0);
-            self::assertNotNull($reply);
-            self::assertStringContainsString('git_commit: ', $reply['result']['content'][0]['text']);
-            self::assertStringContainsString('tpc_version: ', $reply['result']['content'][0]['text']);
-
-            if (CompilerOracle::phpBinary() !== '') {
-                $call = [
-                    'jsonrpc' => '2.0',
-                    'id' => 6,
-                    'method' => 'tools/call',
-                    'params' => ['name' => 'check_code', 'arguments' => ['path' => 'examples/hello.php']],
-                ];
-                self::assertNotFalse(fwrite($pipes[0], (string) json_encode($call) . "\n"));
-                $reply = $this->readReply($pipes[1], 60.0);
-                self::assertNotNull($reply, 'no check_code reply within timeout');
-                self::assertStringStartsWith('OK:', $reply['result']['content'][0]['text']);
-            }
-        } finally {
-            fclose($pipes[0]);
-            fclose($pipes[1]);
-            fclose($pipes[2]);
-            proc_close($process);
+        $checks = McpBinaryDriver::run($binary, self::repoRoot(), null);
+        self::assertNotEmpty($checks);
+        foreach ($checks as $check) {
+            self::assertTrue($check['ok'], $check['name'] . ': ' . $check['detail']);
         }
     }
 
-    /**
-     * Read one newline-delimited JSON reply, waiting at most $seconds. The
-     * timeout proves the server flushes each reply instead of buffering until
-     * stdin closes (which would deadlock every real MCP client).
-     *
-     * @param resource $stream
-     * @return array<string, mixed>|null
-     */
-    private function readReply($stream, float $seconds): ?array
+    public function testStdioSessionFromOutsideRepo(): void
     {
-        $deadline = microtime(true) + $seconds;
-        $buffer = '';
-        while (microtime(true) < $deadline) {
-            $read = [$stream];
-            $write = null;
-            $except = null;
-            $ready = stream_select($read, $write, $except, 0, 200000);
-            if ($ready === false) {
-                return null;
+        // The server must not depend on the dev machine's checkout location:
+        // launch it from a temporary directory outside the repository.
+        $binary = self::binaryPath();
+        if ($binary === null) {
+            if (getenv('TYPEPHP_MCP_REQUIRE_BINARY') === '1') {
+                self::fail('typephp_mcp binary missing; CI must build it (tools/typephp-mcp/build.sh or build.bat)');
             }
-            if ($ready > 0) {
-                $chunk = (string) fread($stream, 8192);
-                if ($chunk === '') {
-                    return null;
-                }
-                $buffer .= $chunk;
-                $position = strpos($buffer, "\n");
-                if ($position !== false) {
-                    $line = substr($buffer, 0, $position);
-                    $decoded = json_decode($line, true);
-                    return is_array($decoded) ? $decoded : null;
-                }
+            self::markTestSkipped('typephp_mcp binary not built; run tools/typephp-mcp/build.sh (Unix) or build.bat (Windows)');
+        }
+
+        $dir = sys_get_temp_dir() . '/typephp-mcp-outside-' . bin2hex(random_bytes(4));
+        self::assertTrue(mkdir($dir, 0777, true));
+        try {
+            $checks = McpBinaryDriver::run($binary, self::repoRoot(), $dir);
+            self::assertNotEmpty($checks);
+            foreach ($checks as $check) {
+                self::assertTrue($check['ok'], $check['name'] . ': ' . $check['detail']);
+            }
+        } finally {
+            self::removeDir($dir);
+        }
+    }
+
+    public function testInterpretedEntryMatchesAotChecks(): void
+    {
+        // The same wire checks against the interpreted entry: the sources are
+        // kept in the stock-PHP/TypePHP intersection, so both runtimes must
+        // answer identically.
+        $php = getenv('TYPEPHP_MCP_PHP');
+        if (!is_string($php) || $php === '' || !is_file($php)) {
+            $php = 'php';
+        }
+        $command = [$php, dirname(__DIR__) . '/run-interpreted.php'];
+        $checks = McpBinaryDriver::run($command, self::repoRoot(), null);
+        self::assertNotEmpty($checks);
+        foreach ($checks as $check) {
+            self::assertTrue($check['ok'], $check['name'] . ': ' . $check['detail']);
+        }
+    }
+
+    private static function binaryPath(): ?string
+    {
+        $override = getenv('TYPEPHP_MCP_BINARY');
+        if (is_string($override) && $override !== '' && is_file($override)) {
+            return $override;
+        }
+        $dir = dirname(__DIR__);
+        foreach (['typephp_mcp.exe', 'typephp_mcp'] as $name) {
+            $path = $dir . '/' . $name;
+            if (is_file($path)) {
+                return $path;
             }
         }
         return null;
+    }
+
+    private static function repoRoot(): string
+    {
+        $root = getenv('TYPEPHP_MCP_ROOT');
+        if (is_string($root) && $root !== '') {
+            return str_replace('\\', '/', $root);
+        }
+        return str_replace('\\', '/', self::REPO_ROOT);
+    }
+
+    private static function removeDir(string $dir): void
+    {
+        $items = @scandir($dir);
+        if (!is_array($items)) {
+            return;
+        }
+        foreach ($items as $item) {
+            if ($item === '.' || $item === '..') {
+                continue;
+            }
+            $path = $dir . '/' . $item;
+            if (is_dir($path)) {
+                self::removeDir($path);
+            } else {
+                @unlink($path);
+            }
+        }
+        @rmdir($dir);
     }
 }

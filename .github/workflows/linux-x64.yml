@@ -175,6 +175,7 @@ jobs:
         php: ["8.4", "8.5"]
     env:
       PHPX_HOME: ${{ github.workspace }}/third_party/phpx
+      TYPEPHP_MCP_REQUIRE_BINARY: '1'
 
     steps:
       - name: Checkout TypePHP
@@ -253,6 +254,14 @@ jobs:
       - name: Configure native library path
         shell: bash
         run: echo "LD_LIBRARY_PATH=${PHPX_HOME}/lib:$(php-config --prefix)/lib" >> "${GITHUB_ENV}"
+
+      - name: Build typephp-mcp
+        shell: bash
+        run: |
+          php_home="$(php-config --prefix)"
+          export PHP_HOME="${php_home}"
+          bash tools/typephp-mcp/build.sh
+          test -x tools/typephp-mcp/typephp_mcp
 
       - name: Run PHPUnit
         run: vendor/bin/phpunit

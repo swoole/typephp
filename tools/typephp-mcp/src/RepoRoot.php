@@ -1,5 +1,12 @@
 <?php
 
+/**
+ * Resolves the TypePHP repository root (the tool resource directory).
+ *
+ * Detection order: TYPEPHP_MCP_ROOT env var, then an upward walk from the
+ * current working directory, then Config::defaultRoot() (source-relative;
+ * meaningless for a deployed binary, which must set TYPEPHP_MCP_ROOT).
+ */
 final class RepoRoot
 {
     private string $root;
@@ -21,7 +28,7 @@ final class RepoRoot
         if (is_string($cwd) && $cwd !== '') {
             $seeds[] = $cwd;
         }
-        $seeds[] = TYPEPHP_MCP_DEFAULT_ROOT;
+        $seeds[] = Config::defaultRoot();
 
         foreach ($seeds as $seed) {
             $dir = self::normalize($seed);
@@ -38,7 +45,9 @@ final class RepoRoot
         }
 
         throw new RuntimeException(
-            'TypePHP repository root not found. Set TYPEPHP_MCP_ROOT to the aot-compiler checkout.'
+            'TypePHP repository root not found (looked for docs/ + bin/tpc.php upward from the'
+            . ' working directory and from ' . Config::defaultRoot() . ').'
+            . ' Set TYPEPHP_MCP_ROOT to the aot-compiler checkout.'
         );
     }
 

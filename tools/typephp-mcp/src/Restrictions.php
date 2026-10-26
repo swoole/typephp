@@ -59,7 +59,8 @@ final class Restrictions
             'objects' => [
                 'title' => '对象模型',
                 'rules' => [
-                    '不能继承内置类（例如 class MyDb extends PDO 会 fatal）；用组合持有，如 private PDO $connection。',
+                    '可以继承内置类（Zend 内部类，如 ArrayObject/PDO/Exception，编译期按反射判定），也可以继承参与 AOT 编译的用户类；不能继承仅在运行时定义/加载（autoload）的用户类，否则报 "inherits from a non-existent class"。',
+                    'Native Class（#[Native]）与普通 Zend 类不能互相继承；不能继承 final 类；readonly 继承契约双向适用（Zend 父类以宿主运行时反射为准，如 BcMath\Number 是 internal readonly）。',
                     'Native Class 使用独立固定布局，不能当作普通 Zend Object、PHP array key/value 或任意 mixed 值使用。',
                     'toInt()/toString()/toArray() 等关键词方法先于普通对象方法解析；toAny()/toRef() 不可覆盖。',
                     '禁止子类用同名 private 属性隐藏父类私有属性。',
@@ -136,7 +137,7 @@ final class Restrictions
             }
             $section = $topics[$topic];
             return '## ' . $section['title'] . ' [' . $topic . "]\n- " . implode("\n- ", $section['rules'])
-                . "\n\nSources: docs/zh-cn/INCOMPATIBLE_PHP_FEATURES.md, docs/zh-cn/MIXED_CPP_PHP.md, docs/zh-cn/COMPILER_CLI.md";
+                . "\n\nSources: docs/zh-cn/INCOMPATIBLE_PHP_FEATURES.md, docs/zh-cn/CLASS_INHERITANCE.md, docs/zh-cn/MIXED_CPP_PHP.md, docs/zh-cn/COMPILER_CLI.md";
         }
 
         $blocks = [];
@@ -157,11 +158,12 @@ final class Restrictions
             . '2) bin mode requires a global main() with signature main() or main(int $argc, array $argv). '
             . '3) once a local is inferred as a concrete native type (int/float/bool/string/array) it cannot be reassigned to an incompatible type in the same scope; use std::any() for dynamic semantics. '
             . '4) reference arguments of dynamic/Closure calls need explicit std::ref()/toRef(); closures cannot return by reference; Closure::bind/bindTo/call are unsupported. '
-            . '5) built-in classes cannot be extended (e.g. PDO) - use composition; Native Class objects are not plain Zend objects/arrays/mixed. '
+            . '5) built-in (internal) classes like ArrayObject/PDO CAN be extended, and so can user classes that take part in AOT compilation; classes defined/loaded only at runtime (autoload, not compiled) cannot - the compiler reports "inherits from a non-existent class"; Native classes and plain Zend classes cannot inherit from each other; final classes cannot be extended. '
             . '6) every non-empty switch case must end with return/break/continue/exit/throw; do not rely on fallthrough. '
             . '7) no $$var, no declare(ticks), strict_types=0 rejected; eval() cannot see AOT locals. '
             . '8) .stub.php bodies must be empty {}; external C++ functions are php_-prefixed with php:: types only. '
             . '9) foreach over std::vector/map/orderedMap forbids structural insert/remove. '
-            . '10) check_code covers C++ generation only, not link-time errors.';
+            . '10) check_code covers C++ generation only, not link-time errors. '
+            . 'Verified against TypePHP v0.9.5; authoritative sources: docs/zh-cn/CLASS_INHERITANCE.md, docs/zh-cn/INCOMPATIBLE_PHP_FEATURES.md, src/Translator.php.';
     }
 }

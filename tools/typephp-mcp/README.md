@@ -9,9 +9,9 @@
 
 | 工具 | 作用 |
 |---|---|
-| `check_code` | 第一工具。跑 `php bin/tpc.php --dry` 验证 TypePHP 子集合法性，返回 `file:line` 诊断或 OK（只覆盖 C++ 生成，不覆盖链接期） |
+| `check_code` | 第一工具。跑 `php bin/tpc.php --dry` 验证 TypePHP 子集合法性，返回结构化结果 `OK/FAILED stage=generate file=… diagnostics=N` + 逐条 `file:line[:col] 严重级别 消息`。只覆盖 C++ 生成阶段；编译/链接阶段不跑、不覆盖。工具自身执行失败（文件不存在 / PHP 或 SDK 缺失 / 编译器超时）以 `isError: true` 返回，与"用户代码不合格"的正常结果区分开 |
 | `list_restrictions` | 写码前必读。TypePHP 裁剪规则（程序结构/类型/引用/对象/控制流/std 表面/stub 契约/构建配置），可按 topic 查询 |
-| `get_symbol` | 按精确名字查函数/类/接口/trait/enum/const 声明，返回签名 + `file:line`（扫 src/、examples/、tests/std/） |
+| `get_symbol` | 按精确名字查函数/类/接口/trait/enum/const 声明，返回签名 + `file:line`（扫 src/、examples/、tests/std/）。支持完整命名空间（`TypePhp\Translator`）与 `Class::method`；大文件分块扫描（超过扫描上限会显式报告 Coverage 截断，绝不静默跳过） |
 | `list_stdlib` | 列出 tests/std 各分类及测试标题；指定分类返回该分类全部用例 |
 | `get_example` | 返回 examples/ 下可运行示例（单文件内容，或目录的文件清单 + README/main.php/project.yml 摘录） |
 | `get_stub_api` | 解析 `.stub.php` ABI 契约：列出全部 stub 文件，或读取指定文件的声明 |
@@ -29,6 +29,11 @@
 - **约束注入**。`initialize` 的 instructions 与 `check_code`/`list_restrictions` 的
   tool description 中内置约 800 token 的 TypePHP 红线摘要，不调工具也能压住头号失败模式。
 - **返回摘录 + 出处，不返整文件**；单次结果有字节预算（约 4 KB），UTF-8 边界安全。
+- **协议版本来真的**。`initialize` 按 MCP 版本规范应答：客户端请求的版本属于已实现集合才回显，
+  否则回本 server 支持的最新版（不假装支持任意版本）。`roots` 只在存在该能力的版本里声明，
+  工作区发现另有 `TYPEPHP_MCP_PROJECT_ROOT` 与 cwd 自动探测兜底。无 id 的通知（含 `tools/list`）一律不回复。
+- **编译器调用有生命周期控制**。`check_code` 通过受控子进程跑 tpc：超时、输出预算、进程树内存上限，
+  超时杀树并清理临时目录；服务在等待期间不会永久卡死。
 
 ## 构建
 
@@ -74,8 +79,14 @@ Windows 有一个 tpc 发行包目录装着 phpx/PHP SDK，Unix 侧没有，所�
 产物是本目录的 `typephp_mcp`（无 `.exe` 后缀，Mach-O arm64，约 25 MB），依赖 gmp/mpfr/oniguruma
 等 brew dylib 的绝对路径，换机需重装同样的 brew 包。
 
-以上 macOS 路径为实测；`build.sh` 同时按 Linux 写（`uname` 分支只影响 libiconv 那条），
-**Linux 侧尚未实跑验证**。
+以上 macOS 路径为实测；`build.sh` 同时按 Linux 写（`uname` 分支只影响 libiconv 那条）。
+
+`build.sh` 在用户自管机器上遵守资源安全约束（AGENTS.md）：Linux 下先抢全用户构建锁
+`${XDG_RUNTIME_DIR:-/tmp}/codex-build-$(id -u).lock`，`-j1` 串行，并对整个构建进程树设虚拟内存上限
+（8 GiB 或启动时可用内存的一半，取小者）；CI 跑在专用 runner 上，改用可用逻辑 CPU 数。
+
+CI（本 PR 新增）在 **Linux x64 / Linux arm64 / macOS arm64 / Windows x64** 上都会实际构建 MCP
+产物并跑原生 stdio 冒烟测试；缺产物即判失败（不再靠"缺产物就 skip"证明兼容）。
 
 ## 运行 / 接入 MCP 客户端
 
@@ -97,10 +108,13 @@ tools/typephp-mcp/typephp_mcp
 
 | 变量 | 默认 | 说明 |
 |---|---|---|
-| `TYPEPHP_MCP_ROOT` | 从 cwd 向上找 `bin/tpc.php` + `docs/`，再退到构建期默认值 | 仓库根。兜底常量 `TYPEPHP_MCP_DEFAULT_ROOT` 是 Windows 开发机路径，**在 mac 上永远命中不到**，客户端从别处拉起 server 时必须显式设置 |
+| `TYPEPHP_MCP_ROOT` | 从 cwd 向上找 `bin/tpc.php` + `docs/`，再退到源码相对默认值（`tools/typephp-mcp/src` 上三级） | **工具资源目录**（编译器 checkout），不是用户项目目录。默认值随源码位置解析，不再是写死的开发机路径；但 **AOT 产物内嵌的是构建机路径**，发布二进制从别处拉起时必须显式设置（否则以可操作的错误信息失败） |
 | `TYPEPHP_MCP_PHP` | `php`（PATH 查找） | `check_code` / `get_index_info` 调编译器用的 PHP |
-| `PHP_HOME` / `PHPX_HOME` | 继承调用方环境 | 这两个只被 `check_code`/`get_index_info` 间接使用（tpc 自己读）；mac 上不设就是 `The host PHP embed library is missing`，工具会如实回报成 `FAILED (exit 255)` |
+| `PHP_HOME` / `PHPX_HOME` | 继承调用方环境 | 这两个只被 `check_code`/`get_index_info` 间接使用（tpc 自己读）；mac 上不设就是 `The host PHP embed library is missing`，工具会如实回报成 `isError: true` |
 | `TYPEPHP_MCP_PROJECT_ROOT` | 未设 | 客户端不发 MCP roots 时，手动把 TypePHP 项目路径并入默认检索集（分隔符 `;` 或 `:` 都认） |
+| `TYPEPHP_MCP_COMPILE_TIMEOUT` | `120` | `check_code` 调编译器的超时秒数；超时杀掉整个子进程树并清理临时目录，服务保持可响应 |
+| `TYPEPHP_MCP_COMPILE_OUTPUT_LIMIT` | `65536` | 编译器输出捕获字节上限（仍持续排空管道，子进程不会被写满阻塞） |
+| `TYPEPHP_MCP_COMPILE_MEMORY_LIMIT_MB` | `4096` | POSIX 下编译器进程树的虚拟内存上限（MiB） |
 
 Finch（`~/.finch/mcp/servers.json`，对象数组）：
 
@@ -157,23 +171,22 @@ php vendor/bin/phpunit tools/typephp-mcp/tests/
 
 - `McpServerTest`：协议分发 + 12 个工具的逻辑单测（普通 PHP 直接跑；
   源码刻意保持在 stock PHP 与 TypePHP 的交集内，解释执行与 AOT 编译跑同一份代码）。
-- `McpBinaryTest`：驱动编译产物跑真实 stdio 会话，含逐条 flush 超时校验
-  （未构建时自动 skip）。二进制按平台取 `typephp_mcp.exe` / `typephp_mcp`，
-  也可用 `TYPEPHP_MCP_BINARY=<path>` 指定。
+- `McpBinaryTest`：用共享的 `McpBinaryDriver` 驱动编译产物跑真实 stdio 会话（逐条 flush 超时校验、
+  大文件符号、工具失败 `isError`、通知不回复、仓库外 cwd 启动、解释执行与 AOT 一致性）。二进制按平台取
+  `typephp_mcp.exe` / `typephp_mcp`，也可用 `TYPEPHP_MCP_BINARY=<path>` 指定；未构建时默认 skip，
+  设 `TYPEPHP_MCP_REQUIRE_BINARY=1`（CI 会设）则改为失败。
+- `tools/typephp-mcp/tests/mcp-binary-smoke.php`：独立 CI 驱动，落地同样的 wire 检查；`--interpreted`
+  跑解释执行入口 `run-interpreted.php`，用于和 AOT 产物对比。缺产物直接以退出码 1 失败。
 
-`check_code` 相关断言（两个测试文件里共 3 条）要求调用方环境里有一个能跑 `tpc --dry`
-的 embed 运行时；Windows 靠 tpc 包，macOS/Linux 靠 `PHP_HOME`/`PHPX_HOME`（见"构建"）。
-没设这些变量时它们会红，报的是编译器那句 `The host PHP embed library is missing`，
-不是本项目的问题。
+`check_code` 相关断言要求调用方环境里有一个能跑 `tpc --dry` 的 embed 运行时；Windows 靠 tpc 包，
+macOS/Linux 靠 `PHP_HOME`/`PHPX_HOME`（见"构建"）。没设这些变量时它们会红，报的是编译器那句
+`The host PHP embed library is missing`，不是本项目的问题。
 
-macOS 实测（2026-10-24，Apple Silicon，PHP 8.5.7 + 私有 8.5.11 embed 运行时 + phpx 2.9.4）：
-`php vendor/bin/phpunit tools/typephp-mcp/tests/` → 36 用例 / 383 断言全绿，
-唯一 skip 是 `testMsvcBinDirDiscovery`（vswhere 只在 Windows 存在）。
-AOT 产物 25 MB，真实 stdio 会话里 12 个工具与两条 `exec()` 通路
-（`get_index_info` 的 tpc+git、`check_code` 的 tpc --dry）均正常。
-逐个工具比对 AOT 产物与解释执行同一份代码：12 条回复逐字节相同，唯一差异是 `check_code`
-里那个 `uniqid()` 临时构建目录名。反向对照：把 `PHP_HOME` 指向没有 embed 库的目录，
-三条 `check_code` 断言（两个单测 + 产物会话各一）一起变红，说明这几条断言真的在管编译器通路。
+本 PR 起 CI 在 Linux x64/arm64、macOS arm64、Windows x64 上实际构建产物并跑原生冒烟，
+不再依赖"缺产物就 skip"来证明兼容。本机（Windows，PHP 8.5.11 + tpc_v0.9.5 包）实测：
+`php vendor/bin/phpunit --testsuite TypePhpMcpTests` → 45 用例 / 456 断言全绿；AOT 产物真实 stdio
+会话里 12 个工具与两条编译器通路（`get_index_info` 的 tpc+git、`check_code` 的 tpc --dry）均正常；
+反向对照：把 `PHP_HOME` 指向没有 embed 库的目录，`check_code` 断言一起变红，说明它们真的在管编译器通路。
 
 ## 已知问题（编译器侧，非本项目 bug）
 

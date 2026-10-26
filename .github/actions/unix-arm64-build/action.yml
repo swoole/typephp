@@ -209,9 +209,17 @@ runs:
         # depends on the auto-detection order.
         export TYPEPHP_MCP_TPC="${PWD}/tpc"
         # 10 minute wall-clock limit: a wedged process must fail the stage
-        # rather than hold the job open.
-        timeout 600 php tools/typephp-mcp/tests/mcp-binary-smoke.php tools/typephp-mcp/typephp_mcp "${{ github.workspace }}"
-        timeout 600 php tools/typephp-mcp/tests/mcp-binary-smoke.php --interpreted "${{ github.workspace }}"
+        # rather than hold the job open. GNU timeout is not on macOS, so fall
+        # back to a plain run there (the driver still bounds each reply).
+        run_smoke() {
+          if command -v timeout >/dev/null 2>&1; then
+            timeout 600 "$@"
+          else
+            "$@"
+          fi
+        }
+        run_smoke php tools/typephp-mcp/tests/mcp-binary-smoke.php tools/typephp-mcp/typephp_mcp "${{ github.workspace }}"
+        run_smoke php tools/typephp-mcp/tests/mcp-binary-smoke.php --interpreted "${{ github.workspace }}"
 
     - name: Show native dependencies
       shell: bash

@@ -72,6 +72,13 @@ final class CompilerOracle
                 'File not found: ' . $file . "\nPass an absolute path, or a path relative to the repo root."
             );
         }
+        // Always hand the compiler an absolute path: it runs with cwd set to
+        // the file's directory (see below), where a path relative to the
+        // server's cwd would no longer resolve.
+        $absolute = realpath($resolved);
+        if (is_string($absolute) && $absolute !== '') {
+            $resolved = $absolute;
+        }
 
         // Resolving the compiler also validates that one is reachable at all
         // (a compiled tpc, or PHP able to run bin/tpc.php).
@@ -91,6 +98,11 @@ final class CompilerOracle
         }
 
         try {
+            // Run the compiler in the directory that contains the file: tpc
+            // derives the generated output path by relativizing the source
+            // path against its own cwd, and a path it cannot relativize ends
+            // up joined onto the build directory verbatim (a drive letter
+            // inside a directory name on Windows), which then fails to write.
             $result = self::runTpc($root, [
                 '--dry',
                 $resolved,
@@ -98,7 +110,7 @@ final class CompilerOracle
                 $buildDir,
                 '--no-color',
                 '--no-progress',
-            ], self::DEFAULT_TIMEOUT_SECONDS);
+            ], self::DEFAULT_TIMEOUT_SECONDS, dirname($resolved));
             return self::format($resolved, $root, $result);
         } finally {
             self::removeDir($buildDir);
@@ -113,12 +125,13 @@ final class CompilerOracle
      * @param array<int, string> $args
      * @return array{code: int, output: string, timedOut: bool}
      */
-    public static function runTpc(RepoRoot $root, array $args, ?int $timeoutSeconds = null): array
+    public static function runTpc(RepoRoot $root, array $args, ?int $timeoutSeconds = null, ?string $cwd = null): array
     {
         return self::runProcess(
             self::buildCommand($root, $args),
             self::timeoutSeconds($timeoutSeconds),
-            self::outputLimit()
+            self::outputLimit(),
+            $cwd ?? $root->path()
         );
     }
 
@@ -254,10 +267,10 @@ final class CompilerOracle
      *
      * @return array{code: int, output: string, timedOut: bool}
      */
-    private static function runProcess(string $command, int $timeoutSeconds, int $outputLimitBytes): array
+    private static function runProcess(string $command, int $timeoutSeconds, int $outputLimitBytes, ?string $cwd = null): array
     {
         $descriptors = [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']];
-        $process = proc_open($command, $descriptors, $pipes);
+        $process = proc_open($command, $descriptors, $pipes, $cwd);
         if (!is_resource($process)) {
             throw new CompilerOracleToolFailure('Cannot start the TypePHP compiler process.');
         }

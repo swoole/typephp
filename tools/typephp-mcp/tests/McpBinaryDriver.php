@@ -133,10 +133,17 @@ final class McpBinaryDriver
                 (string) json_encode($reply)
             );
         } finally {
-            fclose($pipes[0]);
-            fclose($pipes[1]);
-            fclose($pipes[2]);
-            proc_close($process);
+            // Close the pipes first, then reap. proc_close() waits for EOF on
+            // them, so a server that stopped reading must be terminated rather
+            // than waited on - a hung server would otherwise hang CI forever.
+            @fclose($pipes[0]);
+            @fclose($pipes[1]);
+            @fclose($pipes[2]);
+            $status = @proc_get_status($process);
+            if (is_array($status) && $status['running']) {
+                @proc_terminate($process, 9);
+            }
+            @proc_close($process);
         }
         return $checks;
     }

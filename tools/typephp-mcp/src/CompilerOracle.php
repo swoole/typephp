@@ -325,13 +325,20 @@ final class CompilerOracle
 
         if ($timedOut) {
             self::terminateTree($process);
-            proc_close($process);
+            // Close the output pipes before reaping: proc_close() waits for
+            // EOF on them, and a descendant that inherited the write ends
+            // would otherwise keep the server blocked forever.
+            @fclose($pipes[1]);
+            @fclose($pipes[2]);
+            @proc_close($process);
             throw new CompilerOracleToolFailure(
                 'The TypePHP compiler did not finish within ' . $timeoutSeconds
                 . ' seconds and was killed. Raise TYPEPHP_MCP_COMPILE_TIMEOUT for huge projects.'
             );
         }
-        $code = proc_close($process);
+        @fclose($pipes[1]);
+        @fclose($pipes[2]);
+        $code = @proc_close($process);
         return ['code' => $code, 'output' => $output, 'timedOut' => false];
     }
 

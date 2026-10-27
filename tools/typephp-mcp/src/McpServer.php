@@ -71,9 +71,14 @@ final class McpServer
      * the client does not send MCP roots.
      *
      * Several paths are separated by ';', and on POSIX also by ':'. The colon
-     * cannot be a separator on Windows: it is part of every drive-letter path,
-     * so splitting on it turned "D:/work/proj" into "D" and "/work/proj" and
-     * the project was never detected.
+     * cannot be a separator where paths carry drive letters: it is part of
+     * every "D:\..." path, so splitting on it turned the path into "D" and
+     * "\workspace\app" and the project was never detected.
+     *
+     * The decision must not depend on PHP_OS: a binary built on Linux and run
+     * on Windows has the build host's value baked in. Detect the shape of the
+     * value instead - a drive letter at the start of any segment, or a
+     * backslash separator, means this is a Windows-style list.
      */
     private function seedFromEnv(): void
     {
@@ -81,7 +86,9 @@ final class McpServer
         if (!is_string($raw) || $raw === '') {
             return;
         }
-        $separator = stripos(PHP_OS, 'WIN') === 0 ? '#;#' : '#[;:]#';
+        $separator = stripos(PHP_OS, 'WIN') === 0 || self::looksLikeWindowsPathList($raw)
+            ? '#;#'
+            : '#[;:]#';
         foreach (preg_split($separator, $raw) ?: [] as $entry) {
             $entry = trim((string) $entry);
             if ($entry === '') {
@@ -94,6 +101,18 @@ final class McpServer
                 }
             }
         }
+    }
+
+    /**
+     * Whether a value looks like a Windows path list: a drive letter followed
+     * by a separator anywhere in the string, or a backslash path separator.
+     */
+    private static function looksLikeWindowsPathList(string $raw): bool
+    {
+        if (preg_match('#[A-Za-z]:[\\\\/]#', $raw) === 1) {
+            return true;
+        }
+        return str_contains($raw, '\\');
     }
 
     private function addAutoDir(string $dir): void

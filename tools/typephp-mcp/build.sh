@@ -170,10 +170,22 @@ if [[ "${CI:-}" != "true" && "${GITHUB_ACTION:-}" != "true" ]]; then
             [[ "$half_mb" -lt "$limit_mb" ]] && limit_mb="$half_mb"
         fi
     fi
-    ulimit -v "$((limit_mb * 1024))" 2>/dev/null || true
-    echo "[build] memory cap: ${limit_mb} MiB virtual, jobs: ${JOBS}"
+    # ulimit -v caps the address space of EACH process; descendants inherit
+    # their own cap, so this is not a shared budget for the build tree. It is
+    # still worth setting (one runaway compiler cannot take the machine down)
+    # but it must not be described as a whole-tree limit. A real total needs a
+    # cgroup, which this script does not create.
+    if ! ulimit -v "$((limit_mb * 1024))" 2>/dev/null; then
+        echo "[build] ERROR: cannot apply the per-process memory cap (${limit_mb} MiB); refusing to build unprotected" >&2
+        exit 1
+    fi
+    echo "[build] per-process memory cap: ${limit_mb} MiB virtual (not a whole-tree total), jobs: ${JOBS}"
 
-    if [[ "$(uname)" == "Linux" ]] && command -v flock >/dev/null 2>&1; then
+    if [[ "$(uname)" == "Linux" ]]; then
+        if ! command -v flock >/dev/null 2>&1; then
+            echo "[build] ERROR: flock is required for the shared build lock but was not found" >&2
+            exit 1
+        fi
         lock_file="${XDG_RUNTIME_DIR:-/tmp}/codex-build-$(id -u).lock"
         echo "[build] acquiring build lock: ${lock_file}"
         flock -n "$lock_file" "${BUILD_CMD[@]}" \

@@ -440,6 +440,223 @@ final class McpServerTest extends TestCase
         self::assertSame('b文', TextUtil::utf8SafeSlice($mixed, 4, 4));
     }
 
+    /**
+     * Write a stand-in compiler that behaves according to
+     * TYPEPHP_FAKE_TPC_MODE ("env-missing", "user-code-error" or "slow"), so
+     * the failure-classification paths can be exercised without a real SDK.
+     * Returns the executable to point TYPEPHP_MCP_TPC at.
+     */
+    private function makeFakeCompiler(string $dir): string
+    {
+        $script = <<<'PHP'
+<?php
+$mode = getenv('TYPEPHP_FAKE_TPC_MODE');
+if (!is_string($mode) || $mode === '') { $mode = 'env-missing'; }
+if (in_array('--version', $argv, true)) { echo "TypePHP Compiler (AOT) v9.9.9\n"; exit(0); }
+switch ($mode) {
+    case 'env-missing':
+        fwrite(STDERR, "Fatal error: The host PHP embed library is missing: fake detail\n");
+        exit(1);
+    case 'user-code-error':
+        fwrite(STDERR, "Fatal error: Unsupported statement: Stmt_Echo in $argv[2]:2\n");
+        exit(1);
+    case 'slow':
+        sleep(30);
+        echo "Dry run completed\n";
+        exit(0);
+}
+exit(0);
+PHP;
+        $this->sandboxWrite($dir, 'fake-tpc.php', $script);
+        if (stripos(PHP_OS, 'WIN') === 0) {
+            $this->sandboxWrite($dir, 'fake-tpc.bat', "@echo off\r\nphp \"%~dp0fake-tpc.php\" %*\r\n");
+            return $dir . '/fake-tpc.bat';
+        }
+        $this->sandboxWrite($dir, 'fake-tpc.sh', "#!/usr/bin/env bash\nexec php \"\$(dirname \"\$0\")/fake-tpc.php\" \"\$@\"\n");
+        @chmod($dir . '/fake-tpc.sh', 0755);
+        return $dir . '/fake-tpc.sh';
+    }
+
+    /**
+     * Run a tool call with TYPEPHP_MCP_TPC pointed at the stand-in compiler.
+     *
+     * @return array<string, mixed>
+     */
+    private function withFakeCompiler(string $mode, callable $call): array
+    {
+        $sandbox = $this->makeSandbox();
+        $previousTpc = getenv('TYPEPHP_MCP_TPC');
+        $previousMode = getenv('TYPEPHP_FAKE_TPC_MODE');
+        try {
+            putenv('TYPEPHP_MCP_TPC=' . $this->makeFakeCompiler($sandbox));
+            putenv('TYPEPHP_FAKE_TPC_MODE=' . $mode);
+            // Force a fresh resolution: the compiler prefix is cached per
+            // process, and other tests already resolved the real one.
+            // (setAccessible() is a no-op since PHP 8.1 and deprecated in 8.5.)
+            (new ReflectionProperty(CompilerOracle::class, 'compilerPrefix'))->setValue(null, null);
+
+            return $call(new McpServer($this->root));
+        } finally {
+            if ($previousTpc === false) { putenv('TYPEPHP_MCP_TPC'); } else { putenv('TYPEPHP_MCP_TPC=' . $previousTpc); }
+            if ($previousMode === false) { putenv('TYPEPHP_FAKE_TPC_MODE'); } else { putenv('TYPEPHP_FAKE_TPC_MODE=' . $previousMode); }
+            (new ReflectionProperty(CompilerOracle::class, 'compilerPrefix'))->setValue(null, null);
+            $this->removeDir($sandbox);
+        }
+    }
+
+    public function testMissingSdkIsReportedAsToolError(): void
+    {
+        $reply = $this->withFakeCompiler('env-missing', function (McpServer $server): array {
+            $raw = (string) $server->handleLine((string) json_encode([
+                'jsonrpc' => '2.0', 'id' => 1, 'method' => 'tools/call',
+                'params' => ['name' => 'check_code', 'arguments' => ['path' => 'examples/hello.php']],
+            ]));
+            return (array) json_decode($raw, true);
+        });
+        self::assertTrue($reply['result']['isError'] ?? false, 'a missing SDK must not look like a code verdict');
+        self::assertStringContainsString('embed library is missing', $reply['result']['content'][0]['text']);
+    }
+
+    public function testUserCodeErrorStaysANormalResult(): void
+    {
+        $reply = $this->withFakeCompiler('user-code-error', function (McpServer $server): array {
+            $raw = (string) $server->handleLine((string) json_encode([
+                'jsonrpc' => '2.0', 'id' => 1, 'method' => 'tools/call',
+                'params' => ['name' => 'check_code', 'arguments' => ['path' => 'examples/hello.php']],
+            ]));
+            return (array) json_decode($raw, true);
+        });
+        self::assertFalse($reply['result']['isError'] ?? false, 'invalid user code is a check result, not a tool error');
+        self::assertStringStartsWith('FAILED stage=generate', $reply['result']['content'][0]['text']);
+        self::assertStringContainsString('Unsupported statement', $reply['result']['content'][0]['text']);
+    }
+
+    public function testCompileTimeoutHonoursTheEnvironmentOverride(): void
+    {
+        $previous = getenv('TYPEPHP_MCP_COMPILE_TIMEOUT');
+        try {
+            putenv('TYPEPHP_MCP_COMPILE_TIMEOUT=2');
+            $started = microtime(true);
+            $reply = $this->withFakeCompiler('slow', function (McpServer $server): array {
+                $raw = (string) $server->handleLine((string) json_encode([
+                    'jsonrpc' => '2.0', 'id' => 1, 'method' => 'tools/call',
+                    'params' => ['name' => 'check_code', 'arguments' => ['path' => 'examples/hello.php']],
+                ]));
+                return (array) json_decode($raw, true);
+            });
+            $elapsed = microtime(true) - $started;
+            self::assertTrue($reply['result']['isError'] ?? false);
+            self::assertStringContainsString('did not finish within 2 seconds', $reply['result']['content'][0]['text']);
+            // The stand-in sleeps 30s; the override must cut it far shorter.
+            self::assertLessThan(20.0, $elapsed, 'TYPEPHP_MCP_COMPILE_TIMEOUT was not applied');
+        } finally {
+            if ($previous === false) { putenv('TYPEPHP_MCP_COMPILE_TIMEOUT'); } else { putenv('TYPEPHP_MCP_COMPILE_TIMEOUT=' . $previous); }
+        }
+    }
+
+    public function testTimeoutLeavesNoDescendantProcesses(): void
+    {
+        // The stand-in forks a long-lived grandchild and records its pid, then
+        // hangs. After the timeout is reported the grandchild must be gone:
+        // a surviving descendant would keep writing into the build directory
+        // that check() deletes in its finally block.
+        $sandbox = $this->makeSandbox();
+        $spawner = <<<'PHP'
+<?php
+if (in_array('--version', $argv, true)) { echo "TypePHP Compiler (AOT) v9.9.9\n"; exit(0); }
+$child = proc_open('php -r "sleep(300);"', [], $pipes);
+$status = proc_get_status($child);
+file_put_contents(getenv('TYPEPHP_FAKE_PIDFILE'), (string) $status['pid']);
+sleep(300);
+PHP;
+        $this->sandboxWrite($sandbox, 'spawner.php', $spawner);
+        if (stripos(PHP_OS, 'WIN') === 0) {
+            $this->sandboxWrite($sandbox, 'spawner.bat', "@echo off\r\nphp \"%~dp0spawner.php\" %*\r\n");
+            $binary = $sandbox . '/spawner.bat';
+        } else {
+            $this->sandboxWrite($sandbox, 'spawner.sh', "#!/usr/bin/env bash\nexec php \"\$(dirname \"\$0\")/spawner.php\" \"\$@\"\n");
+            @chmod($sandbox . '/spawner.sh', 0755);
+            $binary = $sandbox . '/spawner.sh';
+        }
+        $pidFile = $sandbox . '/child.pid';
+
+        $previousTpc = getenv('TYPEPHP_MCP_TPC');
+        $previousPid = getenv('TYPEPHP_FAKE_PIDFILE');
+        try {
+            putenv('TYPEPHP_MCP_TPC=' . $binary);
+            putenv('TYPEPHP_FAKE_PIDFILE=' . $pidFile);
+            (new ReflectionProperty(CompilerOracle::class, 'compilerPrefix'))->setValue(null, null);
+
+            try {
+                CompilerOracle::runTpc($this->root, ['--dry', 'examples/hello.php'], 2);
+                self::fail('the stand-in should have timed out');
+            } catch (CompilerOracleToolFailure $error) {
+                self::assertStringContainsString('did not finish within 2 seconds', $error->getMessage());
+            }
+
+            $deadline = microtime(true) + 10;
+            while (!is_file($pidFile) && microtime(true) < $deadline) {
+                usleep(50000);
+            }
+            $childPid = (int) trim((string) @file_get_contents($pidFile));
+            self::assertGreaterThan(0, $childPid, 'the stand-in did not record its grandchild pid');
+            self::assertFalse($this->processAlive($childPid), 'a descendant survived the timeout');
+        } finally {
+            if ($previousTpc === false) { putenv('TYPEPHP_MCP_TPC'); } else { putenv('TYPEPHP_MCP_TPC=' . $previousTpc); }
+            if ($previousPid === false) { putenv('TYPEPHP_FAKE_PIDFILE'); } else { putenv('TYPEPHP_FAKE_PIDFILE=' . $previousPid); }
+            (new ReflectionProperty(CompilerOracle::class, 'compilerPrefix'))->setValue(null, null);
+            $this->removeDir($sandbox);
+        }
+    }
+
+    public function testSymlinkAliasIsNotScannedTwice(): void
+    {
+        // A symlink that aliases a directory inside the same tree used to be
+        // walked again (the visited set was passed by value, so sibling
+        // branches never saw each other's entries). The same file then counted
+        // twice, consuming both the hit limit and the scan budget.
+        $sandbox = $this->makeSandbox();
+        try {
+            $this->sandboxWrite($sandbox, 'src/Test.php', "<?php\nclass AliasProbe {}\n");
+            self::assertTrue(mkdir($sandbox . '/before', 0777, true));
+            $this->sandboxWrite($sandbox, 'before/Marker.php', "<?php\nclass BeforeMarker {}\n");
+
+            $linked = @symlink($sandbox . '/src', $sandbox . '/alias');
+            if ($linked !== true) {
+                self::markTestSkipped('cannot create symlinks in this environment');
+            }
+
+            $code = new CodeIndex($this->root);
+            $text = $code->getSymbol('AliasProbe', [$sandbox]);
+            // Which of the two names is reported depends on scandir() order;
+            // what matters is that the file is reported exactly once.
+            self::assertMatchesRegularExpression('#(src|alias)/Test\.php#', $text);
+            self::assertSame(1, substr_count($text, 'class AliasProbe'), $text);
+            self::assertSame(1, substr_count($text, 'Test.php'), $text);
+        } finally {
+            $this->removeDir($sandbox);
+        }
+    }
+
+    private function processAlive(int $pid): bool
+    {
+        if (stripos(PHP_OS, 'WIN') === 0) {
+            $output = [];
+            $code = 0;
+            @exec('tasklist /FI "PID eq ' . $pid . '" /NH 2>nul', $output, $code);
+            foreach ($output as $line) {
+                if (str_contains((string) $line, (string) $pid)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+        $output = [];
+        $code = 0;
+        @exec('kill -0 ' . $pid . ' 2>/dev/null', $output, $code);
+        return $code === 0;
+    }
+
     private function makeSandbox(): string
     {
         $dir = sys_get_temp_dir() . '/typephp-mcp-dirs-' . bin2hex(random_bytes(4));

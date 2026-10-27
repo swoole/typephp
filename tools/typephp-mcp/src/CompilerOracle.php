@@ -110,7 +110,17 @@ final class CompilerOracle
                 $buildDir,
                 '--no-color',
                 '--no-progress',
-            ], self::DEFAULT_TIMEOUT_SECONDS, dirname($resolved));
+            // null lets timeoutSeconds() consult TYPEPHP_MCP_COMPILE_TIMEOUT:
+            // passing the constant here made the documented override dead
+            // code, so the error message pointed at a setting that did
+            // nothing.
+            ], null, dirname($resolved));
+            if (self::isEnvironmentFailure($result['output'])) {
+                throw new CompilerOracleToolFailure(
+                    'The compiler could not run: ' . self::environmentFailureSummary($result['output'])
+                    . "\nThis is a tool/environment problem, not a verdict on the code being checked."
+                );
+            }
             return self::format($resolved, $root, $result);
         } finally {
             self::removeDir($buildDir);
@@ -155,13 +165,20 @@ final class CompilerOracle
     }
 
     /**
-     * Assemble the command line. On POSIX the compiler is wrapped in a shell
-     * that caps virtual memory for the whole process tree before exec; tpc
-     * --dry only generates C++ (no make/link), but the translation pipeline
-     * still runs in PHP and must not be able to exhaust the machine. A real
-     * compile/link tier would additionally need the shared build lock and
-     * serial Make/CMake jobs (see AGENTS.md) - this tool intentionally does
-     * not provide such a tier.
+     * Assemble the command line.
+     *
+     * On POSIX the compiler runs in a shell that applies `ulimit -v` before
+     * exec. That is a PER-PROCESS address-space cap inherited by each
+     * descendant, not a shared budget for the tree: N children can each reach
+     * the cap. It is kept because it still stops one runaway process from
+     * taking the machine down, but it must not be described as a total cap.
+     * A real whole-tree limit needs a cgroup, which this tool does not set
+     * up; if applying the per-process cap fails, the build is refused rather
+     * than run unprotected while claiming otherwise.
+     *
+     * tpc --dry only generates C++ (no make/link), so this stage does not
+     * spawn a compiler farm. A real compile/link tier would additionally need
+     * the shared build lock and serial Make/CMake jobs (see AGENTS.md).
      */
     private static function buildCommand(RepoRoot $root, array $args): string
     {
@@ -172,8 +189,15 @@ final class CompilerOracle
         $command = implode(' ', $parts);
         if (stripos(PHP_OS, 'WIN') !== 0) {
             $limitMb = self::memoryLimitMb();
+            if ($limitMb < 1) {
+                throw new CompilerOracleToolFailure(
+                    'TYPEPHP_MCP_COMPILE_MEMORY_LIMIT_MB must be a positive number of MiB.'
+                );
+            }
+            // The `|| exit` makes a rejected ulimit abort the build instead of
+            // silently running without the cap.
             $command = 'bash -c ' . escapeshellarg(
-                'ulimit -v ' . ($limitMb * 1024) . '; exec ' . $command
+                'ulimit -v ' . ($limitMb * 1024) . ' || { echo "typephp-mcp: cannot apply the per-process memory cap" >&2; exit 125; }; exec ' . $command
             );
         }
         return $command;
@@ -343,9 +367,18 @@ final class CompilerOracle
     }
 
     /**
-     * Kill the compiler and its descendants. Windows gets a real tree kill
-     * (taskkill /T); POSIX terminates the direct child, which is the only
-     * process tpc --dry spawns (no make/link in this stage).
+     * Kill the compiler and every descendant, then wait for them to be gone.
+     *
+     * proc_terminate() only signals the direct child: on POSIX the command is
+     * started through a shell, and the compiler itself can fork (php-builder,
+     * make, cl). Killing just the parent left those running, still able to
+     * write into the build directory that check() is about to delete. So the
+     * descendants are collected first, then signalled from the leaves up, and
+     * the caller only proceeds once none of them is alive.
+     *
+     * Windows collects the tree the same way and hands the whole thing to
+     * taskkill /T, which is done before the parent is signalled - signalling
+     * the parent first would break the parent chain the /T walk relies on.
      */
     private static function terminateTree(mixed $process): void
     {
@@ -354,19 +387,190 @@ final class CompilerOracle
         }
         $status = @proc_get_status($process);
         $pid = is_array($status) && isset($status['pid']) ? (int) $status['pid'] : 0;
-        @proc_terminate($process, 15);
-        usleep(200000);
+
         if (stripos(PHP_OS, 'WIN') === 0) {
             if ($pid > 0) {
                 $discard = [];
                 @exec('taskkill /PID ' . $pid . ' /T /F 2>nul', $discard, $discardCode);
             }
-        } else {
-            $status = @proc_get_status($process);
-            if (is_array($status) && $status['running']) {
-                @proc_terminate($process, 9);
+            @proc_terminate($process, 9);
+            self::waitForExit($process, 5);
+            return;
+        }
+
+        // Collect descendants before signalling anything: once the parent is
+        // gone the trees are reparented and can no longer be found.
+        $tree = self::descendantPids($pid);
+        @proc_terminate($process, 15);
+        foreach (array_reverse($tree) as $childPid) {
+            $discard = [];
+            @exec('kill -TERM ' . $childPid . ' 2>/dev/null', $discard, $discardCode);
+        }
+        usleep(200000);
+        foreach (array_reverse($tree) as $childPid) {
+            $discard = [];
+            @exec('kill -KILL ' . $childPid . ' 2>/dev/null', $discard, $discardCode);
+        }
+        $stillRunning = self::runningPids($tree);
+        if ($stillRunning !== []) {
+            self::waitUntilGone($stillRunning, 5);
+        }
+        self::waitForExit($process, 5);
+    }
+
+    /**
+     * PIDs of every live descendant of $pid (depth-first).
+     *
+     * @return array<int, int>
+     */
+    private static function descendantPids(int $pid): array
+    {
+        if ($pid <= 0) {
+            return [];
+        }
+        $parents = self::processParents();
+        $children = [];
+        foreach ($parents as $childPid => $parentPid) {
+            $children[$parentPid][] = $childPid;
+        }
+        $collected = [];
+        $queue = [$pid];
+        while ($queue !== []) {
+            $current = array_shift($queue);
+            foreach ($children[$current] ?? [] as $childPid) {
+                if (in_array($childPid, $collected, true)) {
+                    continue;
+                }
+                $collected[] = $childPid;
+                $queue[] = $childPid;
             }
         }
+        return $collected;
+    }
+
+    /**
+     * pid => ppid for every visible process.
+     *
+     * @return array<int, int>
+     */
+    private static function processParents(): array
+    {
+        $output = [];
+        @exec('ps -A -o pid= -o ppid= 2>/dev/null', $output);
+        $map = [];
+        foreach ($output as $line) {
+            $line = trim((string) $line);
+            if ($line === '') {
+                continue;
+            }
+            $fields = preg_split('/\s+/', $line) ?: [];
+            if (count($fields) < 2 || !is_numeric($fields[0]) || !is_numeric($fields[1])) {
+                continue;
+            }
+            $map[(int) $fields[0]] = (int) $fields[1];
+        }
+        return $map;
+    }
+
+    /**
+     * @param array<int, int> $pids
+     * @return array<int, int>
+     */
+    private static function runningPids(array $pids): array
+    {
+        $alive = [];
+        foreach ($pids as $pid) {
+            $discard = [];
+            $code = 0;
+            @exec('kill -0 ' . $pid . ' 2>/dev/null', $discard, $code);
+            if ($code === 0) {
+                $alive[] = $pid;
+            }
+        }
+        return $alive;
+    }
+
+    /**
+     * @param array<int, int> $pids
+     */
+    private static function waitUntilGone(array $pids, int $seconds): void
+    {
+        $deadline = microtime(true) + $seconds;
+        while (microtime(true) < $deadline) {
+            if (self::runningPids($pids) === []) {
+                return;
+            }
+            usleep(50000);
+        }
+    }
+
+    /**
+     * Wait for the direct child to be reaped, bounded.
+     */
+    private static function waitForExit(mixed $process, int $seconds): void
+    {
+        if (!is_resource($process)) {
+            return;
+        }
+        $deadline = microtime(true) + $seconds;
+        while (microtime(true) < $deadline) {
+            $status = @proc_get_status($process);
+            if (!is_array($status) || empty($status['running'])) {
+                return;
+            }
+            usleep(50000);
+        }
+    }
+
+    /**
+     * Signals that the generate stage never got far enough to judge the
+     * user's code: a missing embed library, a missing SDK import library, or
+     * a compiler binary that is not executable.
+     *
+     * @var array<int, string>
+     */
+    private const ENVIRONMENT_FAILURE_MARKERS = [
+        'The host PHP embed library is missing',
+        'The host PHP installation does not provide an Embed SAPI library',
+        'Neither php8ts.lib nor php8.lib found',
+        'php8embed.lib not found',
+        'No TypePHP compiler found',
+        'Permission denied',
+        'is not recognized as an internal or external command',
+        'cannot execute binary file',
+        'cannot apply the per-process memory cap',
+    ];
+
+    /**
+     * Whether the output describes a broken toolchain rather than invalid
+     * user code. Without this, a missing SDK came back as a normal FAILED
+     * result and the client concluded the code was at fault.
+     */
+    private static function isEnvironmentFailure(string $output): bool
+    {
+        foreach (self::ENVIRONMENT_FAILURE_MARKERS as $marker) {
+            if (stripos($output, $marker) !== false) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static function environmentFailureSummary(string $output): string
+    {
+        foreach (self::ENVIRONMENT_FAILURE_MARKERS as $marker) {
+            $position = stripos($output, $marker);
+            if ($position === false) {
+                continue;
+            }
+            $line = substr($output, $position, 300);
+            $break = strpos($line, "\n");
+            if ($break !== false) {
+                $line = substr($line, 0, $break);
+            }
+            return trim($line);
+        }
+        return 'the compiler exited before it could analyse the file';
     }
 
     /**

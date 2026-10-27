@@ -231,24 +231,44 @@ final class McpBinaryDriver
      */
     private static function readReply($stream, float $seconds): ?array
     {
-        // Every read here follows a request the server must answer, and the
-        // server writes one line and flushes per request, so a plain blocking
-        // read is enough. Polling or select() on a pipe is not portable to
-        // Windows (a non-blocking read there still blocks, and select() can
-        // block forever once the peer closes), which is what stalled the CI
-        // smoke run for ten minutes after every check had passed.
-        stream_set_blocking($stream, true);
-        @stream_set_timeout($stream, (int) $seconds);
-        $line = @fgets($stream);
-        if (!is_string($line) || $line === '') {
-            return null;
+        // Blocking fgets() plus stream_set_timeout() is NOT a timeout: PHP
+        // ignores that setting on pipes, so a silent server blocked forever
+        // while the declared deadline went unused (verified with a real
+        // proc_open pipe: a reply arriving after 1.57 s was still accepted for
+        // a 1.0 s deadline).
+        //
+        // Read non-blocking in a loop against a wall-clock deadline instead.
+        // stream_set_blocking() is ignored for pipes on Windows as well, so
+        // each attempt is additionally guarded by a short, bounded sleep and
+        // the whole wait is capped by both $seconds and the session deadline.
+        $deadline = microtime(true) + $seconds;
+        if (self::$deadline !== null && self::$deadline < $deadline) {
+            $deadline = self::$deadline;
         }
-        $meta = @stream_get_meta_data($stream);
-        if (is_array($meta) && !empty($meta['timed_out'])) {
-            return null;
+        stream_set_blocking($stream, false);
+        $buffer = '';
+        $emptyReads = 0;
+        while (microtime(true) < $deadline) {
+            $chunk = (string) @fread($stream, 8192);
+            if ($chunk !== '') {
+                $emptyReads = 0;
+                $buffer .= $chunk;
+                $position = strpos($buffer, "\n");
+                if ($position !== false) {
+                    $decoded = json_decode(trim(substr($buffer, 0, $position)), true);
+                    return is_array($decoded) ? $decoded : null;
+                }
+                continue;
+            }
+            // Only trust EOF once reads have been empty for a while: some
+            // platforms report it prematurely right after the child starts.
+            $emptyReads++;
+            if ($emptyReads > 100 && feof($stream)) {
+                return null;
+            }
+            usleep(20000);
         }
-        $decoded = json_decode(trim($line), true);
-        return is_array($decoded) ? $decoded : null;
+        return null;
     }
 
     /**

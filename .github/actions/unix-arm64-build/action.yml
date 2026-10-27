@@ -209,13 +209,17 @@ runs:
         # depends on the auto-detection order.
         export TYPEPHP_MCP_TPC="${PWD}/tpc"
         # 10 minute wall-clock limit: a wedged process must fail the stage
-        # rather than hold the job open. GNU timeout is not on macOS, so fall
-        # back to a plain run there (the driver still bounds each reply).
+        # rather than hold the job open. GNU timeout is missing on macOS, and
+        # a plain fallback there let a non-replying server hang the job
+        # forever, so use perl (shipped with macOS) as the watchdog.
         run_smoke() {
           if command -v timeout >/dev/null 2>&1; then
             timeout 600 "$@"
+          elif command -v perl >/dev/null 2>&1; then
+            perl -e 'alarm shift; exec @ARGV' 600 "$@"
           else
-            "$@"
+            echo "[smoke] ERROR: neither timeout nor perl is available for the watchdog" >&2
+            return 1
           fi
         }
         run_smoke php tools/typephp-mcp/tests/mcp-binary-smoke.php tools/typephp-mcp/typephp_mcp "${{ github.workspace }}"

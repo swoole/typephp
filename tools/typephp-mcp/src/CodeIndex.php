@@ -412,7 +412,8 @@ final class CodeIndex
                 }
                 foreach ($this->autoDirs as $dir) {
                     $visited = [];
-                    foreach ($this->collectDir($dir, false, 0, $visited) as $file) {
+                    $seenFiles = [];
+                    foreach ($this->collectDir($dir, false, 0, $visited, $seenFiles) as $file) {
                         if (str_ends_with($file, '.stub.php')) {
                             $lines[] = $this->displayPath([], $file, false);
                         }
@@ -613,8 +614,9 @@ final class CodeIndex
     {
         $files = [];
         $visited = [];
+        $seenFiles = [];
         foreach ($skip as $dir) {
-            foreach ($this->collectDir($dir, true, 0, $visited) as $file) {
+            foreach ($this->collectDir($dir, true, 0, $visited, $seenFiles) as $file) {
                 $files[] = $file;
             }
             if (count($files) >= self::MAX_FILES) {
@@ -622,7 +624,7 @@ final class CodeIndex
             }
         }
         foreach ($keep as $dir) {
-            foreach ($this->collectDir($dir, false, 0, $visited) as $file) {
+            foreach ($this->collectDir($dir, false, 0, $visited, $seenFiles) as $file) {
                 $files[] = $file;
             }
             if (count($files) >= self::MAX_FILES) {
@@ -634,9 +636,24 @@ final class CodeIndex
     }
 
     /**
+     * Collect .php files under $dir.
+     *
+     * $visited and $seenFiles are shared by reference across the whole
+     * traversal. Passing them by value made every sibling branch - and every
+     * additional root - start from a copy, so a symlinked alias of a directory
+     * was walked a second time and each aliased file counted twice. That
+     * duplicated results, consumed the hit limit, and made the scan budget run
+     * out before genuinely different definitions were seen.
+     *
+     * Keys are canonical paths. They are lower-cased only where the filesystem
+     * is case-insensitive (Windows), so a case-sensitive volume keeps two
+     * legitimately distinct paths apart.
+     *
+     * @param array<string, bool> $visited      canonical directories already walked
+     * @param array<string, bool> $seenFiles    canonical files already emitted
      * @return array<int, string>
      */
-    private function collectDir(string $dir, bool $skipPackages, int $depth, array $visited): array
+    private function collectDir(string $dir, bool $skipPackages, int $depth, array &$visited, array &$seenFiles): array
     {
         $result = [];
         if ($depth > self::MAX_DEPTH || !is_dir($dir)) {
@@ -649,7 +666,7 @@ final class CodeIndex
         if (!is_string($real) || $real === '') {
             return $result;
         }
-        $key = strtolower(str_replace('\\', '/', $real));
+        $key = self::pathKey($real);
         if (isset($visited[$key])) {
             return $result;
         }
@@ -673,15 +690,32 @@ final class CodeIndex
             }
             $path = $dir . '/' . $entry;
             if (is_dir($path)) {
-                $nested = $this->collectDir($path, $skipPackages, $depth + 1, $visited);
+                $nested = $this->collectDir($path, $skipPackages, $depth + 1, $visited, $seenFiles);
                 foreach ($nested as $file) {
                     $result[] = $file;
                 }
             } elseif (str_ends_with($entry, '.php')) {
+                $fileReal = realpath($path);
+                $fileKey = self::pathKey(is_string($fileReal) && $fileReal !== '' ? $fileReal : $path);
+                if (isset($seenFiles[$fileKey])) {
+                    continue;
+                }
+                $seenFiles[$fileKey] = true;
                 $result[] = $path;
             }
         }
         return $result;
+    }
+
+    /**
+     * Canonical key for path de-duplication. Case is folded only on
+     * case-insensitive filesystems.
+     */
+    private static function pathKey(string $path): string
+    {
+        $path = str_replace('\\', '/', $path);
+        $foldCase = stripos(PHP_OS, 'WIN') === 0 || stripos(PHP_OS, 'DARWIN') === 0;
+        return $foldCase ? strtolower($path) : $path;
     }
 
     /**
@@ -692,8 +726,9 @@ final class CodeIndex
     {
         $files = [];
         $visited = [];
+        $seenFiles = [];
         foreach ($roots as $root) {
-            foreach ($this->collectDir($root, $skipPackages, 0, $visited) as $file) {
+            foreach ($this->collectDir($root, $skipPackages, 0, $visited, $seenFiles) as $file) {
                 if (str_ends_with($file, '.stub.php')) {
                     $files[] = $file;
                 }
@@ -807,7 +842,9 @@ final class CodeIndex
 
     private function renderExampleDir(string $name, string $dir, string $base = ''): string
     {
-        $files = $this->collectDir($dir, $base !== '', 0, []);
+        $visited = [];
+        $seenFiles = [];
+        $files = $this->collectDir($dir, $base !== '', 0, $visited, $seenFiles);
         $relOf = function (string $f) use ($base): string {
             if ($base !== '' && str_starts_with($f, $base . '/')) {
                 return substr($f, strlen($base) + 1);

@@ -76,6 +76,27 @@ final class McpBinaryTest extends TestCase
         }
     }
 
+    public function testSilentServerDeadlineIsEnforced(): void
+    {
+        // A service that stays alive but never replies must not wedge the
+        // driver. A normal session passing proves nothing about the reply
+        // deadline - every reply there arrives immediately - so this probe
+        // runs a stand-in that holds the pipe open and never writes. On
+        // Windows the watchdog must also have terminated the whole tree by
+        // the time the read gives up; on POSIX the non-blocking loop ends the
+        // read at the deadline and the probe cleans the stub up itself.
+        $probe = McpBinaryDriver::runSilentServerProbe(
+            [PHP_BINARY, '-r', 'while (true) { usleep(50000); }'],
+            1.0
+        );
+        self::assertFalse($probe['gotReply'], 'a silent server must not produce a reply');
+        // reply deadline (1.0) + watchdog margin (2.0) + CI slack.
+        self::assertLessThan(4.5, $probe['elapsed'], 'the reply deadline was not enforced');
+        if (stripos(PHP_OS, 'WIN') === 0) {
+            self::assertTrue($probe['treeKilled'], 'the watchdog must terminate the whole silent tree');
+        }
+    }
+
     private static function binaryPath(): ?string
     {
         $override = getenv('TYPEPHP_MCP_BINARY');

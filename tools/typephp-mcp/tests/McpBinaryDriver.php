@@ -9,6 +9,12 @@
  * The reply reads use deadlines: a reply must arrive while stdin is still
  * open, which proves the server flushes per message instead of buffering
  * until EOF (a buffering server would deadlock every real MCP client).
+ *
+ * On Windows a blocked fread() cannot be interrupted by that deadline loop
+ * (stream_set_blocking() is ignored for pipes), so each reply read is
+ * additionally guarded by an external watchdog that terminates the whole
+ * server tree shortly after the deadline. The blocked read then returns on
+ * EOF, and a wedged server can never hang the session.
  */
 final class McpBinaryDriver
 {
@@ -29,11 +35,27 @@ final class McpBinaryDriver
     private const SESSION_BUDGET_SECONDS = 360.0;
 
     /**
+     * How long after a reply deadline the Windows watchdog waits before it
+     * kills the server tree. The margin keeps the disarm (kill of the
+     * watchdog) safely ahead of the firing when a reply arrives just inside
+     * the deadline; a wedged reply therefore costs deadline + margin.
+     */
+    private const WATCHDOG_MARGIN_SECONDS = 2.0;
+
+    /**
      * Absolute deadline for the current session, enforced by readReply().
      *
      * @var float|null
      */
     private static $deadline = null;
+
+    /**
+     * Server pid of the current session, used by the Windows watchdog to
+     * terminate the whole tree (taskkill /T) when a reply deadline passes.
+     *
+     * @var int
+     */
+    private static $serverPid = 0;
 
     /**
      * @param array<int, string>|string $command executable (and arguments)
@@ -62,6 +84,8 @@ final class McpBinaryDriver
         if (!is_resource($process)) {
             return [['name' => 'spawn', 'ok' => false, 'detail' => 'cannot start ' . json_encode($command)]];
         }
+        $status = @proc_get_status($process);
+        self::$serverPid = is_array($status) && isset($status['pid']) ? (int) $status['pid'] : 0;
 
         $checks = [];
         self::$deadline = microtime(true) + self::SESSION_BUDGET_SECONDS;
@@ -241,34 +265,168 @@ final class McpBinaryDriver
         // stream_set_blocking() is ignored for pipes on Windows as well, so
         // each attempt is additionally guarded by a short, bounded sleep and
         // the whole wait is capped by both $seconds and the session deadline.
+        // On Windows that loop still cannot interrupt a blocked fread(): the
+        // deadline checks and sleeps only run between reads. A watchdog that
+        // kills the server tree shortly after the deadline bounds even that.
         $deadline = microtime(true) + $seconds;
         if (self::$deadline !== null && self::$deadline < $deadline) {
             $deadline = self::$deadline;
         }
-        stream_set_blocking($stream, false);
-        $buffer = '';
-        $emptyReads = 0;
-        while (microtime(true) < $deadline) {
-            $chunk = (string) @fread($stream, 8192);
-            if ($chunk !== '') {
-                $emptyReads = 0;
-                $buffer .= $chunk;
-                $position = strpos($buffer, "\n");
-                if ($position !== false) {
-                    $decoded = json_decode(trim(substr($buffer, 0, $position)), true);
-                    return is_array($decoded) ? $decoded : null;
+        $watchdog = self::armWatchdog($deadline);
+        try {
+            stream_set_blocking($stream, false);
+            $buffer = '';
+            $emptyReads = 0;
+            while (microtime(true) < $deadline) {
+                $chunk = (string) @fread($stream, 8192);
+                if ($chunk !== '') {
+                    $emptyReads = 0;
+                    $buffer .= $chunk;
+                    $position = strpos($buffer, "\n");
+                    if ($position !== false) {
+                        $decoded = json_decode(trim(substr($buffer, 0, $position)), true);
+                        return is_array($decoded) ? $decoded : null;
+                    }
+                    continue;
                 }
-                continue;
+                // Only trust EOF once reads have been empty for a while: some
+                // platforms report it prematurely right after the child starts.
+                $emptyReads++;
+                if ($emptyReads > 100 && feof($stream)) {
+                    return null;
+                }
+                usleep(20000);
             }
-            // Only trust EOF once reads have been empty for a while: some
-            // platforms report it prematurely right after the child starts.
-            $emptyReads++;
-            if ($emptyReads > 100 && feof($stream)) {
-                return null;
-            }
-            usleep(20000);
+            return null;
+        } finally {
+            self::disarmWatchdog($watchdog);
         }
-        return null;
+    }
+
+    /**
+     * Arm the Windows watchdog for one reply read.
+     *
+     * On Windows a blocked fread() returns only when the pipe has data or
+     * its write end closes, so an unresponsive server would block the read
+     * forever no matter what deadlines the loop declares. A detached helper
+     * process waits until shortly after the deadline and then terminates the
+     * WHOLE server tree (taskkill /T /F): the closed write ends release the
+     * blocked read, and no orphaned compiler grandchild can outlive the
+     * session. POSIX needs none of this - its read loop is genuinely
+     * non-blocking - and returns null.
+     *
+     * @return array{process: resource}|null
+     */
+    private static function armWatchdog(float $deadline): ?array
+    {
+        if (stripos(PHP_OS, 'WIN') !== 0 || self::$serverPid <= 0) {
+            return null;
+        }
+        $delaySeconds = ($deadline - microtime(true)) + self::WATCHDOG_MARGIN_SECONDS;
+        if ($delaySeconds <= 0) {
+            return null;
+        }
+        // Fire-and-forget helper: sleeps, then kills the tree. Killing a pid
+        // that has since exited (or was reused) is the same residual risk the
+        // session-end killTree already carries, and the helper is disarmed
+        // microseconds after a timely reply.
+        $code = sprintf(
+            'usleep(%d); exec("taskkill /PID %d /T /F 2>nul");',
+            (int) round($delaySeconds * 1000000),
+            self::$serverPid
+        );
+        $pipes = [];
+        $watchdog = @proc_open([PHP_BINARY, '-r', $code], [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes);
+        if (!is_resource($watchdog)) {
+            return null;
+        }
+        foreach ($pipes as $pipe) {
+            @fclose($pipe);
+        }
+        return ['process' => $watchdog];
+    }
+
+    /**
+     * Disarm the watchdog: kill it before it can fire, then reap it.
+     *
+     * @param array{process: resource}|null $watchdog
+     */
+    private static function disarmWatchdog(?array $watchdog): void
+    {
+        if ($watchdog === null) {
+            return;
+        }
+        @proc_terminate($watchdog['process'], 9);
+        @proc_close($watchdog['process']);
+    }
+
+    /**
+     * Deadline probe for a service that stays alive but never replies.
+     *
+     * Proves the reply deadline is actually enforced - a normal session
+     * passing proves nothing about it, because every reply there arrives
+     * immediately. On Windows the watchdog must also have terminated the
+     * whole tree by the time the read gives up; on POSIX the deadline comes
+     * from the non-blocking read loop and the stub is cleaned up here.
+     *
+     * @param array<int, string>|string $command
+     * @return array{gotReply: bool, elapsed: float, treeKilled: bool}
+     */
+    public static function runSilentServerProbe(array|string $command, float $replyTimeout): array
+    {
+        $process = proc_open(
+            $command,
+            [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']],
+            $pipes
+        );
+        if (!is_resource($process)) {
+            return ['gotReply' => true, 'elapsed' => 0.0, 'treeKilled' => false];
+        }
+        $status = @proc_get_status($process);
+        self::$serverPid = is_array($status) && isset($status['pid']) ? (int) $status['pid'] : 0;
+        self::$deadline = microtime(true) + $replyTimeout + self::WATCHDOG_MARGIN_SECONDS + 30.0;
+        $started = microtime(true);
+        $gotReply = false;
+        try {
+            // A request the stub never answers; the write itself cannot block
+            // because the line is far smaller than the pipe buffer.
+            self::write($pipes[0], [
+                'jsonrpc' => '2.0', 'id' => 1, 'method' => 'initialize',
+                'params' => ['protocolVersion' => '1900-01-01', 'capabilities' => new stdClass()],
+            ]);
+            $gotReply = self::readReply($pipes[1], $replyTimeout) !== null;
+        } finally {
+            @fclose($pipes[0]);
+            @fclose($pipes[1]);
+            @fclose($pipes[2]);
+            $treeKilled = false;
+            // On Windows the watchdog has already fired (the blocked read can
+            // only have ended through the kill); on POSIX nothing killed the
+            // stub, so the deadline must have done the work instead.
+            if (stripos(PHP_OS, 'WIN') === 0 && self::$serverPid > 0) {
+                $pollDeadline = microtime(true) + 2.0;
+                while (microtime(true) < $pollDeadline) {
+                    $status = @proc_get_status($process);
+                    if (!is_array($status) || empty($status['running'])) {
+                        $treeKilled = true;
+                        break;
+                    }
+                    usleep(50000);
+                }
+            }
+            if (!$treeKilled) {
+                $status = @proc_get_status($process);
+                if (is_array($status) && $status['running'] && isset($status['pid'])) {
+                    self::killTree((int) $status['pid']);
+                }
+            }
+            @proc_close($process);
+        }
+        return [
+            'gotReply' => $gotReply,
+            'elapsed' => microtime(true) - $started,
+            'treeKilled' => $treeKilled,
+        ];
     }
 
     /**

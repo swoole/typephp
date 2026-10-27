@@ -80,6 +80,29 @@ foreach ($checks as $check) {
     }
 }
 
+// Deadline probe against a service that stays alive but never replies: the
+// driver must give up at the reply deadline (a normal session proves nothing
+// - every reply there arrives immediately) and, on Windows, the watchdog must
+// have terminated the whole tree. Regression test for the Windows blocked
+// fread() problem: without the watchdog this probe hangs instead of failing.
+fwrite(STDOUT, "[smoke] deadline probe: silent server must not wedge the driver\n");
+fflush(STDOUT);
+$probe = McpBinaryDriver::runSilentServerProbe([PHP_BINARY, '-r', 'while (true) { usleep(50000); }'], 1.0);
+$onWindows = stripos(PHP_OS, 'WIN') === 0;
+$probeOk = !$probe['gotReply']
+    && $probe['elapsed'] < 4.5
+    && (!$onWindows || $probe['treeKilled']);
+printf(
+    "[smoke] %s silent-server reply deadline - elapsed %.2fs, treeKilled: %s\n",
+    $probeOk ? 'PASS' : 'FAIL',
+    $probe['elapsed'],
+    $probe['treeKilled'] ? 'yes' : 'no'
+);
+fflush(STDOUT);
+if (!$probeOk) {
+    $failures++;
+}
+
 if ($failures > 0) {
     fwrite(STDERR, "[smoke] $failures check(s) failed\n");
     exit(1);

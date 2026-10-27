@@ -260,6 +260,8 @@ jobs:
         run: |
           php_home="$(php-config --prefix)"
           export PHP_HOME="${php_home}"
+          # Lock critical section first: fails fast and needs no toolchain.
+          bash tools/typephp-mcp/tests/build-lock-test.sh
           bash tools/typephp-mcp/build.sh
           test -x tools/typephp-mcp/typephp_mcp
           # Pin check_code to the compiler built above rather than relying on

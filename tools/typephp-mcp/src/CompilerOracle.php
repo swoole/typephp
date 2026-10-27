@@ -14,10 +14,11 @@
  * check; compile and link are separate stages this tool does not run.
  *
  * Lifetime controls: the compiler runs as a controlled child process with a
- * timeout, an output budget and (on POSIX) a virtual-memory cap covering the
- * whole process tree. On timeout the tree is killed, the temporary build
- * directory is removed, and the call fails with a tool error so the MCP
- * server stays responsive instead of blocking on a stuck compiler.
+ * timeout, an output budget and (on POSIX) a per-process virtual-memory cap
+ * inherited by every process of the tree. On timeout the whole tree is
+ * killed (SIGKILL after a grace period, including the direct child), the
+ * temporary build directory is removed, and the call fails with a tool error
+ * so the MCP server stays responsive instead of blocking on a stuck compiler.
  *
  * Tool-execution failures (missing file, missing PHP, compiler could not
  * start or did not finish) raise CompilerOracle::ToolFailure; the MCP layer
@@ -380,6 +381,13 @@ final class CompilerOracle
      * descendants are collected first, then signalled from the leaves up, and
      * the caller only proceeds once none of them is alive.
      *
+     * The direct child only receives SIGTERM first: after the grace period
+     * it is SIGKILLed too. A child that ignores SIGTERM would otherwise
+     * survive this method and block the caller's proc_close() forever, and
+     * runProcess() would report "was killed" while the compiler was still
+     * running. Only when the whole tree is confirmed dead does the caller
+     * reclaim the process and delete the build directory.
+     *
      * Windows collects the tree the same way and hands the whole thing to
      * taskkill /T, which is done before the parent is signalled - signalling
      * the parent first would break the parent chain the /T walk relies on.
@@ -411,10 +419,21 @@ final class CompilerOracle
             @exec('kill -TERM ' . $childPid . ' 2>/dev/null', $discard, $discardCode);
         }
         usleep(200000);
+        // The grace period is over: SIGKILL everything still running,
+        // including the direct child - it only got SIGTERM so far.
         foreach (array_reverse($tree) as $childPid) {
             $discard = [];
             @exec('kill -KILL ' . $childPid . ' 2>/dev/null', $discard, $discardCode);
         }
+        if ($pid > 0) {
+            $discard = [];
+            @exec('kill -KILL ' . $pid . ' 2>/dev/null', $discard, $discardCode);
+        }
+        // Descendants were reparented to init, so kill -0 stops reporting
+        // them once they are gone. The direct child is OUR child: after
+        // SIGKILL it lingers as a zombie until proc_close() reaps it, so it
+        // must not go through runningPids()/waitUntilGone() - its liveness
+        // is checked via proc_get_status() in waitForExit() below.
         $stillRunning = self::runningPids($tree);
         if ($stillRunning !== []) {
             self::waitUntilGone($stillRunning, 5);

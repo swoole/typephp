@@ -145,17 +145,15 @@ if [[ -x "${REPO_ROOT}/tpc" ]]; then
     TPC=("${REPO_ROOT}/tpc")
 fi
 
-# Clean the previous build tree. Guarded so a failed cd (script dir gone,
-# BASH_SOURCE oddity) can never turn this into `rm -rf` of the caller's cwd.
-[ -n "$SCRIPT_DIR" ] && [ -d "$SCRIPT_DIR" ] || { echo "[build] ERROR: script directory not found" >&2; exit 1; }
-rm -rf "${SCRIPT_DIR:?}/build"
-
 BUILD_CMD=("${TPC[@]}" project.yml -O2 --job "$JOBS" --build-dir build \
     --no-color --no-progress -o typephp_mcp ${LINK_FLAGS[@]+"${LINK_FLAGS[@]}"})
 
-if [[ "${CI:-}" != "true" && "${GITHUB_ACTION:-}" != "true" ]]; then
-    # Hard virtual-memory cap for the whole build tree: 8 GiB or half of the
-    # memory available at startup, whichever is smaller.
+if [[ "${CI:-}" == "true" || "${GITHUB_ACTION:-}" == "true" ]]; then
+    "${BUILD_CMD[@]}"
+else
+    # --- self-managed machine: resource safety (AGENTS.md) ---
+    # Budget for the build tree: 8 GiB or half of the memory available at
+    # startup, whichever is smaller.
     limit_mb=8192
     if [[ "$(uname)" == "Linux" && -r /proc/meminfo ]]; then
         avail_kb=$(awk '/MemAvailable/{print $2}' /proc/meminfo 2>/dev/null || true)
@@ -170,16 +168,39 @@ if [[ "${CI:-}" != "true" && "${GITHUB_ACTION:-}" != "true" ]]; then
             [[ "$half_mb" -lt "$limit_mb" ]] && limit_mb="$half_mb"
         fi
     fi
-    # ulimit -v caps the address space of EACH process; descendants inherit
-    # their own cap, so this is not a shared budget for the build tree. It is
-    # still worth setting (one runaway compiler cannot take the machine down)
-    # but it must not be described as a whole-tree limit. A real total needs a
-    # cgroup, which this script does not create.
-    #
-    # macOS does not implement ulimit -v, so a rejection there is reported and
-    # the build continues: refusing outright would make the script unusable on
-    # that platform while protecting nothing. Anywhere else a rejection is
-    # fatal, because the platform is expected to support it.
+
+    if [[ "$(uname)" == "Linux" ]]; then
+        # Whole-tree budget. ulimit -v caps the address space of EACH
+        # process; the compiler, its driver and every descendant each get
+        # their own cap, so N processes could reach N * limit together. A
+        # real total for the build tree needs a cgroup: this script enforces
+        # it by running the build inside a transient systemd user scope
+        # (cgroup v2) with a hard MemoryMax and swap forbidden. The probe
+        # verifies the scope mechanism works before anything is cleaned or
+        # compiled; when it cannot be established the build refuses to run
+        # and prints the controlled entries it accepts instead.
+        if ! command -v systemd-run >/dev/null 2>&1 \
+            || ! systemd-run --user --quiet --collect --scope true 2>/dev/null; then
+            {
+                echo "[build] ERROR: no whole-build-tree memory limit could be established (no working systemd user scope)."
+                echo "[build] A per-process cap is not a substitute: the build tree's TOTAL would be unbounded,"
+                echo "[build] so this script refuses to run an unprotected Linux build. Re-run it inside one of:"
+                echo "[build]   systemd-run --scope -p MemoryMax=${limit_mb}M -p MemorySwapMax=0 bash tools/typephp-mcp/build.sh"
+                echo "[build]   podman run --rm --memory=${limit_mb}m --memory-swap=${limit_mb}m -v \"\$PWD\":/src -w /src <image> \\"
+                echo "[build]     bash tools/typephp-mcp/build.sh"
+                echo "[build] (dedicated CI is exempt: it builds with the runner's CPU count under its own budget)"
+            } >&2
+            exit 1
+        fi
+    fi
+
+    # Second line of defence: a per-process virtual-memory cap, inherited by
+    # every descendant, so one runaway compiler cannot take the machine down.
+    # This is NOT the whole-tree budget - that is the systemd scope's
+    # MemoryMax above (Linux). macOS does not implement ulimit -v, so a
+    # rejection there is reported and the build continues: refusing outright
+    # would make the script unusable on that platform while protecting
+    # nothing. Anywhere else a rejection is fatal.
     if ! ulimit -v "$((limit_mb * 1024))" 2>/dev/null; then
         if [[ "$(uname)" == "Darwin" ]]; then
             echo "[build] note: macOS has no ulimit -v; continuing without a per-process memory cap"
@@ -188,7 +209,7 @@ if [[ "${CI:-}" != "true" && "${GITHUB_ACTION:-}" != "true" ]]; then
             exit 1
         fi
     else
-        echo "[build] per-process memory cap: ${limit_mb} MiB virtual (not a whole-tree total), jobs: ${JOBS}"
+        echo "[build] per-process memory cap: ${limit_mb} MiB virtual, jobs: ${JOBS}"
     fi
 
     if [[ "$(uname)" == "Linux" ]]; then
@@ -198,11 +219,34 @@ if [[ "${CI:-}" != "true" && "${GITHUB_ACTION:-}" != "true" ]]; then
         fi
         lock_file="${XDG_RUNTIME_DIR:-/tmp}/codex-build-$(id -u).lock"
         echo "[build] acquiring build lock: ${lock_file}"
-        flock -n "$lock_file" "${BUILD_CMD[@]}" \
-            || { echo "[build] ERROR: another build holds ${lock_file}; wait for it to finish" >&2; exit 1; }
-    else
-        "${BUILD_CMD[@]}"
+        # Hold the lock on this shell's own descriptor instead of wrapping
+        # the build command: `flock -n <file> <cmd>` would only cover
+        # BUILD_CMD, and the clean below would run OUTSIDE the critical
+        # section - a second invocation that failed to get the lock had
+        # already deleted the directory the first build was writing into.
+        exec 9>"$lock_file"
+        if ! flock -n 9; then
+            echo "[build] ERROR: another build holds ${lock_file}; wait for it to finish" >&2
+            exit 1
+        fi
     fi
+fi
+
+# Clean the previous build tree. Guarded so a failed cd (script dir gone,
+# BASH_SOURCE oddity) can never turn this into `rm -rf` of the caller's cwd.
+# On a self-managed Linux machine this runs INSIDE the build lock (and the
+# whole build tree stays inside it, since every child inherits descriptor 9).
+[ -n "$SCRIPT_DIR" ] && [ -d "$SCRIPT_DIR" ] || { echo "[build] ERROR: script directory not found" >&2; exit 1; }
+rm -rf "${SCRIPT_DIR:?}/build"
+
+if [[ "$(uname)" == "Linux" && "${CI:-}" != "true" && "${GITHUB_ACTION:-}" != "true" ]]; then
+    # Compile inside the systemd user scope probed above: MemoryMax bounds
+    # the total of this build tree, MemorySwapMax=0 forbids swap. The build
+    # lock (descriptor 9) is inherited and stays held while tpc runs.
+    echo "[build] whole-tree budget: systemd scope MemoryMax=${limit_mb}M, MemorySwapMax=0"
+    systemd-run --user --quiet --collect --scope \
+        -p "MemoryMax=${limit_mb}M" -p "MemorySwapMax=0" \
+        "${BUILD_CMD[@]}"
 else
     "${BUILD_CMD[@]}"
 fi

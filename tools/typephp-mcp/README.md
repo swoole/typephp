@@ -81,9 +81,11 @@ Windows 有一个 tpc 发行包目录装着 phpx/PHP SDK，Unix 侧没有，所�
 
 以上 macOS 路径为实测；`build.sh` 同时按 Linux 写（`uname` 分支只影响 libiconv 那条）。
 
-`build.sh` 在用户自管机器上遵守资源安全约束（AGENTS.md）：Linux 下先抢全用户构建锁
-`${XDG_RUNTIME_DIR:-/tmp}/codex-build-$(id -u).lock`，`-j1` 串行，并对整个构建进程树设虚拟内存上限
-（8 GiB 或启动时可用内存的一半，取小者）；CI 跑在专用 runner 上，改用可用逻辑 CPU 数。
+`build.sh` 在用户自管机器上遵守资源安全约束（AGENTS.md）：Linux 下先把清理和编译放进全用户构
+建锁 `${XDG_RUNTIME_DIR:-/tmp}/codex-build-$(id -u).lock` 的临界区（抢不到锁就不触碰 `build/`、不调用编译器），`-j1` 串行，并把整个构建进程树放进 systemd user scope
+（`MemoryMax` 为 8 GiB 或启动时可用内存的一半取小者，`MemorySwapMax=0` 禁 swap）——这才是整树
+内存总预算，`ulimit -v` 只是每进程第二道防线；scope 建不起来时拒绝构建并给出可用的受控入口
+（root scope / 容器）；CI 跑在专用 runner 上，改用可用逻辑 CPU 数。
 
 CI（本 PR 新增）在 **Linux x64 / Linux arm64 / macOS arm64 / Windows x64** 上都会实际构建 MCP
 产物并跑原生 stdio 冒烟测试；缺产物即判失败（不再靠"缺产物就 skip"证明兼容）。

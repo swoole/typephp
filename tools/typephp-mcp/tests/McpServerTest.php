@@ -609,6 +609,59 @@ PHP;
         }
     }
 
+    public function testTimeoutKillsASigtermIgnoringDirectChild(): void
+    {
+        // terminateTree() must SIGKILL the direct child after the grace
+        // period. The descendants-only sweep left a child that ignores
+        // SIGTERM alive: waitForExit() gave up, and the caller's
+        // proc_close() then blocked forever while runProcess() had already
+        // reported "was killed". The stand-in ignores SIGTERM and would
+        // write a completion marker after its own 8 second sleep; with a
+        // 1 second timeout the marker must never appear and the call must
+        // return long before that sleep ends.
+        if (stripos(PHP_OS, 'WIN') === 0 || !function_exists('pcntl_signal')) {
+            self::markTestSkipped('needs POSIX SIGTERM handling (pcntl)');
+        }
+        $sandbox = $this->makeSandbox();
+        $stub = <<<'PHP'
+<?php
+if (in_array('--version', $argv, true)) { echo "TypePHP Compiler (AOT) v9.9.9\n"; exit(0); }
+pcntl_signal(SIGTERM, SIG_IGN);
+sleep(8);
+file_put_contents(getenv('TYPEPHP_FAKE_MARKER'), "finished\n");
+PHP;
+        $this->sandboxWrite($sandbox, 'stub.php', $stub);
+        $this->sandboxWrite($sandbox, 'stub.sh', "#!/usr/bin/env bash\nexec php \"\$(dirname \"\$0\")/stub.php\" \"\$@\"\n");
+        @chmod($sandbox . '/stub.sh', 0755);
+        $marker = $sandbox . '/finished.marker';
+
+        $previousTpc = getenv('TYPEPHP_MCP_TPC');
+        $previousMarker = getenv('TYPEPHP_FAKE_MARKER');
+        try {
+            putenv('TYPEPHP_MCP_TPC=' . $sandbox . '/stub.sh');
+            putenv('TYPEPHP_FAKE_MARKER=' . $marker);
+            (new ReflectionProperty(CompilerOracle::class, 'compilerPrefix'))->setValue(null, null);
+
+            $started = microtime(true);
+            try {
+                CompilerOracle::runTpc($this->root, ['--dry', 'examples/hello.php'], 1);
+                self::fail('the SIGTERM-ignoring stand-in should have timed out');
+            } catch (CompilerOracleToolFailure $error) {
+                self::assertStringContainsString('did not finish within 1 seconds', $error->getMessage());
+            }
+            $elapsed = microtime(true) - $started;
+            // With the fix: about 1.2 s (timeout + grace + kill). Without it
+            // the stand-in survives to the end of its own 8 second sleep.
+            self::assertLessThan(5.0, $elapsed, 'the direct child was not killed after the grace period');
+            self::assertFileDoesNotExist($marker, 'the SIGTERM-ignoring child ran to completion');
+        } finally {
+            if ($previousTpc === false) { putenv('TYPEPHP_MCP_TPC'); } else { putenv('TYPEPHP_MCP_TPC=' . $previousTpc); }
+            if ($previousMarker === false) { putenv('TYPEPHP_FAKE_MARKER'); } else { putenv('TYPEPHP_FAKE_MARKER=' . $previousMarker); }
+            (new ReflectionProperty(CompilerOracle::class, 'compilerPrefix'))->setValue(null, null);
+            $this->removeDir($sandbox);
+        }
+    }
+
     public function testSymlinkAliasIsNotScannedTwice(): void
     {
         // A symlink that aliases a directory inside the same tree used to be

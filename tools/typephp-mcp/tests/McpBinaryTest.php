@@ -97,6 +97,19 @@ final class McpBinaryTest extends TestCase
         }
     }
 
+    public function testLateReplyIsRejected(): void
+    {
+        // A reply that arrives after the deadline must be rejected even while
+        // the watchdog margin is still open: on Windows the blocked read
+        // returns the moment the data arrives, so the deadline has to be
+        // re-checked before the payload is accepted. A fully silent server
+        // alone would not catch this - the reply here is valid, only late.
+        $probe = McpBinaryDriver::runSilentServerProbe(
+            [PHP_BINARY, '-r', 'usleep(1600000); echo "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{}}\n";'],
+            0.3
+        );
+        self::assertFalse($probe['gotReply'], 'a reply after the deadline must be rejected');
+    }
     private static function binaryPath(): ?string
     {
         $override = getenv('TYPEPHP_MCP_BINARY');

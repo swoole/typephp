@@ -148,9 +148,10 @@ fi
 BUILD_CMD=("${TPC[@]}" project.yml -O2 --job "$JOBS" --build-dir build \
     --no-color --no-progress -o typephp_mcp ${LINK_FLAGS[@]+"${LINK_FLAGS[@]}"})
 
-if [[ "${CI:-}" == "true" || "${GITHUB_ACTION:-}" == "true" ]]; then
-    "${BUILD_CMD[@]}"
-else
+# Dedicated CI runs under its own budget and needs no lock or memory scope.
+# It must also not build here: the single build happens after the clean below,
+# so both paths compile exactly once.
+if [[ "${CI:-}" != "true" && "${GITHUB_ACTION:-}" != "true" ]]; then
     # --- self-managed machine: resource safety (AGENTS.md) ---
     # Budget for the build tree: 8 GiB or half of the memory available at
     # startup, whichever is smaller.

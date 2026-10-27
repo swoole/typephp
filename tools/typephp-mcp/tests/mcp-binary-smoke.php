@@ -103,6 +103,19 @@ if (!$probeOk) {
     $failures++;
 }
 
+fwrite(STDOUT, "[smoke] late-reply probe: data after the deadline must be rejected\n");
+fflush(STDOUT);
+$late = McpBinaryDriver::runSilentServerProbe(
+    [PHP_BINARY, '-r', 'usleep(1600000); echo "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{}}\n";'],
+    0.3
+);
+$lateOk = !$late['gotReply'] && $late['elapsed'] < 4.5;
+printf("[smoke] %s late-reply rejection - elapsed %.2fs\n", $lateOk ? 'PASS' : 'FAIL', $late['elapsed']);
+fflush(STDOUT);
+if (!$lateOk) {
+    $failures++;
+}
+
 if ($failures > 0) {
     fwrite(STDERR, "[smoke] $failures check(s) failed\n");
     exit(1);

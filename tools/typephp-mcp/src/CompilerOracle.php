@@ -294,6 +294,14 @@ final class CompilerOracle
      * capped, reading is not, so the child can never block on a full pipe),
      * and the process is reaped before returning.
      *
+     * Windows needs more than the deadline loop: stream_select() and fread()
+     * on a process pipe may ignore the timeout there, so a silent compiler
+     * kept the loop blocked past its budget (measured on Windows PHP 8.4 ZTS:
+     * a 1 s budget returned "success" after 4.2 s, once the child finally
+     * wrote). A watchdog process kills the tree at the deadline, which closes
+     * the pipe and releases the blocked read; the elapsed time is re-checked
+     * afterwards so data that arrives late is never accepted as success.
+     *
      * @return array{code: int, output: string, timedOut: bool}
      */
     private static function runProcess(string $command, int $timeoutSeconds, int $outputLimitBytes, ?string $cwd = null): array
@@ -307,9 +315,15 @@ final class CompilerOracle
         stream_set_blocking($pipes[1], false);
         stream_set_blocking($pipes[2], false);
 
+        $status = @proc_get_status($process);
+        $pid = is_array($status) && isset($status['pid']) ? (int) $status['pid'] : 0;
+
         $output = '';
         $timedOut = false;
         $deadline = microtime(true) + $timeoutSeconds;
+        // Windows may ignore the timeout on a blocked pipe read; the watchdog
+        // kills the tree at the deadline so that read can return.
+        $watchdog = self::armWatchdog($pid, $timeoutSeconds);
         while (true) {
             $remaining = $deadline - microtime(true);
             if ($remaining <= 0) {
@@ -321,7 +335,25 @@ final class CompilerOracle
             $except = null;
             $ready = @stream_select($read, $write, $except, (int) ceil($remaining), (int) round(($remaining - floor($remaining)) * 1000000));
             if ($ready === false) {
-                break;
+                // select() cannot monitor these handles (Windows process pipes
+                // in some builds). Poll instead so the deadline and the
+                // watchdog still bound the wait.
+                foreach ([$pipes[1], $pipes[2]] as $stream) {
+                    $chunk = (string) @fread($stream, 65536);
+                    if ($chunk === '') {
+                        continue;
+                    }
+                    $room = $outputLimitBytes - strlen($output);
+                    if ($room > 0) {
+                        $output .= $room >= strlen($chunk) ? $chunk : substr($chunk, 0, $room);
+                    }
+                }
+                $status = proc_get_status($process);
+                if (!$status['running']) {
+                    break;
+                }
+                usleep(10000);
+                continue;
             }
             if ($ready > 0) {
                 foreach ($read as $stream) {
@@ -352,6 +384,16 @@ final class CompilerOracle
             }
         }
 
+        self::disarmWatchdog($watchdog);
+
+        // A blocked read returns only when the child writes or dies, so data
+        // can arrive long after the budget (measured: a 1 s budget "succeeded"
+        // after 4.2 s). The watchdog has killed the tree by now - never accept
+        // the late data as success.
+        if (!$timedOut && microtime(true) >= $deadline) {
+            $timedOut = true;
+        }
+
         if ($timedOut) {
             self::terminateTree($process);
             // Close the output pipes before reaping: proc_close() waits for
@@ -369,6 +411,75 @@ final class CompilerOracle
         @fclose($pipes[2]);
         $code = @proc_close($process);
         return ['code' => $code, 'output' => $output, 'timedOut' => false];
+    }
+
+    /**
+     * Kill the compiler tree at the deadline (Windows only).
+     *
+     * stream_select()/fread() on a Windows process pipe may block until the
+     * child writes or exits, ignoring the timeout, so runProcess() cannot end
+     * a silent compiler on its own. This helper sleeps past the deadline and
+     * then kills the whole tree; that closes the pipe write ends, which
+     * releases the blocked read.
+     *
+     * The helper is gated by a sentinel file: it fires only while the file
+     * still exists, and the normal path deletes it before disarming. A
+     * recycled pid is therefore never killed after a successful call, and a
+     * crash of this process still leaves the watchdog armed (the sentinel
+     * survives) - which is the right outcome for a wedged compiler.
+     *
+     * Built from cmd.exe built-ins only (ping, if, taskkill): the server runs
+     * as an AOT binary where no PHP interpreter is guaranteed to exist.
+     *
+     * @return array{process: resource, sentinel: string}|null
+     */
+    private static function armWatchdog(int $pid, int $timeoutSeconds): ?array
+    {
+        if (stripos(PHP_OS, 'WIN') !== 0 || $pid <= 0 || $timeoutSeconds <= 0) {
+            return null;
+        }
+        $sentinel = sys_get_temp_dir() . '/typephp-mcp-watchdog-' . getmypid() . '-' . mt_rand(100000, 999999);
+        if (@file_put_contents($sentinel, '1') === false) {
+            return null;
+        }
+        // ping -n N waits about N-1 seconds (the first packet is immediate),
+        // so N = timeout + 1 fires just past the deadline.
+        $command = 'ping -n ' . ($timeoutSeconds + 1) . ' 127.0.0.1 >nul & if exist '
+            . escapeshellarg($sentinel) . ' taskkill /PID ' . $pid . ' /T /F >nul 2>&1';
+        // stdio goes to NUL, not to pipes: a pipe's write ends are inherited
+        // by the ping child, and reaping the helper would then block in
+        // proc_close() until that child exits on its own (measured: 19 s).
+        $watchdog = @proc_open($command, [
+            0 => ['file', 'NUL', 'r'],
+            1 => ['file', 'NUL', 'w'],
+            2 => ['file', 'NUL', 'w'],
+        ], $pipes);
+        if (!is_resource($watchdog)) {
+            @unlink($sentinel);
+            return null;
+        }
+        return ['process' => $watchdog, 'sentinel' => $sentinel];
+    }
+
+    /**
+     * Disarm the watchdog: delete the gate first, then stop the helper tree.
+     *
+     * Removing the sentinel before terminating keeps the helper from killing
+     * anything even if it outlives this call (a ping child keeps running for
+     * a moment after cmd.exe is terminated, then sees no sentinel and does
+     * nothing). stdio is NUL rather than a pipe, so reaping the helper never
+     * waits for that child.
+     *
+     * @param array{process: resource, sentinel: string}|null $watchdog
+     */
+    private static function disarmWatchdog(?array $watchdog): void
+    {
+        if ($watchdog === null) {
+            return;
+        }
+        @unlink($watchdog['sentinel']);
+        @proc_terminate($watchdog['process'], 9);
+        @proc_close($watchdog['process']);
     }
 
     /**

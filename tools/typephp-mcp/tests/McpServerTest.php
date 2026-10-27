@@ -464,6 +464,13 @@ switch ($mode) {
         sleep(30);
         echo "Dry run completed\n";
         exit(0);
+    case 'silent-then-finish':
+        // Silent past the budget, then reports success. Stand-in for Windows
+        // pipes, where a blocked read ignores the timeout: the late "success"
+        // must never be accepted.
+        usleep(4000000);
+        echo "Dry run completed\n";
+        exit(0);
 }
 exit(0);
 PHP;
@@ -554,6 +561,38 @@ PHP;
         }
     }
 
+    public function testSilentCompilerTimesOutInsteadOfSucceeding(): void
+    {
+        // A compiler that stays silent and only then writes used to be
+        // reported as a success after the budget: on Windows the pipe read
+        // ignores the timeout, so runProcess() returned once the child finally
+        // spoke (measured on Windows PHP 8.4 ZTS: a 1 s budget "succeeded" at
+        // 4.2 s). The watchdog plus the post-read deadline check must turn
+        // that into a tool error instead of the late success.
+        $previous = getenv('TYPEPHP_MCP_COMPILE_TIMEOUT');
+        try {
+            putenv('TYPEPHP_MCP_COMPILE_TIMEOUT=1');
+            $started = microtime(true);
+            $reply = $this->withFakeCompiler('silent-then-finish', function (McpServer $server): array {
+                $raw = (string) $server->handleLine((string) json_encode([
+                    'jsonrpc' => '2.0', 'id' => 1, 'method' => 'tools/call',
+                    'params' => ['name' => 'check_code', 'arguments' => ['path' => 'examples/hello.php']],
+                ]));
+                return (array) json_decode($raw, true);
+            });
+            $elapsed = microtime(true) - $started;
+            self::assertTrue($reply['result']['isError'] ?? false, 'a silent compiler must not be reported as success');
+            self::assertStringContainsString('did not finish within 1 seconds', $reply['result']['content'][0]['text']);
+            // The stand-in finishes at 4 s; the timeout must return well before.
+            self::assertLessThan(3.5, $elapsed, 'the call waited for the late success instead of timing out');
+        } finally {
+            if ($previous === false) {
+                putenv('TYPEPHP_MCP_COMPILE_TIMEOUT');
+            } else {
+                putenv('TYPEPHP_MCP_COMPILE_TIMEOUT=' . $previous);
+            }
+        }
+    }
     public function testTimeoutLeavesNoDescendantProcesses(): void
     {
         // The stand-in forks a long-lived grandchild and records its pid, then

@@ -284,6 +284,13 @@ final class McpBinaryDriver
                     $buffer .= $chunk;
                     $position = strpos($buffer, "\n");
                     if ($position !== false) {
+                        // A blocked read (Windows) returns only when data
+                        // arrives, so a reply can land after the deadline -
+                        // the watchdog still has its 2 s margin at that point.
+                        // Never accept a reply that missed its deadline.
+                        if (microtime(true) >= $deadline) {
+                            return null;
+                        }
                         $decoded = json_decode(trim(substr($buffer, 0, $position)), true);
                         return is_array($decoded) ? $decoded : null;
                     }

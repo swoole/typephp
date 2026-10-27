@@ -953,6 +953,11 @@ abstract class Preprocessor extends CompilerBase
         $this->resetFunction();
         $constant->arrayExpr = '';
         $constant->value = $this->parseIdentifier($expression);
+        // resetFunction() installed a fresh context, so the temporary counter
+        // reflects only this constant's lowering — a structural record of
+        // whether the value depends on prelude temporaries.
+        $constant->hasMaterializedTemporaries = $this->context->tmpVarIndex > 0
+            || $this->context->beforeStmtLines !== [];
         if ($this->context->beforeStmtLines) {
             if ($this->context->localVars) {
                 $constant->arrayExpr .= $this->genScopeVarDecl();
@@ -2363,6 +2368,12 @@ abstract class Preprocessor extends CompilerBase
         $constInfo->valueExpr = $const->value;
         $constInfo->declaredType = $declaredType;
         $constInfo->codegenFinalized = $this->compilerPhase === self::PHASE_CONVERT;
+        if ($constInfo->codegenFinalized) {
+            // Structural dependency record: computed from the lowering context
+            // (temporary counter / captured prelude), not from the value text.
+            $constInfo->hasMaterializedTemporaries = $this->context->tmpVarIndex > 0
+                || $this->context->beforeStmtLines !== [];
+        }
 
         if ($constInfo->codegenFinalized && $this->context->beforeStmtLines) {
             $arrayExpr = '';

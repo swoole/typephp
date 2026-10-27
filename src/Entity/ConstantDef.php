@@ -23,6 +23,15 @@ class ConstantDef
     public ?NodeAbstract $valueExpr = null;
     /** True after the declaration AST has been lowered to C++ in convert. */
     public bool $codegenFinalized = false;
+    /**
+     * True when lowering this constant's initializer materialized temporaries
+     * (tmp_var_N) into the local scope. Those temporaries only exist inside
+     * arrayExpr's prelude, so the value string must never be inlined into a
+     * fetching function. Set structurally at lowering time from the function
+     * context (never by inspecting the value text, which may legitimately
+     * contain substrings like "tmp_var_" inside string literals).
+     */
+    public bool $hasMaterializedTemporaries = false;
     /** Explicit declared type (e.g. `const int FOO`); null for inferred/untyped constants. */
     public ?string $declaredType = null;
 

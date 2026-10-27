@@ -3375,6 +3375,20 @@ abstract class CompilerBase implements PropertyAccessContext
                 if (!$interfaceConstDef->codegenFinalized) {
                     return false;
                 }
+                // Inline-eligibility only: a value that depends on
+                // materialize-temporaries (tmp_var_N, recorded structurally at
+                // lowering time) cannot be inlined into the fetching function
+                // because those locals only exist in arrayExpr's prelude
+                // (C2065 / C2593). Fall back to the Zend lookup below.
+                // Native classes have no zend_class_entry, so the Zend fallback
+                // is unsupported for them: keep their constants on the
+                // compile-time inline path.
+                if (!$this->isNativeObjectClass($class)
+                    && ($interfaceConstDef->arrayExpr !== ''
+                        || $interfaceConstDef->hasMaterializedTemporaries)
+                ) {
+                    return false;
+                }
                 $expr->setAttribute('nativeConst', $interfaceConstDef);
                 return $interfaceConstDef->value;
             }
@@ -3398,6 +3412,24 @@ abstract class CompilerBase implements PropertyAccessContext
             // Fall back to the Zend class-constant lookup instead of emitting
             // an incomplete value; the lookup is cached in the convert phase.
             if (!$constDef->codegenFinalized) {
+                return false;
+            }
+            // Inline-eligibility only: a constant initializer that parse
+            // lowered into materialize temporaries (tmp_var_N, recorded
+            // structurally at lowering time) cannot be inlined: those
+            // temporaries are declared and assigned only in arrayExpr's
+            // prelude, which is emitted together with array constants.
+            // Inlining the value string into the fetching function references
+            // locals that do not exist there (C2065 / C2593). Fall back to
+            // the Zend class-constant lookup instead: it reads the
+            // already-evaluated literal that was registered for the constant
+            // and is cached in the convert phase.
+            // Native classes have no zend_class_entry, so the Zend fallback
+            // is unsupported for them: keep their constants on the
+            // compile-time inline path.
+            if (!$this->isNativeObjectClass($class)
+                && ($constDef->arrayExpr !== '' || $constDef->hasMaterializedTemporaries)
+            ) {
                 return false;
             }
             $expr->setAttribute('nativeConst', $constDef);

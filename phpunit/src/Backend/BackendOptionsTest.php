@@ -300,6 +300,9 @@ class BackendOptionsTest extends TestCase
         ]);
         
         $this->assertStringContainsString('-fsanitize=address', $options);
+        $this->assertStringContainsString('-g ', $options);
+        $this->assertStringContainsString('-fno-omit-frame-pointer', $options);
+        $this->assertStringContainsString('-O2', $options);
     }
 
     /**

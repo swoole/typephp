@@ -94,6 +94,27 @@ trait ClassConstantValueTrait
                 // `K::CONST === E::Case` false through every dynamic path.
                 return new EnumCaseRef($classDef->getNamespacedName(false), $name);
             }
+            // PHP also resolves a fetch like `self::MASK` on an implementing
+            // class through the class's interfaces when neither the class nor
+            // any parent declares the constant. Constant DEFINITION lookup
+            // must not depend on findNativeClassConst's inline-eligibility
+            // gate (which legitimately returns false for expression-valued
+            // constants whose value string cannot be inlined), so the
+            // interface search runs independently of any codegen decision and
+            // evaluates the retained AST.
+            foreach ($this->getClassImplementedInterfaces($classDef) as $interfaceName) {
+                $constant = $this->findCompileTimeInterfaceConstant($interfaceName, $name);
+                if ($constant !== null) {
+                    [$interface, $interfaceConstDef] = $constant;
+                    return $this->evaluateCompileTimeClassConstant(
+                        $expr,
+                        $interface,
+                        $interfaceConstDef,
+                        $name,
+                        $interface,
+                    );
+                }
+            }
         }
         $this->fatalError($expr, "Class constant `{$class}::{$name}` not found");
     }

@@ -29,6 +29,7 @@ tests/**/*.diff
 tests/**/*.exp
 tests/**/*.log
 tests/**/*.out
+tests/**/*.sanitizer-*
 tests/**/*.php
 !tests/windows/clang/*.php
 tests/**/*.sh

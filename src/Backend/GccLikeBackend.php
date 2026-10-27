@@ -93,6 +93,9 @@ abstract class GccLikeBackend extends CompilerBackend
 
         if (!empty($config['sanitize'])) {
             $cmd .= ' ' . $this->formatSanitizerFlag($config['sanitize']);
+            // Symbols for native diagnostics must not enable TypePHP's
+            // separate PHP-level debug tracing or change exception locations.
+            $cmd .= ' -g -fno-omit-frame-pointer';
         }
 
         if (!empty($config['debug'])) {

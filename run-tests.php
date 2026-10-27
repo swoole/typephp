@@ -132,6 +132,10 @@ Options:
 
     --no-aot    Run tests without AOT compilation (plain PHP mode).
 
+    --sanitize <list>
+                Instrument every native test binary with address, undefined,
+                or address,undefined. Sanitizer reports always fail the test.
+
     --compiler <path>
                 Use specified compiler binary (default: ./bin/tpc.php).
                 For bootstrap testing, use: --compiler ./tpc
@@ -169,7 +173,7 @@ function main(): void
            $temp_source, $temp_target, $test_cnt,
            $test_files, $test_idx, $test_results, $testfile,
            $valgrind, $sum_results, $shuffle, $file_cache, $num_repeats,
-           $show_progress, $aot_parallel_root, $test_target;
+           $show_progress, $aot_parallel_root, $test_target, $aot_sanitize;
     // Parallel testing
     global $workers, $workerID;
     global $context_line_count;
@@ -367,6 +371,7 @@ function main(): void
     $workers = null;
     $aot_parallel_root = null;
     $test_target = 'native';
+    $aot_sanitize = [];
     $context_line_count = 3;
     $num_repeats = 1;
     $show_progress = true;
@@ -610,6 +615,10 @@ function main(): void
                             . ':print_suppressions=0';
                     }
                     break;
+                case '--sanitize':
+                    $aot_sanitize = parse_sanitize_option($argv[++$i] ?? '');
+                    $environment = configure_sanitizer_environment($environment, $aot_sanitize);
+                    break;
                 case '--repeat':
                     $num_repeats = (int) $argv[++$i];
                     $environment['SKIP_REPEAT'] = 1;
@@ -673,6 +682,10 @@ function main(): void
                 die('Cannot find test file "' . $argv[$i] . '".' . PHP_EOL);
             }
         }
+    }
+
+    if ($aot_sanitize !== [] && ($no_aot || $test_target !== 'native')) {
+        error('--sanitize requires native AOT tests (incompatible with --no-aot and WASM targets)');
     }
 
     if ($online === null && !isset($environment['SKIP_ONLINE_TESTS'])) {
@@ -1447,13 +1460,19 @@ function run_all_tests_parallel(array $test_files, array $env, ?string $redir_te
     $totalFileCount = count($test_files);
 
     $startTime = microtime(true);
+    $workerEnvironment = $GLOBALS['environment'];
+    foreach (['CMAKE_BUILD_PARALLEL_LEVEL', 'PHP_COMPILER_JOBS', 'CARGO_BUILD_JOBS'] as $name) {
+        $workerEnvironment[$name] = '1';
+    }
+    $workerEnvironment['MAKEFLAGS'] = IS_WINDOWS ? '' : '-j1';
+    $workerEnvironment['MFLAGS'] = IS_WINDOWS ? '' : '-j1';
     for ($i = 1; $i <= $workers; $i++) {
         $proc = proc_open(
             [$thisPHP, $thisScript],
             [], // Inherit our stdin, stdout and stderr
             $pipes,
             null,
-            $GLOBALS['environment'] + [
+            $workerEnvironment + [
                 "TEST_PHP_WORKER" => $i,
                 "TEST_PHP_URI" => $sockUri,
             ],
@@ -1863,7 +1882,7 @@ function run_test(string $php, $file, array $env): string
     global $slow_min_ms;
     global $preload, $file_cache;
     global $num_repeats;
-    global $compiler_path, $test_target;
+    global $compiler_path, $test_target, $aot_sanitize;
     // Parallel testing
     global $workerID;
     global $show_progress;
@@ -2589,6 +2608,12 @@ COMMAND $cmd
 ";
     }
 
+    $sanitizerPrefix = null;
+    if (!$no_aot && $aot_sanitize !== []) {
+        // Reapply after --ENV--: a test must not disable the requested checks.
+        $sanitizerPrefix = $log_filename . '.sanitizer-' . uniqid();
+        $env = configure_sanitizer_environment($env, $aot_sanitize, $sanitizerPrefix);
+    }
     $junit->startTimer($shortname);
     $hrtime = hrtime();
     $startTime = $hrtime[0] * 1000000000 + $hrtime[1];
@@ -2619,6 +2644,26 @@ COMMAND $cmd
         $out = system_with_timeout($cmd, $env, $stdin, $captureStdIn, $captureStdOut, $captureStdErr);
     }
 
+    $sanitizerFailure = false;
+    if ($sanitizerPrefix !== null) {
+        // Runtime initialization failures and fatal signals may reach stderr
+        // before the sanitizer can open its report file.
+        $sanitizerFailure = preg_match(
+            '/(?:ERROR: (?:Address|Leak)Sanitizer:|AddressSanitizer:DEADLYSIGNAL|ASan runtime does not come first)/',
+            (string) $out,
+        ) === 1;
+        foreach (glob($sanitizerPrefix . '.*') ?: [] as $report) {
+            $diagnostic = file_get_contents($report);
+            if (is_string($diagnostic) && $diagnostic !== '') {
+                if (sanitizer_report_is_failure($diagnostic)) {
+                    $sanitizerFailure = true;
+                    $out .= "\nSanitizer report: " . $report . "\n" . $diagnostic;
+                } else {
+                    fwrite(STDERR, "ASan Fiber warning retained in " . $report . "\n");
+                }
+            }
+        }
+    }
     $junit->stopTimer($shortname);
     $hrtime = hrtime();
     $time = $hrtime[0] * 1000000000 + $hrtime[1] - $startTime;
@@ -2765,7 +2810,10 @@ COMMAND $cmd
 
         $wanted_re = null;
     }
-    if (!$passed && !$retried && error_may_be_retried($test, $output)) {
+    if ($sanitizerFailure) {
+        $passed = false;
+    }
+    if (!$passed && !$sanitizerFailure && !$retried && error_may_be_retried($test, $output)) {
         $retried = true;
         goto retry;
     }
@@ -2841,7 +2889,7 @@ COMMAND $cmd
     }
 
     if (!$passed) {
-        if ($test->hasSection('XFAIL')) {
+        if (!$sanitizerFailure && $test->hasSection('XFAIL')) {
             $restype[] = 'XFAIL';
             $info = '  XFAIL REASON: ' . rtrim($test->getSection('XFAIL'));
         } elseif ($test->hasSection('XLEAK') && $valgrind) {
@@ -4534,9 +4582,54 @@ function normalize_wasm_test_output(string $output): string
     return str_replace("\r\n", "\n", trim($output));
 }
 
+/** @return list<string> */
+function parse_sanitize_option(string $value): array
+{
+    $sanitizers = array_values(array_unique(array_map('trim', explode(',', $value))));
+    if ($sanitizers === [] || array_diff($sanitizers, ['address', 'undefined']) !== []) {
+        error('--sanitize expects address and/or undefined, got: ' . $value);
+    }
+    return $sanitizers;
+}
+
+function sanitizer_report_is_failure(string $diagnostic): bool
+{
+    // The prebuilt PHP runtime is not instrumented and does not notify ASan
+    // about Fiber stack switches. This specific informational warning is not
+    // a memory error. Keep its file, but do not alter the test's output.
+    // Any other content, including an error after the warning, remains fatal.
+    $remaining = preg_replace(
+        '~^==\d+==WARNING: ASan is ignoring requested __asan_handle_no_return:[^\n]*\n'
+        . 'False positive error reports may follow\n'
+        . 'For details see https://github\.com/google/sanitizers/issues/189(?:\n|$)~m',
+        '',
+        str_replace("\r\n", "\n", $diagnostic),
+    );
+    return trim($remaining ?? $diagnostic) !== '';
+}
+
+function configure_sanitizer_environment(array $env, array $sanitizers, ?string $reportPrefix = null): array
+{
+    $log = $reportPrefix === null ? '' : ':log_path="' . str_replace('\\', '/', $reportPrefix) . '"';
+    if (in_array('address', $sanitizers, true)) {
+        // Zend's private allocator hides individual allocations from ASan.
+        $env['USE_ZEND_ALLOC'] = '0';
+        $env['USE_TRACKED_ALLOC'] = '1';
+        $env['SKIP_ASAN'] = '1';
+        $env['SKIP_PERF_SENSITIVE'] = '1';
+        $env['ASAN_OPTIONS'] = ($env['ASAN_OPTIONS'] ?? '')
+            . ':halt_on_error=1:abort_on_error=0:detect_leaks=0:verbosity=0' . $log;
+    }
+    if (in_array('undefined', $sanitizers, true)) {
+        $env['UBSAN_OPTIONS'] = ($env['UBSAN_OPTIONS'] ?? '')
+            . ':halt_on_error=1:abort_on_error=0:print_stacktrace=1' . $log;
+    }
+    return $env;
+}
+
 function compile_php_file(string $file, string $compiler_args = ''): string
 {
-    global $compiler_path, $workerID, $aot_parallel_root;
+    global $compiler_path, $workerID, $aot_parallel_root, $aot_sanitize;
 
     $data = trim(file_get_contents($file));
     if (!str_starts_with($data, '<?php') or !str_ends_with($data, '?>')) {
@@ -4582,6 +4675,10 @@ function compile_php_file(string $file, string $compiler_args = ''): string
     if ($compiler_args !== '') {
         $cmd .= ' ' . $compiler_args;
     }
+    if ($aot_sanitize !== []) {
+        // Append after --AOT_ARGS-- so per-test flags cannot turn this off.
+        $cmd .= ' --sanitize ' . escapeshellarg(implode(',', $aot_sanitize));
+    }
     foreach (get_aot_compiler_job_args() as $argument) {
         $compiler_output_args .= ' ' . escapeshellarg($argument);
     }
@@ -4600,6 +4697,7 @@ function compile_php_file(string $file, string $compiler_args = ''): string
  *
  * `parse_worker_count()` represents the sequential `-j1` mode as null, so a
  * non-null value here means run-tests owns more than one concurrent test slot.
+ * A sequential harness uses the configured job count, defaulting to one.
  * Append this after --AOT_ARGS-- so an individual test cannot accidentally
  * re-enable nested compiler parallelism.
  *
@@ -4609,7 +4707,11 @@ function get_aot_compiler_job_args(): array
 {
     global $workers;
 
-    return $workers !== null && $workers > 1 ? ['--job', '1'] : [];
+    $jobs = getenv('PHP_COMPILER_JOBS');
+    if (($workers !== null && $workers > 1) || !is_string($jobs) || !preg_match('/^[1-9][0-9]*$/', $jobs)) {
+        $jobs = '1';
+    }
+    return ['--job', $jobs];
 }
 
 function create_aot_parallel_root(): string

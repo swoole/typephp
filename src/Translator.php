@@ -96,7 +96,7 @@ class Translator extends Preprocessor
     use ResourceCompilationTrait;
     use ClassConstantValueTrait;
 
-    public const string VERSION = '0.9.5';
+    public const string VERSION = '0.9.6';
     public const string APP_NAME = 'TypePHP Compiler (AOT)';
     protected bool $hasExplicitOutput = false;
 
@@ -6590,6 +6590,39 @@ CODE;
         }
 
         parent::finalizePreparedProperty($property, $expression);
+    }
+
+    protected function finalizePreparedConstant(ConstantDef $constant, Expr $expression): void
+    {
+        // Lower the original AST first so constant-access and expression
+        // validation cannot be bypassed by folding an otherwise valid value.
+        parent::finalizePreparedConstant($constant, $expression);
+        if (!$this->classDef?->nativeObject || $constant->type === Type::ARRAY) {
+            return;
+        }
+
+        // Native classes have no Zend constant table to fall back to.
+        // Replace declaration-local temporaries with a scalar literal evaluated
+        // in the declaring scope. Keep valueExpr for metadata evaluation.
+        try {
+            $value = $this->evaluateCompileTimeClassConstant(
+                $expression,
+                $this->classDef,
+                $constant,
+                $constant->name,
+            );
+        } catch (TestError $error) {
+            throw $error;
+        } catch (\Throwable) {
+            // Preserve lowering for values the evaluator cannot represent
+            // (for example runtime objects), as for property defaults.
+            return;
+        }
+        if (is_scalar($value) || $value === null) {
+            $literal = BuilderHelpers::normalizeValue($value);
+            parent::finalizePreparedConstant($constant, $literal);
+            $expression->setAttribute(self::ATTR_LOWERED_TYPE, $this->getLoweredExpressionType($literal));
+        }
     }
 
     /**

@@ -1611,14 +1611,15 @@ abstract class CompilerBase implements PropertyAccessContext
      *
      * Class constants are emitted as php::Var objects inside the project
      * namespace (exported via `using namespace`), while functions and methods
-     * are global-scope symbols built with the same getNativeName() spelling.
-     * A dedicated `const__` segment keeps the two symbol families disjoint so
-     * a constant and a method whose names differ only by case (PHP method
-     * names are case-insensitive, constants are not) cannot collapse onto one
-     * C++ identifier (MSVC C2872 / g++ "reference is ambiguous"). The constant
-     * name keeps its original case so two case-distinct constants in one class
-     * (`const A` + `const a`) also keep their own symbols instead of both
-     * lowering onto the escaped (lowercased) spelling.
+     * are global-scope symbols of the `php_` callable ABI. Constant data is
+     * not part of that ABI, so its symbol deliberately does NOT start with
+     * `php_`: no user-declared function or method can ever produce a
+     * `class_const__` name, keeping the two symbol families disjoint even
+     * when a constant and a function/method share a spelling (MSVC C2872 /
+     * g++ "reference is ambiguous"). The constant name keeps its original
+     * case so two case-distinct constants in one class (`const A` +
+     * `const a`) also keep their own symbols instead of both lowering onto
+     * a single escaped (lowercased) spelling.
      */
     protected function getNativeClassConstName(string $name, string $ns = '', string $class = ''): string
     {
@@ -1630,7 +1631,7 @@ abstract class CompilerBase implements PropertyAccessContext
             $names[] = $this->escapeClass($class);
         }
         $names[] = $name;
-        return self::PREFIX . 'const__' . implode(self::NAMESPACE_SEPARATOR, $names);
+        return 'class_const__' . implode(self::NAMESPACE_SEPARATOR, $names);
     }
 
     /**

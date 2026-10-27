@@ -31,6 +31,18 @@ class C2872Canvas implements C2872Palette
 {
 }
 
+// A lowercase array constant plus a root-namespace function whose mapped
+// php_ symbol would collide with a php_-prefixed constant spelling.
+class Box
+{
+    public const items = [1, 2];
+}
+
+function const__box__items(): int
+{
+    return 7;
+}
+
 function main()
 {
     var_dump(C2872FontData::latin());
@@ -38,6 +50,7 @@ function main()
     var_dump(C2872CasePair::A);
     var_dump(C2872CasePair::a);
     var_dump(C2872Canvas::COLORS);
+    var_dump(Box::items, const__box__items());
 }
 ?>
 --EXPECT--
@@ -61,3 +74,10 @@ array(2) {
   [1]=>
   string(1) "g"
 }
+array(2) {
+  [0]=>
+  int(1)
+  [1]=>
+  int(2)
+}
+int(7)

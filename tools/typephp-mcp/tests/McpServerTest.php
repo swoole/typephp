@@ -94,6 +94,30 @@ final class McpServerTest extends TestCase
         self::assertSame(-32602, $reply['error']['code']);
     }
 
+    public function testFloatRequestIdsArePreserved(): void
+    {
+        // JSON-RPC allows a Number id, floats included. Narrowing the id to
+        // int truncated 1.5 to 1, so the client could not match the reply to
+        // its request.
+        $raw = (string) $this->server->handleLine('{"jsonrpc":"2.0","id":1.5,"method":"ping"}');
+        self::assertStringContainsString('"id":1.5', $raw);
+
+        $raw = (string) $this->server->handleLine(
+            '{"jsonrpc":"2.0","id":2.25,"method":"tools/call","params":{"name":"list_restrictions","arguments":{"topic":"build"}}}'
+        );
+        self::assertStringContainsString('"id":2.25', $raw);
+    }
+
+    public function testBatchRequestIsRejectedExplicitly(): void
+    {
+        // Dropping a batch line silently would leave the client waiting for
+        // replies that never come; answer with an invalid-request error.
+        $raw = (string) $this->server->handleLine('[{"jsonrpc":"2.0","id":1,"method":"ping"}]');
+        $reply = json_decode($raw, true);
+        self::assertSame(-32600, $reply['error']['code']);
+        self::assertStringContainsString('batch', $reply['error']['message']);
+    }
+
     public function testToolsListExposesTwelveTools(): void
     {
         $raw = (string) $this->server->handleLine('{"jsonrpc":"2.0","id":5,"method":"tools/list"}');

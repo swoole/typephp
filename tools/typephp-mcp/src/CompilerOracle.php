@@ -382,7 +382,8 @@ final class CompilerOracle
         $relative = $root->relativeFrom($file);
         if ($result['code'] === 0) {
             $lines = [
-                'OK stage=' . self::STAGE_GENERATE . ' file=' . $relative . ' diagnostics=0',
+                'OK stage=' . self::STAGE_GENERATE . ' file=' . $relative
+                . ' diagnostics=' . count($diagnostics),
                 'Note: stage=generate runs `tpc --dry` (C++ generation only). The compile and link stages are not run, so their errors are not covered.',
             ];
             if ($diagnostics !== []) {

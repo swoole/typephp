@@ -156,6 +156,17 @@ final class McpServer
                 'message' => 'Parse error',
             ]]);
         }
+        // A JSON-RPC batch (a top-level array) would have to be answered with
+        // a batch. Answer it with an explicit invalid-request error instead
+        // of dropping the line: a client that sent one would otherwise wait
+        // forever for replies it never gets. Written without array_is_list()
+        // (PHP 8.1+) to stay inside the PHP subset the compiler accepts.
+        if ($decoded !== [] && array_keys($decoded) === range(0, count($decoded) - 1)) {
+            return $this->encode(['jsonrpc' => '2.0', 'id' => null, 'error' => [
+                'code' => -32600,
+                'message' => 'Invalid Request: batch requests are not supported',
+            ]]);
+        }
 
         $hasId = array_key_exists('id', $decoded);
         $id = $hasId ? $decoded['id'] : null;
@@ -265,7 +276,7 @@ final class McpServer
         return $this->error($id, -32601, 'Method not found: ' . $method);
     }
 
-    private function handleToolCall(int|string|null $id, array $request): string
+    private function handleToolCall(int|string|float|null $id, array $request): string
     {
         $params = isset($request['params']) && is_array($request['params']) ? $request['params'] : [];
         $name = isset($params['name']) && is_string($params['name']) ? $params['name'] : '';
@@ -403,12 +414,12 @@ final class McpServer
     /**
      * @param array<string, mixed> $payload
      */
-    private function result(int|string|null $id, array|object $result): string
+    private function result(int|string|float|null $id, array|object $result): string
     {
         return $this->encode(['jsonrpc' => '2.0', 'id' => $id, 'result' => $result]);
     }
 
-    private function error(int|string|null $id, int $code, string $message): string
+    private function error(int|string|float|null $id, int $code, string $message): string
     {
         return $this->encode(['jsonrpc' => '2.0', 'id' => $id, 'error' => [
             'code' => $code,

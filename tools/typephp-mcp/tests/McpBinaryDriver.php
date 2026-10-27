@@ -159,6 +159,25 @@ final class McpBinaryDriver
                 is_array($reply) && array_key_exists('result', $reply),
                 (string) json_encode($reply)
             );
+
+            // 9. A float id survives the round trip. Narrowing it to int made
+            // the reply unmatchable for the client that sent 1.5.
+            self::write($pipes[0], ['jsonrpc' => '2.0', 'id' => 1.5, 'method' => 'ping']);
+            $reply = self::readReply($pipes[1], self::REPLY_TIMEOUT_SECONDS);
+            $checks[] = self::check(
+                'float request id is preserved',
+                is_array($reply) && ($reply['id'] ?? null) === 1.5,
+                (string) json_encode($reply)
+            );
+
+            // 10. A batch line is rejected explicitly rather than dropped.
+            self::write($pipes[0], [(object) ['jsonrpc' => '2.0', 'id' => 9, 'method' => 'ping']]);
+            $reply = self::readReply($pipes[1], self::REPLY_TIMEOUT_SECONDS);
+            $checks[] = self::check(
+                'batch request is rejected explicitly',
+                is_array($reply) && ($reply['error']['code'] ?? null) === -32600,
+                (string) json_encode($reply)
+            );
         } finally {
             // Close the pipes first, then reap. proc_close() waits for EOF on
             // them, so a server that stopped reading must be terminated rather

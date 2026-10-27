@@ -673,6 +673,14 @@ final class McpServerTest extends TestCase
         self::assertSame('D:/git/php/typephp-qt', ProjectDetector::uriToPath('file:///D:/git/php/typephp-qt'));
         self::assertSame('/home/user/proj', ProjectDetector::uriToPath('file:///home/user/proj'));
         self::assertSame('D:/git/php/typephp-qt', ProjectDetector::uriToPath('D:/git/php/typephp-qt'));
+
+        // A percent-encoded drive colon must still strip the leading slash.
+        self::assertSame('d:/git/proj', ProjectDetector::uriToPath('file:///d%3A/git/proj'));
+        // Percent-encoded spaces and non-ASCII survive decoding.
+        self::assertSame('C:/Program Files/x', ProjectDetector::uriToPath('file:///C:/Program%20Files/x'));
+        self::assertSame('D:/中文/项目', ProjectDetector::uriToPath('file:///D:/中文/项目'));
+        // A UNC share stays UNC rather than becoming a relative path.
+        self::assertSame('//server/share/proj', ProjectDetector::uriToPath('file://server/share/proj'));
     }
 
     public function testCodeIndexMergesAutoDirsIntoDefault(): void

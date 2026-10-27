@@ -58,15 +58,25 @@ final class ProjectDetector
     public static function uriToPath(string $uri): string
     {
         $uri = trim($uri);
+        $unc = preg_match('#^file://(?!localhost/|/)([^/]+)#', $uri, $matches) === 1;
         $path = preg_replace('#^file://(?:localhost)?#', '', $uri);
         if (!is_string($path)) {
             $path = $uri;
         }
+        // Decode before looking for a drive letter: a client may percent-encode
+        // the colon ("file:///d%3A/git/proj"), and testing the encoded form
+        // left the leading slash in place.
+        $path = rawurldecode($path);
         // file:///D:/x  ->  /D:/x  ->  D:/x
         if (str_starts_with($path, '/') && preg_match('#^/[A-Za-z]:#', $path) === 1) {
             $path = substr($path, 1);
         }
-        $path = rawurldecode($path);
-        return str_replace('\\', '/', $path);
+        $path = str_replace('\\', '/', $path);
+        // file://server/share names a UNC share; keep it in UNC form instead
+        // of a relative-looking "server/share".
+        if ($unc && !str_starts_with($path, '//')) {
+            $path = '//' . ltrim($path, '/');
+        }
+        return $path;
     }
 }

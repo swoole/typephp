@@ -480,6 +480,18 @@ final class McpServerTest extends TestCase
         @rmdir($dir);
     }
 
+    public function testResolveInsideRejectsPrefixSiblings(): void
+    {
+        // A sibling directory whose name merely starts with the root's name
+        // must not count as inside it - a symlink in the checkout could
+        // otherwise reach it.
+        $sibling = $this->root->path() . '-evil';
+        self::assertNull($this->root->resolveInside($sibling . '/x.php'));
+        self::assertNull($this->root->resolveInside('../' . basename($sibling) . '/x.php'));
+        // A genuine repo file still resolves.
+        self::assertNotNull($this->root->resolveInside('composer.json'));
+    }
+
     public function testRepoRootDetectsFromOutsideRepo(): void
     {
         // Launching from a directory outside the repository must still locate

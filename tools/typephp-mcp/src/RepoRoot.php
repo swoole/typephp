@@ -101,7 +101,13 @@ final class RepoRoot
         if (!is_string($real) || $real === '') {
             return null;
         }
-        if (!str_starts_with($real, $this->root)) {
+        // Require the separator boundary: a plain prefix test also accepts a
+        // sibling directory whose name merely starts with the root's
+        // (".../aot-compiler-evil" for root ".../aot-compiler"), which a
+        // symlink inside the checkout could reach.
+        $root = rtrim(str_replace('\\', '/', $this->root), '/');
+        $normalized = str_replace('\\', '/', $real);
+        if ($normalized !== $root && !str_starts_with($normalized, $root . '/')) {
             return null;
         }
         return $real;

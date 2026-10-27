@@ -145,7 +145,10 @@ if [[ -x "${REPO_ROOT}/tpc" ]]; then
     TPC=("${REPO_ROOT}/tpc")
 fi
 
-rm -rf build
+# Clean the previous build tree. Guarded so a failed cd (script dir gone,
+# BASH_SOURCE oddity) can never turn this into `rm -rf` of the caller's cwd.
+[ -n "$SCRIPT_DIR" ] && [ -d "$SCRIPT_DIR" ] || { echo "[build] ERROR: script directory not found" >&2; exit 1; }
+rm -rf "${SCRIPT_DIR:?}/build"
 
 BUILD_CMD=("${TPC[@]}" project.yml -O2 --job "$JOBS" --build-dir build \
     --no-color --no-progress -o typephp_mcp ${LINK_FLAGS[@]+"${LINK_FLAGS[@]}"})

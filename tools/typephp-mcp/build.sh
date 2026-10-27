@@ -175,11 +175,21 @@ if [[ "${CI:-}" != "true" && "${GITHUB_ACTION:-}" != "true" ]]; then
     # still worth setting (one runaway compiler cannot take the machine down)
     # but it must not be described as a whole-tree limit. A real total needs a
     # cgroup, which this script does not create.
+    #
+    # macOS does not implement ulimit -v, so a rejection there is reported and
+    # the build continues: refusing outright would make the script unusable on
+    # that platform while protecting nothing. Anywhere else a rejection is
+    # fatal, because the platform is expected to support it.
     if ! ulimit -v "$((limit_mb * 1024))" 2>/dev/null; then
-        echo "[build] ERROR: cannot apply the per-process memory cap (${limit_mb} MiB); refusing to build unprotected" >&2
-        exit 1
+        if [[ "$(uname)" == "Darwin" ]]; then
+            echo "[build] note: macOS has no ulimit -v; continuing without a per-process memory cap"
+        else
+            echo "[build] ERROR: cannot apply the per-process memory cap (${limit_mb} MiB)" >&2
+            exit 1
+        fi
+    else
+        echo "[build] per-process memory cap: ${limit_mb} MiB virtual (not a whole-tree total), jobs: ${JOBS}"
     fi
-    echo "[build] per-process memory cap: ${limit_mb} MiB virtual (not a whole-tree total), jobs: ${JOBS}"
 
     if [[ "$(uname)" == "Linux" ]]; then
         if ! command -v flock >/dev/null 2>&1; then

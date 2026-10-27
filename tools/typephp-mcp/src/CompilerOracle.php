@@ -168,13 +168,17 @@ final class CompilerOracle
      * Assemble the command line.
      *
      * On POSIX the compiler runs in a shell that applies `ulimit -v` before
-     * exec. That is a PER-PROCESS address-space cap inherited by each
-     * descendant, not a shared budget for the tree: N children can each reach
-     * the cap. It is kept because it still stops one runaway process from
-     * taking the machine down, but it must not be described as a total cap.
-     * A real whole-tree limit needs a cgroup, which this tool does not set
-     * up; if applying the per-process cap fails, the build is refused rather
-     * than run unprotected while claiming otherwise.
+     * exec where the platform supports it. That is a PER-PROCESS address-space
+     * cap inherited by each descendant, not a shared budget for the tree: N
+     * children can each reach the cap. It is kept because it still stops one
+     * runaway process from taking the machine down, but it must not be
+     * described as a total cap. A real whole-tree limit needs a cgroup, which
+     * this tool does not create.
+     *
+     * macOS does not implement `ulimit -v` at all, so the shell probes for it
+     * first and, when it is unavailable, runs the compiler without a cap
+     * rather than refusing to work - refusing would make check_code unusable
+     * on that platform while protecting nothing.
      *
      * tpc --dry only generates C++ (no make/link), so this stage does not
      * spawn a compiler farm. A real compile/link tier would additionally need
@@ -194,11 +198,11 @@ final class CompilerOracle
                     'TYPEPHP_MCP_COMPILE_MEMORY_LIMIT_MB must be a positive number of MiB.'
                 );
             }
-            // The `|| exit` makes a rejected ulimit abort the build instead of
-            // silently running without the cap.
-            $command = 'bash -c ' . escapeshellarg(
-                'ulimit -v ' . ($limitMb * 1024) . ' || { echo "typephp-mcp: cannot apply the per-process memory cap" >&2; exit 125; }; exec ' . $command
-            );
+            // Probe the capability, and never claim a cap that was not
+            // applied: on macOS `ulimit -v` is accepted by the shell but
+            // ineffective, so the shell checks that the limit actually took.
+            $guard = 'if ulimit -v ' . ($limitMb * 1024) . ' 2>/dev/null && [ "$(ulimit -v)" != "unlimited" ]; then :; else echo "typephp-mcp: no per-process memory cap on this platform" >&2; fi;';
+            $command = 'bash -c ' . escapeshellarg($guard . ' exec ' . $command);
         }
         return $command;
     }
@@ -538,7 +542,6 @@ final class CompilerOracle
         'Permission denied',
         'is not recognized as an internal or external command',
         'cannot execute binary file',
-        'cannot apply the per-process memory cap',
     ];
 
     /**

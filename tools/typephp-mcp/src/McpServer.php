@@ -67,8 +67,13 @@ final class McpServer
     }
 
     /**
-     * TYPEPHP_MCP_PROJECT_ROOT (single path or ;/-separated list) seeds the
-     * auto-detected project dirs even when the client does not send MCP roots.
+     * TYPEPHP_MCP_PROJECT_ROOT seeds the auto-detected project dirs even when
+     * the client does not send MCP roots.
+     *
+     * Several paths are separated by ';', and on POSIX also by ':'. The colon
+     * cannot be a separator on Windows: it is part of every drive-letter path,
+     * so splitting on it turned "D:/work/proj" into "D" and "/work/proj" and
+     * the project was never detected.
      */
     private function seedFromEnv(): void
     {
@@ -76,7 +81,8 @@ final class McpServer
         if (!is_string($raw) || $raw === '') {
             return;
         }
-        foreach (preg_split('#[;:]+#', $raw) ?: [] as $entry) {
+        $separator = stripos(PHP_OS, 'WIN') === 0 ? '#;#' : '#[;:]#';
+        foreach (preg_split($separator, $raw) ?: [] as $entry) {
             $entry = trim((string) $entry);
             if ($entry === '') {
                 continue;

@@ -605,6 +605,40 @@ final class McpServerTest extends TestCase
         }
     }
 
+    public function testProjectRootEnvSplitsPathsPerPlatform(): void
+    {
+        // A Windows path contains a colon, so ':' cannot be a list separator
+        // there: splitting on it turned "D:/work/proj" into "D" and
+        // "/work/proj" and the project was never detected.
+        $sandbox = $this->makeSandbox();
+        $previous = getenv('TYPEPHP_MCP_PROJECT_ROOT');
+        try {
+            $project = $sandbox . '/proj';
+            self::assertTrue(mkdir($project, 0777, true));
+            file_put_contents($project . '/project.yml', "entry: main\n");
+
+            putenv('TYPEPHP_MCP_PROJECT_ROOT=' . $project);
+            $server = new McpServer($this->root);
+            self::assertContains($project, $server->getAutoDirs(), 'single Windows-style path');
+
+            // ';' separates several paths on every platform.
+            $second = $sandbox . '/proj2';
+            self::assertTrue(mkdir($second, 0777, true));
+            file_put_contents($second . '/project.yml', "entry: main\n");
+            putenv('TYPEPHP_MCP_PROJECT_ROOT=' . $project . ';' . $second);
+            $server = new McpServer($this->root);
+            self::assertContains($project, $server->getAutoDirs());
+            self::assertContains($second, $server->getAutoDirs());
+        } finally {
+            if ($previous === false) {
+                putenv('TYPEPHP_MCP_PROJECT_ROOT');
+            } else {
+                putenv('TYPEPHP_MCP_PROJECT_ROOT=' . $previous);
+            }
+            $this->removeDir($sandbox);
+        }
+    }
+
     public function testProjectDetectorRecognizesTypePhpProject(): void
     {
         $sandbox = $this->makeSandbox();

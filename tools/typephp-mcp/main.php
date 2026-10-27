@@ -9,7 +9,8 @@
  *   TYPEPHP_MCP_PHP   php executable used by check_code/get_index_info
  *                     (default: `php` from PATH)
  *   TYPEPHP_MCP_PROJECT_ROOT  optional TypePHP project path(s) (separate multiple
- *                     with ; or :) to auto-merge into the default search set when
+ *                     with ; - POSIX also accepts :) to auto-merge into the
+ *                     default search set when
  *                     the client does not send MCP roots.
  *
  * The server also advertises the MCP roots capability and, once initialized,

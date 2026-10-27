@@ -112,7 +112,7 @@ tools/typephp-mcp/typephp_mcp
 | `TYPEPHP_MCP_TPC` | 仓库根的 `tpc` / `tpc.exe` | `check_code` 调用的**编译好的 tpc 二进制**：不需要 PHP 解释器、也不需要 phpy 扩展（Windows 上尤其重要，因为解释执行 `php bin/tpc.php` 必须加载 phpy）。会先做一次有界的 `--version` 探测，跑不起来（缺运行时 DLL 或缺 mbstring）就退回解释执行 |
 | `TYPEPHP_MCP_PHP` | `php`（PATH 查找） | 只有走解释执行（`php bin/tpc.php`）时才需要；`get_index_info` 探测 tpc 版本同理 |
 | `PHP_HOME` / `PHPX_HOME` | 继承调用方环境 | 这两个只被 `check_code`/`get_index_info` 间接使用（tpc 自己读）；mac 上不设就是 `The host PHP embed library is missing`，工具会如实回报成 `isError: true` |
-| `TYPEPHP_MCP_PROJECT_ROOT` | 未设 | 客户端不发 MCP roots 时，手动把 TypePHP 项目路径并入默认检索集（分隔符 `;` 或 `:` 都认） |
+| `TYPEPHP_MCP_PROJECT_ROOT` | 未设 | 客户端不发 MCP roots 时，手动把 TypePHP 项目路径并入默认检索集。分隔符：`;` 通用，POSIX 下 `:` 也认；**Windows 只认 `;`**（盘符里的冒号不能当分隔符） |
 | `TYPEPHP_MCP_COMPILE_TIMEOUT` | `120` | `check_code` 调编译器的超时秒数；超时杀掉整个子进程树并清理临时目录，服务保持可响应 |
 | `TYPEPHP_MCP_COMPILE_OUTPUT_LIMIT` | `65536` | 编译器输出捕获字节上限（仍持续排空管道，子进程不会被写满阻塞） |
 | `TYPEPHP_MCP_COMPILE_MEMORY_LIMIT_MB` | `4096` | POSIX 下编译器进程树的虚拟内存上限（MiB） |

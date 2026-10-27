@@ -1607,6 +1607,33 @@ abstract class CompilerBase implements PropertyAccessContext
     }
 
     /**
+     * C++ symbol for an array-valued class constant.
+     *
+     * Class constants are emitted as php::Var objects inside the project
+     * namespace (exported via `using namespace`), while functions and methods
+     * are global-scope symbols built with the same getNativeName() spelling.
+     * A dedicated `const__` segment keeps the two symbol families disjoint so
+     * a constant and a method whose names differ only by case (PHP method
+     * names are case-insensitive, constants are not) cannot collapse onto one
+     * C++ identifier (MSVC C2872 / g++ "reference is ambiguous"). The constant
+     * name keeps its original case so two case-distinct constants in one class
+     * (`const A` + `const a`) also keep their own symbols instead of both
+     * lowering onto the escaped (lowercased) spelling.
+     */
+    protected function getNativeClassConstName(string $name, string $ns = '', string $class = ''): string
+    {
+        $names = [];
+        if ($ns) {
+            $names[] = $this->escapeNamespace($ns);
+        }
+        if ($class) {
+            $names[] = $this->escapeClass($class);
+        }
+        $names[] = $name;
+        return self::PREFIX . 'const__' . implode(self::NAMESPACE_SEPARATOR, $names);
+    }
+
+    /**
      * Determine whether a class's symbol pointer is stable across the PHP
      * module lifetime (registered at MINIT, safe to cache across requests).
      * Compiled output (classes/interfaces compiled in this unit) and PHP
@@ -3370,7 +3397,7 @@ abstract class CompilerBase implements PropertyAccessContext
                 }
                 $interfaceConstDef = $interfaceDef->constants[$const];
                 if ($interfaceConstDef->type === Type::ARRAY) {
-                    return self::PREFIX . $this->getNativeName($interfaceConstDef->name, $interfaceDef->namespace, $interfaceDef->name);
+                    return $this->getNativeClassConstName($interfaceConstDef->name, $interfaceDef->namespace, $interfaceDef->name);
                 }
                 if (!$interfaceConstDef->codegenFinalized) {
                     return false;
@@ -3405,7 +3432,7 @@ abstract class CompilerBase implements PropertyAccessContext
             $this->fatalError($expr, 'Constant `' . $classDef->getNamespacedName() . '::' . $const . '` is not accessible');
         }
         if ($constDef->type === Type::ARRAY) {
-            return self::PREFIX . $this->getNativeName($constDef->name, $classDef->namespace, $classDef->name);
+            return $this->getNativeClassConstName($constDef->name, $classDef->namespace, $classDef->name);
         } else {
             // Forward constant references may be encountered while the
             // declaration-expression pass is still visiting another file.

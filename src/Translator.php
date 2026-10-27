@@ -1155,7 +1155,7 @@ class Translator extends Preprocessor
                 }
                 foreach ($classDef->constants as $constant) {
                     if ($constant->type === Type::ARRAY) {
-                        $constName = self::PREFIX . $this->getNativeName($constant->name, $classDef->namespace, $classDef->name);
+                        $constName = $this->getNativeClassConstName($constant->name, $classDef->namespace, $classDef->name);
                         $lines[] = 'extern ' . Type::VAR . ' ' . $constName . ';' . PHP_EOL;
                     }
                 }
@@ -1587,7 +1587,7 @@ CODE;
             }
             foreach ($classDef->constants as $constant) {
                 if ($constant->type === Type::ARRAY) {
-                    $constName = self::PREFIX . $this->getNativeName($constant->name, $classDef->namespace, $classDef->name);
+                    $constName = $this->getNativeClassConstName($constant->name, $classDef->namespace, $classDef->name);
                     $code .= Type::VAR . ' ' . $constName . ";\n";
                 }
             }
@@ -4255,7 +4255,7 @@ CODE;
         foreach ($this->getClassLikesWithConstants() as $classDef) {
             foreach ($classDef->constants as $constant) {
                 if ($constant->type === Type::ARRAY) {
-                    $constName = self::PREFIX . $this->getNativeName($constant->name, $classDef->namespace, $classDef->name);
+                    $constName = $this->getNativeClassConstName($constant->name, $classDef->namespace, $classDef->name);
                     $init = "do {\n";
                     $init .= $constant->arrayExpr;
                     $init .= $constName . ' = ' . $constant->value . ";\n";
@@ -4296,7 +4296,7 @@ CODE;
                 foreach ($parentDef->constants as $constant) {
                     if ($constant->type === Type::ARRAY && !isset($ownConstNames[$constant->name])) {
                         $ownConstNames[$constant->name] = true;
-                        $constName = self::PREFIX . $this->getNativeName($constant->name, $parentDef->namespace, $parentDef->name);
+                        $constName = $this->getNativeClassConstName($constant->name, $parentDef->namespace, $parentDef->name);
                         $classNameStr = $this->genCharPtr($classDef->getNamespacedName(false), true);
                         $classConstStr = $this->genCharPtr($constant->name);
                         $operations[] = [
@@ -4320,7 +4320,7 @@ CODE;
                 foreach ($interfaceDef->constants as $constant) {
                     if ($constant->type === Type::ARRAY && !isset($ownConstNames[$constant->name])) {
                         $ownConstNames[$constant->name] = true;
-                        $constName = self::PREFIX . $this->getNativeName($constant->name, $interfaceDef->namespace, $interfaceDef->name);
+                        $constName = $this->getNativeClassConstName($constant->name, $interfaceDef->namespace, $interfaceDef->name);
                         $classNameStr = $this->genCharPtr($classDef->getNamespacedName(false), true);
                         $classConstStr = $this->genCharPtr($constant->name);
                         $operations[] = [

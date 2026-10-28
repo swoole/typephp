@@ -68,9 +68,24 @@ final class CompilerOracle
             $inside = $root->resolveInside($file);
             $resolved = is_string($inside) ? $inside : '';
         }
-        if ($resolved === '' || !is_file($resolved)) {
+        if ($resolved === '' || (!is_file($resolved) && !is_dir($resolved))) {
             throw new CompilerOracleToolFailure(
                 'File not found: ' . $file . "\nPass an absolute path, or a path relative to the repo root."
+            );
+        }
+        // Only single-file checks are allowed. Directory and project.yml
+        // inputs make tpc parse the project configuration, where `php-builder:
+        // {}` reaches SapiPhpBuilder even under --dry (prepare() runs before
+        // the dry-run return) and starts a real php-src build - exactly the
+        // uncontrolled make/cmake this tool must never trigger (AGENTS.md).
+        // A .php file keeps tpc in single-file mode: no YAML is parsed, and
+        // the php-builder path is unreachable (verified by interception).
+        $extension = strtolower(pathinfo($resolved, PATHINFO_EXTENSION));
+        if (!is_file($resolved) || $extension !== 'php') {
+            throw new CompilerOracleToolFailure(
+                'check_code only accepts a PHP source file, got: ' . $file . "\n"
+                . 'Pass a .php file. Directory and project.yml inputs are rejected because tpc would parse the'
+                . ' project configuration, which can start a real runtime build (php-builder) even under --dry.'
             );
         }
         // Always hand the compiler an absolute path: it runs with cwd set to
@@ -324,6 +339,20 @@ final class CompilerOracle
         // Windows may ignore the timeout on a blocked pipe read; the watchdog
         // kills the tree at the deadline so that read can return.
         $watchdog = self::armWatchdog($pid, $timeoutSeconds);
+        if (stripos(PHP_OS, 'WIN') === 0 && $watchdog === null) {
+            // Without the watchdog a silent compiler blocks the read past its
+            // budget (measured: a 1 s budget returned only after the child
+            // finished at 4.2 s). Fail fast instead of running unprotected:
+            // the just-started compiler is reaped before reporting.
+            self::terminateTree($process);
+            @fclose($pipes[1]);
+            @fclose($pipes[2]);
+            @proc_close($process);
+            throw new CompilerOracleToolFailure(
+                'The Windows compile watchdog could not be created (unwritable temporary directory or process creation failure),'
+                . ' so the compiler cannot be bounded. Fix TMP/TEMP, or raise TYPEPHP_MCP_COMPILE_TIMEOUT after making the directory writable.'
+            );
+        }
         while (true) {
             $remaining = $deadline - microtime(true);
             if ($remaining <= 0) {
@@ -470,6 +499,11 @@ final class CompilerOracle
      * nothing). stdio is NUL rather than a pipe, so reaping the helper never
      * waits for that child.
      *
+     * proc_terminate() only kills the direct cmd.exe; its ping child would
+     * stay behind for the rest of the armed delay (nearly the full compile
+     * timeout, so up to two minutes per call) and would accumulate across
+     * calls. The whole tree is killed with taskkill /T before reaping.
+     *
      * @param array{process: resource, sentinel: string}|null $watchdog
      */
     private static function disarmWatchdog(?array $watchdog): void
@@ -478,6 +512,12 @@ final class CompilerOracle
             return;
         }
         @unlink($watchdog['sentinel']);
+        $status = @proc_get_status($watchdog['process']);
+        $pid = is_array($status) && isset($status['pid']) ? (int) $status['pid'] : 0;
+        if ($pid > 0) {
+            $discard = [];
+            @exec('taskkill /PID ' . $pid . ' /T /F 2>nul', $discard, $discardCode);
+        }
         @proc_terminate($watchdog['process'], 9);
         @proc_close($watchdog['process']);
     }

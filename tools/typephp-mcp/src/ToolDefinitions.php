@@ -12,14 +12,14 @@ final class ToolDefinitions
         return [
             [
                 'name' => 'check_code',
-                'description' => "Validate a PHP file or project.yml with the TypePHP compiler (`tpc --dry`, C++ generation only; link errors are not covered). Returns diagnostics with file:line, or OK. ALWAYS call this before submitting TypePHP code.\n\n"
+                'description' => "Validate a single PHP file with the TypePHP compiler (`tpc --dry`, C++ generation only; link errors are not covered). Returns diagnostics with file:line, or OK. ALWAYS call this before submitting TypePHP code.\n\n"
                     . Restrictions::summary(),
                 'inputSchema' => [
                     'type' => 'object',
                     'properties' => [
                         'path' => [
                             'type' => 'string',
-                            'description' => 'Absolute path to a .php file or project.yml, or a path relative to the repository root.',
+                            'description' => 'Absolute path to a .php file, or a path relative to the repository root. Only .php files are accepted: project.yml and directory inputs would let tpc parse the project configuration, which can start a real runtime build (php-builder) even in dry-run.',
                         ],
                     ],
                     'required' => ['path'],

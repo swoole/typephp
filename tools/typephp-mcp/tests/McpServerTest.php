@@ -232,6 +232,29 @@ final class McpServerTest extends TestCase
         }
     }
 
+    public function testCheckCodeRejectsNonPhpInputs(): void
+    {
+        // tpc parses project configuration for directory and project.yml
+        // inputs, and a `php-builder: {}` entry reaches SapiPhpBuilder even
+        // under --dry (prepare() runs before the dry-run return), starting a
+        // real php-src build on the user's machine. check_code must accept
+        // only .php files, which keep tpc in single-file mode: no YAML is
+        // parsed and the builder path is unreachable.
+        foreach (['project.yml', 'examples/qt-taskboard'] as $path) {
+            $reply = $this->request((string) json_encode([
+                'jsonrpc' => '2.0',
+                'id' => 1,
+                'method' => 'tools/call',
+                'params' => ['name' => 'check_code', 'arguments' => ['path' => $path]],
+            ]));
+            self::assertTrue($reply['result']['isError'] ?? false, "$path must be a tool error");
+            self::assertStringContainsString(
+                'only accepts a PHP source file',
+                (string) ($reply['result']['content'][0]['text'] ?? ''),
+                "$path rejection must explain why"
+            );
+        }
+    }
     public function testCheckCodeMissingFileIsAToolError(): void
     {
         // A missing path is a tool-execution failure, not a check result:
@@ -648,6 +671,118 @@ PHP;
         }
     }
 
+    public function testWatchdogCreationFailureFailsFastAndReapsTheCompiler(): void
+    {
+        // The watchdog is the only thing that can end a silent compiler on
+        // Windows, where a blocked pipe read ignores its timeout. If it cannot
+        // be created, running unprotected means the call returns only when the
+        // child finishes (measured: a 1 s budget "timed out" at 4.2 s). The
+        // call must fail fast and reap the child instead.
+        if (stripos(PHP_OS, 'WIN') !== 0) {
+            self::markTestSkipped('the watchdog only exists on Windows');
+        }
+        $sandbox = $this->makeSandbox();
+        $marker = $sandbox . '/finished.marker';
+        $this->sandboxWrite($sandbox, 'silent.php', <<<'PHP'
+<?php
+usleep(5000000);
+file_put_contents(getenv('TYPEPHP_FAKE_MARKER'), "finished\n");
+PHP);
+        // sys_temp_dir is process-wide, so the unprotected read has to be
+        // provoked in a child process; the child reports its own verdict.
+        $this->sandboxWrite($sandbox, 'probe.php', <<<'PHP'
+<?php
+require getenv('TYPEPHP_SRC') . '/Config.php';
+require getenv('TYPEPHP_SRC') . '/TextUtil.php';
+require getenv('TYPEPHP_SRC') . '/Restrictions.php';
+require getenv('TYPEPHP_SRC') . '/RepoRoot.php';
+require getenv('TYPEPHP_SRC') . '/CompilerOracle.php';
+$method = new ReflectionMethod(CompilerOracle::class, 'runProcess');
+$start = microtime(true);
+try {
+    $method->invoke(null, escapeshellarg(getenv('TYPEPHP_FAKE_PHP')) . ' ' . escapeshellarg(getenv('TYPEPHP_FAKE_STUB')), 1, 8192);
+    fwrite(STDOUT, "returned-without-error\n");
+    exit(1);
+} catch (Throwable $error) {
+    $elapsed = microtime(true) - $start;
+    fwrite(STDOUT, sprintf("elapsed=%.2f msg=%s\n", $elapsed, strtok($error->getMessage(), "\n")));
+    $ok = $elapsed < 3.0 && str_contains($error->getMessage(), 'watchdog could not be created');
+    exit($ok ? 0 : 1);
+}
+PHP);
+        $broken = $sandbox . '/broken-temp-dir-that-does-not-exist';
+        $previousMarker = getenv('TYPEPHP_FAKE_MARKER');
+        $previousSrc = getenv('TYPEPHP_SRC');
+        $previousPhp = getenv('TYPEPHP_FAKE_PHP');
+        $previousStub = getenv('TYPEPHP_FAKE_STUB');
+        try {
+            // The probe reads its inputs from the environment, which exec()
+            // passes on; -d sys_temp_dir then applies to the probe process,
+            // where the watchdog is armed.
+            putenv('TYPEPHP_SRC=' . $this->root->path() . '/tools/typephp-mcp/src');
+            putenv('TYPEPHP_FAKE_PHP=' . PHP_BINARY);
+            putenv('TYPEPHP_FAKE_STUB=' . $sandbox . '/silent.php');
+            putenv('TYPEPHP_FAKE_MARKER=' . $marker);
+            $output = [];
+            $code = 0;
+            @exec(
+                escapeshellarg(PHP_BINARY)
+                . ' -d sys_temp_dir=' . escapeshellarg($broken)
+                . ' ' . escapeshellarg($sandbox . '/probe.php'),
+                $output,
+                $code
+            );
+            $detail = implode("\n", $output);
+            self::assertSame(0, $code, 'unexpected failure: ' . $detail);
+            self::assertStringContainsString('watchdog could not be created', $detail);
+            // The 5 s stand-in would write this marker had it survived. It must
+            // not: the fast-failure path reaps the compiler before reporting.
+            sleep(1);
+            self::assertFileDoesNotExist($marker, 'the compiler survived the watchdog creation failure');
+        } finally {
+            if ($previousMarker === false) { putenv('TYPEPHP_FAKE_MARKER'); } else { putenv('TYPEPHP_FAKE_MARKER=' . $previousMarker); }
+            if ($previousSrc === false) { putenv('TYPEPHP_SRC'); } else { putenv('TYPEPHP_SRC=' . $previousSrc); }
+            if ($previousPhp === false) { putenv('TYPEPHP_FAKE_PHP'); } else { putenv('TYPEPHP_FAKE_PHP=' . $previousPhp); }
+            if ($previousStub === false) { putenv('TYPEPHP_FAKE_STUB'); } else { putenv('TYPEPHP_FAKE_STUB=' . $previousStub); }
+            $this->removeDir($sandbox);
+        }
+    }
+
+    public function testDisarmWatchdogLeavesNoPingChildBehind(): void
+    {
+        // proc_terminate() only kills the direct cmd.exe on Windows; the ping
+        // child survives for the rest of the armed delay (nearly the compile
+        // timeout, so up to two minutes) and accumulates across calls.
+        if (stripos(PHP_OS, 'WIN') !== 0) {
+            self::markTestSkipped('the watchdog only exists on Windows');
+        }
+        $pingPids = static function (): array {
+            $output = [];
+            @exec('tasklist /FI "IMAGENAME eq PING.EXE" /NH /FO CSV 2>nul', $output);
+            $pids = [];
+            foreach ($output as $line) {
+                $fields = str_getcsv((string) $line);
+                if (count($fields) >= 2 && ctype_digit((string) $fields[1])) {
+                    $pids[] = (int) $fields[1];
+                }
+            }
+            return $pids;
+        };
+        $before = $pingPids();
+        $arm = new ReflectionMethod(CompilerOracle::class, 'armWatchdog');
+        $disarm = new ReflectionMethod(CompilerOracle::class, 'disarmWatchdog');
+
+        $watchdog = $arm->invoke(null, getmypid(), 8);
+        self::assertNotNull($watchdog, 'the watchdog could not be armed');
+        usleep(700000);
+        $armed = array_values(array_diff($pingPids(), $before));
+        self::assertNotSame([], $armed, 'the watchdog did not start a ping child');
+
+        $disarm->invoke(null, $watchdog);
+        usleep(700000);
+        $surviving = array_values(array_intersect($pingPids(), $armed));
+        self::assertSame([], $surviving, 'the ping child survived disarm: ' . implode(',', $surviving));
+    }
     public function testTimeoutKillsASigtermIgnoringDirectChild(): void
     {
         // terminateTree() must SIGKILL the direct child after the grace

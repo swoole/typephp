@@ -73,6 +73,18 @@ final class CompilerOracle
                 'File not found: ' . $file . "\nPass an absolute path, or a path relative to the repo root."
             );
         }
+        // Always hand the compiler an absolute, fully resolved path: it runs
+        // with cwd set to the file's directory (see below), where a path
+        // relative to the server's cwd would no longer resolve.
+        //
+        // Realpath must come BEFORE the type check. An alias.php symlink to
+        // project.yml passes a suffix test on the given path while the
+        // compiler would open the YAML, re-entering exactly the project
+        // configuration path this tool must not take.
+        $absolute = realpath($resolved);
+        if (is_string($absolute) && $absolute !== '') {
+            $resolved = $absolute;
+        }
         // Only single-file checks are allowed. Directory and project.yml
         // inputs make tpc parse the project configuration, where `php-builder:
         // {}` reaches SapiPhpBuilder even under --dry (prepare() runs before
@@ -80,6 +92,8 @@ final class CompilerOracle
         // uncontrolled make/cmake this tool must never trigger (AGENTS.md).
         // A .php file keeps tpc in single-file mode: no YAML is parsed, and
         // the php-builder path is unreachable (verified by interception).
+        // The check uses the resolved target, so a symlink cannot smuggle a
+        // non-PHP file past it.
         $extension = strtolower(pathinfo($resolved, PATHINFO_EXTENSION));
         if (!is_file($resolved) || $extension !== 'php') {
             throw new CompilerOracleToolFailure(
@@ -87,13 +101,6 @@ final class CompilerOracle
                 . 'Pass a .php file. Directory and project.yml inputs are rejected because tpc would parse the'
                 . ' project configuration, which can start a real runtime build (php-builder) even under --dry.'
             );
-        }
-        // Always hand the compiler an absolute path: it runs with cwd set to
-        // the file's directory (see below), where a path relative to the
-        // server's cwd would no longer resolve.
-        $absolute = realpath($resolved);
-        if (is_string($absolute) && $absolute !== '') {
-            $resolved = $absolute;
         }
 
         // Resolving the compiler also validates that one is reachable at all

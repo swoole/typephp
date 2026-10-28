@@ -255,6 +255,65 @@ final class McpServerTest extends TestCase
             );
         }
     }
+    public function testCheckCodeResolvesSymlinksBeforeTheTypeCheck(): void
+    {
+        // The suffix check must run on the resolved target. An alias.php
+        // symlink to project.yml passes a check on the given path while the
+        // compiler opens the YAML, re-entering the project-configuration path
+        // (php-builder) this tool must not take. The rejection has to happen
+        // before the compiler is started at all.
+        $sandbox = $this->makeSandbox();
+        $yaml = $sandbox . '/project.yml';
+        file_put_contents($yaml, "php-builder: {}\n");
+        $real = $sandbox . '/real.php';
+        file_put_contents($real, "<?php\nfunction main(): int\n{\n    return 0;\n}\n");
+        $aliasYaml = $sandbox . '/alias.php';
+        $aliasPhp = $sandbox . '/good.php';
+        if (!@symlink($yaml, $aliasYaml) || !@symlink($real, $aliasPhp)) {
+            $this->removeDir($sandbox);
+            self::markTestSkipped('cannot create symlinks in this environment');
+        }
+
+        $log = $sandbox . '/calls.log';
+        $previousLog = getenv('TYPEPHP_FAKE_CALL_LOG');
+        putenv('TYPEPHP_FAKE_CALL_LOG=' . $log);
+        try {
+            $this->withFakeCompiler('record-call', function (McpServer $server) use ($aliasYaml, $aliasPhp, $log): array {
+                $reply = json_decode((string) $server->handleLine((string) json_encode([
+                    'jsonrpc' => '2.0',
+                    'id' => 1,
+                    'method' => 'tools/call',
+                    'params' => ['name' => 'check_code', 'arguments' => ['path' => $aliasYaml]],
+                ])), true);
+                self::assertTrue($reply['result']['isError'] ?? false, 'a .php symlink to YAML must be rejected');
+                self::assertStringContainsString(
+                    'only accepts a PHP source file',
+                    (string) ($reply['result']['content'][0]['text'] ?? '')
+                );
+                self::assertFileDoesNotExist($log, 'the compiler was started for a symlink to YAML');
+
+                $reply = json_decode((string) $server->handleLine((string) json_encode([
+                    'jsonrpc' => '2.0',
+                    'id' => 2,
+                    'method' => 'tools/call',
+                    'params' => ['name' => 'check_code', 'arguments' => ['path' => $aliasPhp]],
+                ])), true);
+                self::assertStringStartsWith(
+                    'OK stage=generate',
+                    (string) ($reply['result']['content'][0]['text'] ?? ''),
+                    'a .php symlink to a real PHP file must be checked normally'
+                );
+                // The compiler receives the resolved target, not the alias.
+                $calls = is_file($log) ? trim((string) file_get_contents($log)) : '';
+                self::assertStringContainsString('real.php', $calls, 'the compiler must see the resolved path');
+                self::assertStringNotContainsString('good.php', $calls);
+                return [];
+            });
+        } finally {
+            if ($previousLog === false) { putenv('TYPEPHP_FAKE_CALL_LOG'); } else { putenv('TYPEPHP_FAKE_CALL_LOG=' . $previousLog); }
+            $this->removeDir($sandbox);
+        }
+    }
     public function testCheckCodeMissingFileIsAToolError(): void
     {
         // A missing path is a tool-execution failure, not a check result:
@@ -483,6 +542,12 @@ switch ($mode) {
     case 'user-code-error':
         fwrite(STDERR, "Fatal error: Unsupported statement: Stmt_Echo in $argv[2]:2\n");
         exit(1);
+    case 'record-call':
+        // Records every real invocation so a test can prove the
+        // compiler was never started for a rejected path.
+        file_put_contents((string) getenv('TYPEPHP_FAKE_CALL_LOG'), json_encode(array_slice($argv, 1)) . "\n", FILE_APPEND);
+        echo "Dry run completed\n";
+        exit(0);
     case 'slow':
         sleep(30);
         echo "Dry run completed\n";

@@ -12,6 +12,7 @@ use Closure;
 use PhpParser\Node;
 use PhpParser\Node\Stmt;
 use PhpParser\NodeVisitorAbstract;
+use TypePhp\CompileTimeAttribute\Expansion;
 use TypePhp\Exception\CompileTimeAttributeError;
 use TypePhp\Exception\SyntaxError;
 use TypePhp\Diagnostics\CompileTimeAttributeDiagnostic;
@@ -194,6 +195,7 @@ class Visitor extends NodeVisitorAbstract
                 $this->guard($node, static fn () => ArrayableLowering::lowerClass($node), 'Arrayable');
             }
         }
+        $this->guard($node, fn () => Expansion::apply($node, $this->sourceFile));
         return null;
     }
 

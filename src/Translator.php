@@ -38,6 +38,8 @@ use TypePhp\Build\PhpBuilderConfiguration;
 use TypePhp\Build\PhpSourceExtensionIndex;
 use TypePhp\Build\PrecompiledHeaderManager;
 use TypePhp\Build\ResourceCompilationTrait;
+use TypePhp\CompileTimeAttribute\ProviderBootstrap;
+use TypePhp\CompileTimeAttribute\ProviderTable;
 use TypePhp\Build\SapiApplicationLinker;
 use TypePhp\Build\SapiBuildConfiguration;
 use TypePhp\Build\SourceCompileQueue;
@@ -4419,6 +4421,42 @@ CODE;
             );
     }
 
+    /** @param array<string, mixed> $cfg */
+    private function configureCompileTimeAttributeProviders(array $cfg, string $projectDir): void
+    {
+        if (!array_key_exists('compile-time-attributes', $cfg)) {
+            return;
+        }
+        $config = $cfg['compile-time-attributes'];
+        if (!is_array($config)) {
+            $this->error('`compile-time-attributes` must be a map');
+        }
+        foreach (array_keys($config) as $key) {
+            if ($key !== 'providers') {
+                $this->error('Unknown key `' . $key . '` in `compile-time-attributes`');
+            }
+        }
+        $providers = $config['providers'] ?? [];
+        if (!is_array($providers)) {
+            $this->error('`compile-time-attributes.providers` must be a list');
+        }
+        try {
+            ProviderBootstrap::install($providers, $projectDir, 'compile-time-attributes.providers');
+        } catch (SyntaxError $error) {
+            $this->error($error->getMessage());
+        }
+        foreach (ProviderTable::all() as $definition) {
+            $sourceDirs = $this->sourceDirs === [] ? [$projectDir] : $this->sourceDirs;
+            foreach ($sourceDirs as $sourceDir) {
+                if (is_dir($sourceDir) && str_starts_with($definition->file, rtrim($sourceDir, '/') . '/')) {
+                    $this->error(
+                        'Provider file `' . $definition->file . '` must live outside `sources`',
+                    );
+                }
+            }
+        }
+    }
+
     protected function parseProjectYaml(string $path): array
     {
         $cfg = $this->getProjectYamlLoader()->load($path);
@@ -4516,6 +4554,8 @@ CODE;
         } else {
             $list = $this->getFilesFromDir($projectDir);
         }
+
+        $this->configureCompileTimeAttributeProviders($cfg, $projectDir);
 
         // Raw files are embedded; PHP files not emitted by `sources` are also
         // compiled into OPcache blobs for ZendVM execution at runtime.

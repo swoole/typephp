@@ -207,6 +207,14 @@ final class CompileTimeAttribute
             && $node instanceof Node\Stmt\ClassLike) {
             return true;
         }
+        if (in_array(CompileTimeAttributeRegistry::TARGET_TRAIT, $targets, true)
+            && $node instanceof Node\Stmt\Trait_) {
+            return true;
+        }
+        if (in_array(CompileTimeAttributeRegistry::TARGET_ENUM, $targets, true)
+            && $node instanceof Node\Stmt\Enum_) {
+            return true;
+        }
         if (in_array(CompileTimeAttributeRegistry::TARGET_FUNCTION, $targets, true)
             && $node instanceof Node\Stmt\Function_) {
             return true;

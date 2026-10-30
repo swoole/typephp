@@ -131,6 +131,17 @@ PHP,
                 ['clamped' => "\$g->property()->setter('{{call}}');"],
                 'only classes support generated property hooks',
             ],
+            'enum generated property' => [
+                <<<'PHP'
+#[Tagged]
+enum Grade
+{
+    case A;
+}
+PHP,
+                ['tagged' => "\$g->member('public int \$x = 0;');"],
+                'generated property $x cannot be added to enum Reject\Grade',
+            ],
             'virtual getter on defaulted property' => [
                 <<<'PHP'
 final class SubjectVirtualGetter
@@ -239,6 +250,11 @@ final class Logged
 {
 }
 
+#[Attribute(Attribute::TARGET_CLASS)]
+final class Tagged
+{
+}
+
 {$declaration}
 PHP;
     }
@@ -248,7 +264,11 @@ PHP;
     {
         $classes = '';
         foreach ($providers as $annotation => $statement) {
-            $target = $annotation === 'audited' ? 'class' : 'property';
+            $target = match ($annotation) {
+                'audited' => 'class',
+                'tagged' => 'enum',
+                default => 'property',
+            };
             $name = ucfirst($annotation);
             $class = $name . 'Provider' . $suffix;
             $classes .= <<<PHP

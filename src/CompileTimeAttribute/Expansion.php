@@ -250,6 +250,14 @@ final class Expansion
                 $members[] = ['source' => $source, 'site' => $site['site']->describe()];
                 continue;
             }
+            if ($member instanceof Stmt\Property && HostView::kind($node) === 'enum') {
+                $errors[] = $site['site']->format(sprintf(
+                    'generated property $%s cannot be added to enum %s; enums cannot declare properties',
+                    $member->props[0]->name->toString(),
+                    HostView::fqcn($node),
+                ));
+                continue;
+            }
             if (isset($memberLines[$key])) {
                 $errors[] = $site['site']->format(sprintf(
                     'generated member `%s` collides with another generated member requested at %s:%d',

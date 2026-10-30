@@ -1,0 +1,17 @@
+name: compile_time_attribute_demo
+mode: bin
+output: attribute_demo
+sources:
+  - src
+compile-time-attributes:
+  providers:
+    - file: providers/Entity.php
+    - file: providers/Audited.php
+    - file: providers/Clamped.php
+    - file: providers/Trimmed.php
+    - file: providers/Surcharge.php
+    - file: providers/Derived.php
+    - file: providers/Traced.php
+    - file: providers/Stamp.php
+    - file: providers/Described.php
+    - file: providers/Labelled.php

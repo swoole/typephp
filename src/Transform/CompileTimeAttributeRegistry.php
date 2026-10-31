@@ -19,6 +19,8 @@ final class CompileTimeAttributeRegistry
     public const TARGET_PROPERTY = 'property';
     public const TARGET_DECLARED_PROPERTY = 'declared_property';
     public const TARGET_PARAMETER = 'parameter';
+    public const TARGET_TRAIT = 'trait';
+    public const TARGET_ENUM = 'enum';
 
     public const ARGUMENTS_NONE = 'none';
     public const ARGUMENTS_METHODS_FOR = 'methods_for';
@@ -26,11 +28,45 @@ final class CompileTimeAttributeRegistry
     public const ARGUMENTS_VALIDATE = 'validate';
     public const ARGUMENTS_WASM_EXPORT = 'wasm_export';
     public const ARGUMENTS_STD_CONTAINER = 'std_container';
+    public const ARGUMENTS_PROVIDER = 'provider';
 
     public const PHASE_PREPROCESS = 'preprocess';
     public const PHASE_ENTER = 'enter';
     public const PHASE_FUNCTION_LEAVE = 'function_leave';
     public const PHASE_CLASS_LEAVE = 'class_leave';
+    public const PHASE_PROVIDER = 'provider';
+
+    /** @var array<string, array<string, mixed>> */
+    private static array $providers = [];
+
+    /** @var ?array<string, array<string, mixed>> */
+    private static ?array $merged = null;
+
+    public static function all(): array
+    {
+        if (self::$providers === []) {
+            return self::buildBuiltins();
+        }
+
+        return self::$merged ??= array_replace(self::buildBuiltins(), self::$providers);
+    }
+
+    public static function registerProvider(array $definition): void
+    {
+        self::$providers[strtolower(ltrim($definition['name'], '\\'))] = $definition;
+        self::$merged = null;
+    }
+
+    public static function resetProviders(): void
+    {
+        self::$providers = [];
+        self::$merged = null;
+    }
+
+    public static function hasBuiltin(string $name): bool
+    {
+        return isset(self::buildBuiltins()[strtolower(ltrim($name, '\\'))]);
+    }
 
     /**
      * @return array<string, array{
@@ -44,7 +80,7 @@ final class CompileTimeAttributeRegistry
      *     preserve_in_library_stub: bool
      * }>
      */
-    public static function all(): array
+    private static function buildBuiltins(): array
     {
         static $definitions = null;
         if ($definitions !== null) {

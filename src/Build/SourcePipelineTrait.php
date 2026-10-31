@@ -11,6 +11,7 @@ namespace TypePhp\Build;
 use Ajaxray\AnsiKit\AnsiTerminal;
 use Ajaxray\AnsiKit\Components\Progressbar;
 use TypePhp\Backend\CompilerFactory;
+use TypePhp\CompileTimeAttribute\ProviderTable;
 use TypePhp\Exception\SyntaxError;
 use TypePhp\Exception\Unsupported;
 use TypePhp\Installer\InteractiveConsole;
@@ -468,6 +469,7 @@ trait SourcePipelineTrait
 
     public function getFiles(string $path): array
     {
+        ProviderTable::reset();
         $this->applyPhpVersionCommandLineArgument();
         $projectPath = realpath($path);
         if ($projectPath === false) {
@@ -512,6 +514,9 @@ trait SourcePipelineTrait
 
     private function validateLoadedProjectConfiguration(): void
     {
+        if ($this->isBuildModeLib() && ProviderTable::active()) {
+            $this->error('`compile-time-attributes` is not supported with `mode: lib`');
+        }
         if ($this->sapiConfigured && !$this->isBuildModeBin()) {
             $this->error('`sapi` is only supported with `mode: bin`');
         }

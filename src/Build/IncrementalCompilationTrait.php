@@ -2,6 +2,8 @@
 
 namespace TypePhp\Build;
 
+use TypePhp\CompileTimeAttribute\ProviderTable;
+
 /** Project-level incremental planning kept separate from the language parser. */
 trait IncrementalCompilationTrait
 {
@@ -422,6 +424,9 @@ trait IncrementalCompilationTrait
             'literalStrings' => !$this->noLiteralStrings,
             'debug' => $this->debug,
         ]));
+        if (ProviderTable::fingerprint() !== '') {
+            hash_update($context, 'compile-time-attribute-providers:' . ProviderTable::fingerprint());
+        }
 
         // New self-hosted compiler builds embed their immutable source snapshot.
         // Reading and hashing a 20+ MB executable on every tiny build costs more

@@ -11,6 +11,7 @@ use TypePhp\Type;
 
 use PhpParser\Node\ArrayItem;
 use PhpParser\Node\Expr;
+use PhpParser\Node\Scalar\Int_;
 use PhpParser\Node\Stmt\Foreach_;
 
 trait ForeachTrait
@@ -26,19 +27,20 @@ trait ForeachTrait
                 if ($item->byRef) {
                     $this->fatalError($item, 'Foreach list destructuring cannot bind items by reference');
                 }
-                $key = $item->key ? $this->parseArrayKey($item->key, true) : (string) $k;
                 if ($item->value instanceof Expr\List_) {
+                    $key = $item->key ? $this->parseArrayKey($item->key, true) : (string) $k;
                     $nestedTmpVar = $this->genTmpVarName();
                     $this->addLocalVar($nestedTmpVar, Type::VAR);
                     $code .= $this->getIndent() . $nestedTmpVar . ' = ' . $listTmpVar . '.item(' . $key . ');' . PHP_EOL;
                     $code .= $this->parseForeachItemAsList($nestedTmpVar, $item->value->items);
                     continue;
                 }
-                $var = $this->parseWritableIdentifier($item->value);
-                if ($this->isVarExpr($item->value) and !$this->hasVar($var)) {
-                    $this->addLocalVar($var, Type::VAR);
-                }
-                $code .= $this->getIndent() . $var . ' = ' . $listTmpVar . '.item(' . $key . ');' . PHP_EOL;
+                $value = new Expr\ArrayDimFetch(
+                    new Expr\Variable($listTmpVar, $item->getAttributes()),
+                    $item->key ?? new Int_($k, $item->getAttributes()),
+                    $item->getAttributes(),
+                );
+                $code .= $this->getIndent() . $this->parseDestructuringWrite($item->value, $value) . ';' . PHP_EOL;
             } else {
                 $this->fatalError($item, 'Unsupported foreach item type');
             }

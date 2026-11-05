@@ -112,6 +112,20 @@ final class VarIntTypesTest extends BaseTest
         self::assertStringContainsString('php::toInt(', $code);
     }
 
+    public function testForeachDestructuringConvertsExistingNativeTargets(): void
+    {
+        $code = $this->compileSource(
+            $this->createCompiler(),
+            TYPEPHP_ROOT_PATH . '/phpunit/code/foreach-destructuring-native-reuse.php',
+        );
+
+        foreach (['integer' => 'Int', 'floating' => 'Float', 'boolean' => 'Bool'] as $name => $conversion) {
+            self::assertMatchesRegularExpression('/' . $name . ' = php::to' . $conversion . '\([^;]+\.item\(/', $code);
+        }
+        self::assertStringContainsString('php::Str string', $code);
+        self::assertSame(2, preg_match_all('/integer = php::toInt\([^;]+\.item\(/', $code));
+    }
+
     private function createCompiler(): CompilerTest
     {
         global $translator;

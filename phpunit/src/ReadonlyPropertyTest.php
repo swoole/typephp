@@ -41,6 +41,7 @@ class ReadonlyPropertyTest extends \BaseTest
             'readonly-write-coalesce.php',
             'readonly-write-list.php',
             'readonly-write-foreach.php',
+            'readonly-write-foreach-list.php',
         ] as $file) {
             $this->exec('only supports direct assignment', $file);
         }

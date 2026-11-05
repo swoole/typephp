@@ -302,22 +302,8 @@ trait AssignOpTrait
                         . $this->parseAssignToList($item->value, $itemExpr)
                         . PHP_EOL;
                 } else {
-                    // Destructuring is an indirect write form. It must not
-                    // inherit the direct-assignment initialization exception
-                    // for readonly properties.
-                    $writeTarget = $item->value;
-                    while ($writeTarget instanceof Expr\ArrayDimFetch) {
-                        $writeTarget = $writeTarget->var;
-                    }
-                    if ($writeTarget instanceof Expr\PropertyFetch) {
-                        $this->preparePropertyWriteTarget($writeTarget, false);
-                    }
-                    // Route every destructuring target through the normal
-                    // assignment pipeline. Existing native locals remain
-                    // native and receive the usual scalar conversion, while
-                    // typed properties retain their runtime type checks.
                     $code .= $this->getIndent()
-                        . $this->parseAssignFinally($item->value, $itemExpr)
+                        . $this->parseDestructuringWrite($item->value, $itemExpr)
                         . ';' . PHP_EOL;
                 }
             } else {
@@ -327,6 +313,19 @@ trait AssignOpTrait
         $this->indentLevel--;
 
         return $code . $this->getIndent() . '}';
+    }
+
+    /** List assignment and foreach share indirect-write checks and conversions. */
+    protected function parseDestructuringWrite(Expr $target, Expr $value): string
+    {
+        $writeTarget = $target;
+        while ($writeTarget instanceof Expr\ArrayDimFetch) {
+            $writeTarget = $writeTarget->var;
+        }
+        if ($writeTarget instanceof Expr\PropertyFetch) {
+            $this->preparePropertyWriteTarget($writeTarget, false);
+        }
+        return $this->parseAssignFinally($target, $value);
     }
 
     protected function parseAssignFinally(

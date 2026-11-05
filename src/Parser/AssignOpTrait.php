@@ -1,21 +1,20 @@
 <?php
 /**
- * This file is part of TypePHP.
+ * This file is part of TypePHP(AOT).
  *
- * @link     https://www.swoole.com/
+ * @link     https://www.swoole.com/aot/
  * @contact  service@swoole.com
  */
 
 namespace TypePhp\Parser;
 
-use TypePhp\Type;
-
-use TypePhp\Resolver\PropertyWriteTarget;
 use PhpParser\Node;
 use PhpParser\Node\ArrayItem;
 use PhpParser\Node\Expr;
 use PhpParser\Node\Expr\Variable;
 use PhpParser\NodeAbstract;
+use TypePhp\Resolver\PropertyWriteTarget;
+use TypePhp\Type;
 
 trait AssignOpTrait
 {
@@ -23,8 +22,7 @@ trait AssignOpTrait
         NodeAbstract $left,
         NodeAbstract $right,
         bool $resultUnused = false,
-    ): string
-    {
+    ): string {
         if ($left instanceof Expr\ArrayDimFetch && $left->dim !== null) {
             $this->assertNotNativeObjectArrayKey($left->dim);
         }
@@ -94,8 +92,7 @@ trait AssignOpTrait
         NodeAbstract $right,
         ?PropertyWriteTarget $target = null,
         bool $resultUnused = false,
-    ): string
-    {
+    ): string {
         if ($target !== null) {
             $this->assertCanAssignPropertyWrite($target, $right);
         }
@@ -333,8 +330,7 @@ trait AssignOpTrait
         Expr $right,
         bool $foldIntoDeclaration = false,
         bool $resultUnused = false,
-    ): string
-    {
+    ): string {
         $this->assertImmutableMutationTarget($left);
         $this->recordImmutableAlias($left, $right);
         $typedArrayAssignment = $this->parseTypedArrayAssignment($left, $right);
@@ -860,7 +856,7 @@ trait AssignOpTrait
         } else {
             $this->addLocalVar($tmp, Type::VAR);
         }
-        $call = $this->emitPropertyHookSetterCall($left, $setter, new Expr\Variable($tmp));
+        $call = $this->emitPropertyHookSetterCall($left, $setter, new Variable($tmp));
         return '((' . $tmp . ' = ' . $rightExpr . ', ' . $call . '), ' . $tmp . ')';
     }
 
@@ -1034,7 +1030,7 @@ trait AssignOpTrait
                 '**' => 'php::fn::pow(' . $read . ', ' . $this->parseExprAsValue($node->expr) . ')',
                 default => $read . ' ' . $binaryOp . ' (' . $this->parseExprAsValue($node->expr) . ')',
             };
-            $call = $this->emitPropertyHookSetterCall($node->var, $setter, new Expr\Variable($tmp));
+            $call = $this->emitPropertyHookSetterCall($node->var, $setter, new Variable($tmp));
             return '((' . $tmp . ' = ' . $value . ', ' . $call . '), ' . $tmp . ')';
         }
 
@@ -1214,7 +1210,7 @@ trait AssignOpTrait
         }
 
         if ($this->isAssignOpConcat($op)) {
-            if (!($node->expr instanceof Expr\BinaryOp\Concat)) {
+            if (!$node->expr instanceof Expr\BinaryOp\Concat) {
                 return $var . '.append(' . $this->parseExprAsValue($node->expr) . ')';
             }
             return $var . ' = php::toString(' . $this->parseFlattenedConcat($node->expr, [$var]) . ')';
@@ -2421,7 +2417,7 @@ trait AssignOpTrait
 
     private function isCoalesceTargetTrivialSubexpr(Expr $expr): bool
     {
-        return $expr instanceof Expr\Variable
+        return $expr instanceof Variable
             || $expr instanceof Node\Scalar
             || $expr instanceof Expr\ConstFetch
             || $expr instanceof Expr\ClassConstFetch;
@@ -2431,8 +2427,7 @@ trait AssignOpTrait
         Expr $sub,
         bool $isReceiver,
         bool $writableContainer = false,
-    ): Expr\Variable
-    {
+    ): Variable {
         [$code, $before, $after] = $this->parseExprWithCapturedStmts($sub);
         $this->appendCapturedStmtLinesToContext($before);
 
@@ -2467,12 +2462,11 @@ trait AssignOpTrait
         // target's receiver/container at the end of the statement, and a
         // function-scoped Variant would defer destructors to function exit.
         $this->context->afterStmtLines[] = $cleanup;
-        return new Expr\Variable($tmp, $sub->getAttributes());
+        return new Variable($tmp, $sub->getAttributes());
     }
 
     protected function getNormalAssignType(string $type): string
     {
         return $type === Type::REF || $type === Type::VOID ? Type::VAR : $type;
     }
-
 }

@@ -1,18 +1,18 @@
 <?php
 /**
- * This file is part of TypePHP.
+ * This file is part of TypePHP(AOT).
  *
- * Lowers foreach iteration, destructuring, and by-reference value assignment.
+ * @link     https://www.swoole.com/aot/
+ * @contact  service@swoole.com
  */
 
 namespace TypePhp\Parser;
-
-use TypePhp\Type;
 
 use PhpParser\Node\ArrayItem;
 use PhpParser\Node\Expr;
 use PhpParser\Node\Scalar\Int_;
 use PhpParser\Node\Stmt\Foreach_;
+use TypePhp\Type;
 
 trait ForeachTrait
 {
@@ -141,8 +141,7 @@ trait ForeachTrait
         Foreach_ $node,
         string $iterableVar,
         bool $allowDirectArrayTargets = false,
-    ): string
-    {
+    ): string {
         $iterator = $this->genTmpVarName();
         $byRef = $node->byRef ? 'true' : 'false';
         $scope = $this->class ? $this->getLocalClassEntryPtr($this->getFullClassName()) : 'nullptr';
@@ -160,15 +159,15 @@ trait ForeachTrait
 
         $code = '{' . PHP_EOL;
         $this->indentLevel++;
-        $code .= $this->getIndent() . "php::ForeachIterator $iterator{{$iterableVar}, $byRef, $scope};" . PHP_EOL;
+        $code .= $this->getIndent() . "php::ForeachIterator {$iterator}{{$iterableVar}, {$byRef}, {$scope}};" . PHP_EOL;
         if ($directValue !== null) {
             $next = $directKey === null
-                ? "$iterator.nextValue($directValue)"
-                : "$iterator.nextKeyValue($directKey, $directValue)";
+                ? "{$iterator}.nextValue({$directValue})"
+                : "{$iterator}.nextKeyValue({$directKey}, {$directValue})";
         } else {
-            $next = "$iterator.next()";
+            $next = "{$iterator}.next()";
         }
-        $code .= $this->getIndent() . "while ($next) {" . PHP_EOL;
+        $code .= $this->getIndent() . "while ({$next}) {" . PHP_EOL;
         $this->indentLevel++;
 
         if ($directValue === null) {
@@ -270,5 +269,4 @@ trait ForeachTrait
 
         return $code;
     }
-
 }

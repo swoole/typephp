@@ -1,6 +1,16 @@
 <?php
+/**
+ * This file is part of TypePHP(AOT).
+ *
+ * @link     https://www.swoole.com/aot/
+ * @contact  service@swoole.com
+ */
 
-class ReadonlyPropertyTest extends \BaseTest
+/**
+ * @internal
+ * @coversNothing
+ */
+class ReadonlyPropertyTest extends BaseTest
 {
     public function testDirectInitializationIsAllowedOutsideConstructor(): void
     {

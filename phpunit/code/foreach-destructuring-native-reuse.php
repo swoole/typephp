@@ -1,5 +1,17 @@
 <?php
+/**
+ * This file is part of TypePHP(AOT).
+ *
+ * @link     https://www.swoole.com/aot/
+ * @contact  service@swoole.com
+ */
 
+/**
+ * This file is part of TypePHP(AOT).
+ *
+ * @see     https://www.swoole.com/aot/
+ * @contact  service@swoole.com
+ */
 function foreachDestructuringNativeReuse(array $rows): void
 {
     $integer = 0;

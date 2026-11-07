@@ -774,14 +774,7 @@ trait AssignOpTrait
         if ($propertyWriteTarget !== null && ($propertyDef = $this->getNativePropertyDef($left)) !== null) {
             $effectiveRightType = $rightExprType === Type::VAR && $this->getFixedPropertyTypeCheckHelper($propertyDef) !== null
                 ? $propertyDef->type
-                : $rightExprType;
-            if ($rightExprType !== Type::VAR
-                && ($right instanceof Expr\PropertyFetch || $right instanceof Expr\StaticPropertyFetch)) {
-                // A declared PHP scalar property can still be read through a
-                // Zend Variant. Use its lowered storage, not its declaration,
-                // when converting into the destination's native scalar slot.
-                $effectiveRightType = $this->getOrderedOperandTmpType($right, $rightExpr);
-            }
+                : $this->resolveNativePropertyRightStorageType($right, $rightExpr, $rightExprType);
             return $var . ' = ' . $this->convertNativePropertyWriteExpr($propertyDef->type, $effectiveRightType, $rightExpr);
         }
         $rawAssignedType = $this->getRawVarType($var);
@@ -1215,6 +1208,14 @@ trait AssignOpTrait
             }
             return $var . ' = php::toString(' . $this->parseFlattenedConcat($node->expr, [$var]) . ')';
         }
+        if ($node->var instanceof Expr\StaticPropertyFetch
+            && ($def = $this->getNativePropertyDef($node->var)) !== null
+            && $this->isNativePropertyTypedValue($node->var)
+        ) {
+            $rightType = $this->detectTypeOfExpr($node->expr);
+            $effectiveRightType = $this->resolveNativePropertyRightStorageType($node->expr, $expr, $rightType);
+            $expr = $this->convertNativePropertyWriteExpr($def->type, $effectiveRightType, $expr);
+        }
         return $var . ' ' . $op . ' (' . $expr . ')';
     }
 
@@ -1393,13 +1394,63 @@ trait AssignOpTrait
         }
         $effectiveRightType = $rightType === Type::VAR && $this->getFixedPropertyTypeCheckHelper($def) !== null
             ? $def->type
-            : $rightType;
+            : $this->resolveNativePropertyRightStorageType($node->expr, $rightExpr, $rightType);
 
         return $this->promoteNativeObjectPropertyValue(
             $def,
             $var . ' ' . $op . ' ('
                 . $this->convertNativePropertyWriteExpr($def->type, $effectiveRightType, $rightExpr) . ')',
         );
+    }
+
+    protected function resolveNativePropertyRightStorageType(Expr $right, string $rightExpr, string $rightExprType): string
+    {
+        if ($rightExprType === Type::VAR) {
+            return Type::VAR;
+        }
+        if ($this->expressionLowersToVariantStorage($right, $rightExpr)) {
+            return Type::VAR;
+        }
+        return $rightExprType;
+    }
+
+    protected function expressionLowersToVariantStorage(NodeAbstract $expr, ?string $renderedExpr = null): bool
+    {
+        if ($expr instanceof Expr\PropertyFetch || $expr instanceof Expr\StaticPropertyFetch) {
+            return $this->getOrderedOperandTmpType($expr, $renderedExpr ?? '') === Type::VAR;
+        }
+        if ($this->getLoweredExpressionType($expr) === Type::VAR) {
+            return true;
+        }
+        if ($expr instanceof Variable && is_string($expr->name) && $this->hasVar($expr->name)) {
+            return $this->getVarType($expr->name) === Type::VAR;
+        }
+        if ($renderedExpr !== null && $this->hasVar($renderedExpr) && $this->getVarType($renderedExpr) === Type::VAR) {
+            return true;
+        }
+        if ($expr instanceof Expr\ArrayDimFetch) {
+            return true;
+        }
+        if ($expr instanceof Expr\UnaryMinus || $expr instanceof Expr\UnaryPlus || $expr instanceof Expr\BitwiseNot) {
+            return $this->expressionLowersToVariantStorage($expr->expr);
+        }
+        if ($expr instanceof Expr\BinaryOp && !$expr instanceof Expr\BinaryOp\Concat) {
+            return $this->expressionLowersToVariantStorage($expr->left)
+                || $this->expressionLowersToVariantStorage($expr->right);
+        }
+        if ($expr instanceof Expr\Ternary) {
+            if ($expr->if === null) {
+                return $this->expressionLowersToVariantStorage($expr->cond)
+                    || $this->expressionLowersToVariantStorage($expr->else);
+            }
+            $lowered = $this->getLoweredExpressionType($expr);
+            if ($lowered !== null && $lowered !== Type::VAR) {
+                return false;
+            }
+            return $this->expressionLowersToVariantStorage($expr->if)
+                || $this->expressionLowersToVariantStorage($expr->else);
+        }
+        return false;
     }
 
     protected function convertNativePropertyWriteExpr(string $propertyType, string $rightType, string $rightExpr): string

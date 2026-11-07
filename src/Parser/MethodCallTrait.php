@@ -300,6 +300,24 @@ trait MethodCallTrait
         return false;
     }
 
+    /**
+     * Materialize a non-variable receiver as an object temporary carrying its
+     * statically detected class, keeping PHP's evaluation order (receiver before
+     * arguments). Dispatching directly is still up to findNativeMethod().
+     */
+    protected function materializeUserObjectReceiver(Node\Expr $expr, string $class): string
+    {
+        [$receiver, $beforeStmts, $afterStmts] = $this->parseExprWithCapturedStmts($expr);
+        $this->appendCapturedStmtLinesToContext($beforeStmts);
+        $object = $this->genTmpVarName();
+        $this->addLocalVar($object, Type::OBJECT);
+        $this->addObject($object, $class);
+        $this->context->beforeStmtLines[] = $object . ' = ' . $receiver . ';';
+        $this->appendCapturedStmtLinesToContext($afterStmts);
+        $this->context->afterStmtLines[] = $object . '.unset();';
+        return $object;
+    }
+
     protected function findNativeMethod(CallLike $expr, string $object, string $method): string|false
     {
         $classDef = null;
@@ -619,6 +637,7 @@ trait MethodCallTrait
         $class = '';
         $materializedNativeReceiver = false;
         $materializedTypedPropertyReceiver = false;
+        $materializedUserReceiver = false;
         $typedPropertyReceiver = false;
         $typedPropertyFinalClass = '';
         // C++17 sequences a member-call receiver before its arguments, but
@@ -665,6 +684,17 @@ trait MethodCallTrait
                     $object = '(' . $object . ')';
                 }
             }
+        } elseif ($receiverClass !== ''
+            && $this->isNamedMethod($expr->name)
+            && ($this->hasClass($receiverClass) || $this->hasInterface($receiverClass))
+        ) {
+            // parseOrderedOperand() types call results as php::Var, dropping the
+            // receiver class this expression still proves. Keep it in an object
+            // temporary; devirtualization below decides if a direct call is safe.
+            // Interfaces stay typed but are never devirtualized.
+            $object = $this->materializeUserObjectReceiver($expr->var, $receiverClass);
+            $class = $receiverClass;
+            $materializedUserReceiver = true;
         } else {
             $object = empty($expr->args)
                 ? $this->parseIdentifier($expr->var)
@@ -843,7 +873,7 @@ trait MethodCallTrait
         }
 
         // Method calls that can be lowered to a native call
-        if (($this->isVarExpr($expr->var) || $materializedNativeReceiver || $materializedTypedPropertyReceiver)
+        if (($this->isVarExpr($expr->var) || $materializedNativeReceiver || $materializedTypedPropertyReceiver || $materializedUserReceiver)
             and $this->isNamedMethod($expr->name)) {
             $type = $this->getVarType($object);
             if ($class !== '' && $this->isNativeObjectClass($class)) {

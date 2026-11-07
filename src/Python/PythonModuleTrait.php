@@ -145,7 +145,12 @@ trait PythonModuleTrait
     /** Return true when the expression is statically known to hold a phpy proxy. */
     protected function isPythonObjectExpr(NodeAbstract $expr): bool
     {
-        $class = $this->detectClassOfExpr($expr);
+        return $this->isPythonProxyClass($this->detectClassOfExpr($expr));
+    }
+
+    /** True when a detected class name denotes a phpy proxy. */
+    private function isPythonProxyClass(string $class): bool
+    {
         if ($class === '') {
             return false;
         }
@@ -155,6 +160,15 @@ trait PythonModuleTrait
         return !$this->hasClass('PyObject')
             && !$this->hasInterface('PyObject')
             && $this->isObjectClassStaticallyAssignableTo($class, 'PyObject');
+    }
+
+    /**
+     * Like isPythonObjectExpr(), but reuses a class the caller already detected;
+     * recomputing it made chain compilation exponential.
+     */
+    protected function isPythonObjectExprWithClass(NodeAbstract $expr, ?string $class): bool
+    {
+        return $this->isPythonProxyClass($class ?? $this->detectClassOfExpr($expr));
     }
 
     /**
@@ -709,15 +723,15 @@ trait PythonModuleTrait
         return Type::OBJECT;
     }
 
-    protected function detectPythonExpressionReturnClass(NodeAbstract $expr): ?string
+    protected function detectPythonExpressionReturnClass(NodeAbstract $expr, ?string $receiverClass = null): ?string
     {
         if ($expr instanceof Expr\ConstFetch && $this->resolvePythonModuleMember($expr->name) !== null) {
             return 'PyObject';
         }
-        if ($expr instanceof Expr\MethodCall && $this->isPythonObjectExpr($expr->var)) {
+        if ($expr instanceof Expr\MethodCall && $this->isPythonObjectExprWithClass($expr->var, $receiverClass)) {
             if ($this->isIdExpr($expr->name)) {
                 $facadeType = $this->getPythonFacadeMethodReturnType(
-                    $this->detectClassOfExpr($expr->var),
+                    $receiverClass ?? $this->detectClassOfExpr($expr->var),
                     $this->parseIdentifier($expr->name),
                 );
                 if ($facadeType !== null) {

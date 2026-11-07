@@ -14,11 +14,30 @@ final class PropertyCopyDestination
 {
     public int $number = 0;
     public float $amount = 0.0;
+    public static int $staticNumber = 0;
+    public static float $staticAmount = 0.0;
 
     public function copy(PropertyCopySource $source): void
     {
         $this->number = $source->number;
         $this->amount = $source->amount;
+    }
+
+    public function add(PropertyCopySource $source): void
+    {
+        $this->number += $source->number;
+        $this->amount += $source->amount;
+        self::$staticNumber += $source->number;
+        self::$staticAmount += $source->amount;
+    }
+
+    public function assignExpressions(PropertyCopySource $source, bool $cond): void
+    {
+        $this->number = $source->number + 10;
+        $this->amount = $source->amount + 0.5;
+        $this->number = -$source->number;
+        $this->number = $cond ? $source->number : 0;
+        $this->number = $source->number ?: 99;
     }
 }
 
@@ -32,6 +51,16 @@ function main(): void
     $source->amount = 2.5;
     $destination->copy($source);
     var_dump($destination->number, $destination->amount);
+
+    $destination->number = 10;
+    $destination->amount = 1.5;
+    $source->number = 5;
+    $source->amount = 0.75;
+    $destination->add($source);
+    var_dump($destination->number, $destination->amount, PropertyCopyDestination::$staticNumber, PropertyCopyDestination::$staticAmount);
+
+    $destination->assignExpressions($source, true);
+    var_dump($destination->number, $destination->amount);
 }
 ?>
 --EXPECT--
@@ -39,3 +68,9 @@ int(42)
 float(1.25)
 int(-7)
 float(2.5)
+int(15)
+float(2.25)
+int(5)
+float(0.75)
+int(5)
+float(1.25)

@@ -4186,7 +4186,11 @@ abstract class CompilerBase implements PropertyAccessContext
     ): string {
         $callArgs = $this->parseCallArgs($args, $funcName, $className);
         if ($requiresDynamicScope && $this->methodDef) {
-            return 'php::callScoped(' . $object . ', ' . $method . ', ' . $this->getCallableScopeExpr() . ', ' . $callArgs . ')';
+            // callScoped resolves a callable name in the lexical scope. Its
+            // Variant argument cannot accept zend_function*: C++ converts
+            // that pointer to bool, producing an invalid callback "1".
+            $scopedMethod = $funcName === '' ? $method : $this->getLiteralString($funcName);
+            return 'php::callScoped(' . $object . ', ' . $scopedMethod . ', ' . $this->getCallableScopeExpr() . ', ' . $callArgs . ')';
         }
         return $object . '.call(' . $method . ', ' . $callArgs . ')';
     }

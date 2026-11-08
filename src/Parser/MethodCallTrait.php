@@ -1039,10 +1039,9 @@ trait MethodCallTrait
                     return 'typephp_call_method_scoped_cached(' . $object . ', ' . $methodPtr . ', '
                         . $this->getCallableScopeExpr() . ', ' . $this->getMethodCallCache() . ')';
                 }
-                // The method is already a stable zend_function* from the
-                // project symbol cache. A second callable cache would only
-                // add guards before the same direct call.
-                return 'php::callScoped(' . $object . ', ' . $methodPtr . ', ' . $this->getCallableScopeExpr() . ')';
+                // Scoped dispatch resolves a name; its Variant overload
+                // must never receive the cached zend_function* pointer.
+                return 'php::callScoped(' . $object . ', ' . $method . ', ' . $this->getCallableScopeExpr() . ')';
             }
             if (!$resolvedMethodPtr) {
                 if (!$cacheMethod) {

@@ -807,9 +807,7 @@ trait BinaryOpTrait
         $nativeClass = $this->detectClassOfExpr($expr);
         if ($this->isNativeObjectClass($nativeClass)) {
             $type = $this->getNativeObjectPointerType($nativeClass);
-            $tmpVar = $this->genTmpVarName();
-            $this->addLocalVar($tmpVar, $type);
-            $this->addNativeObject($tmpVar, $nativeClass);
+            $tmpVar = $this->addObjectTmpVar($nativeClass);
         } else {
             $type = $preserveReference ? Type::VAR : $this->getOrderedOperandTmpType($expr, (string) $value);
             $tmpVar = $this->addTmpVar($type);
@@ -820,28 +818,7 @@ trait BinaryOpTrait
             // element), so normalize it at the materialization boundary.
             $value = $this->convertExprFromType($type, (string) $value);
         }
-        if ($preserveReference) {
-            // A call result used as an array key keeps its returned reference
-            // until insertion, after the value expression has run. Ordinary
-            // assignment dereferences it. Clear a reused temporary first so
-            // copyFrom() cannot write through a reference from an earlier loop.
-            $this->addBeforeStmtLine($tmpVar . '.unset();');
-            $this->addBeforeStmtLine($tmpVar . '.copyFrom(php::Var(' . $value . ').const_ptr());');
-        } else {
-            $this->addBeforeStmtLine($tmpVar . ' = ' . $value . ';');
-        }
-        $this->appendCapturedStmtLinesToContext($afterStmts);
-        if ($this->isNativeObjectClass($nativeClass)) {
-            $this->addAfterStmtLine($tmpVar . ' = nullptr;');
-        } elseif (in_array($type, [Type::VAR, Type::STR, Type::ARRAY, Type::OBJECT], true)) {
-            // The declaration is function-scoped, but PHP releases an owned
-            // expression temporary after the statement that consumes it.
-            // All zval-owning PHPX wrappers must be cleared here: an Object is
-            // directly observable through __destruct(), while an Array may own
-            // objects whose destruction would otherwise also be delayed until
-            // the native function returns.
-            $this->addAfterStmtLine($tmpVar . '.unset();');
-        }
+        $this->materializeStatementTemporary($tmpVar, $value, $afterStmts, $preserveReference);
         return $tmpVar;
     }
 

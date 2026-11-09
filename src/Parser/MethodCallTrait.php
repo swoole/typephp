@@ -311,12 +311,8 @@ trait MethodCallTrait
     {
         [$receiver, $beforeStmts, $afterStmts] = $this->parseExprWithCapturedStmts($expr);
         $this->appendCapturedStmtLinesToContext($beforeStmts);
-        $object = $this->genTmpVarName();
-        $this->addLocalVar($object, Type::OBJECT);
-        $this->addObject($object, $class);
-        $this->addBeforeStmtLine($object . ' = ' . $receiver . ';');
-        $this->appendCapturedStmtLinesToContext($afterStmts);
-        $this->addAfterStmtLine($object . '.unset();');
+        $object = $this->addObjectTmpVar($class);
+        $this->materializeStatementTemporary($object, $receiver, $afterStmts);
         return $object;
     }
 

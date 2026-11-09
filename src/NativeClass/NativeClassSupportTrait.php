@@ -1503,14 +1503,10 @@ trait NativeClassSupportTrait
     {
         [$receiver, $beforeStmts, $afterStmts] = $this->parseExprWithCapturedStmts($expr);
         $this->appendCapturedStmtLinesToContext($beforeStmts);
-        $object = $this->genTmpVarName();
-        $this->addLocalVar($object, $this->getNativeObjectPointerType($class));
-        $this->addNativeObject($object, $class);
-        $this->addBeforeStmtLine($object . ' = ' . $receiver . ';');
-        $this->appendCapturedStmtLinesToContext($afterStmts);
         // Keep the temporary in the precise root frame while the complete PHP
         // statement executes, then release that root at statement end.
-        $this->addAfterStmtLine($object . ' = nullptr;');
+        $object = $this->addObjectTmpVar($class);
+        $this->materializeStatementTemporary($object, $receiver, $afterStmts);
         return $object;
     }
 

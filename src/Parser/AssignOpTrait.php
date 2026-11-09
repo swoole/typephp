@@ -973,8 +973,8 @@ trait AssignOpTrait
             $this->addBeforeStmtLine($result . ' = '
                 . $this->emitDynamicBinaryOp($current, $right, $this->removeAssignOp($op)) . ';');
             $this->appendCapturedStmtLinesToContext($after);
-            $this->addAfterStmtLine($current . '.unset();');
-            $this->addAfterStmtLine($result . '.unset();');
+            $this->scheduleTemporaryCleanup($current);
+            $this->scheduleTemporaryCleanup($result);
             return $this->parseAssign(new Expr\Assign($property, new Variable($result)));
         }
 
@@ -1283,20 +1283,8 @@ trait AssignOpTrait
         [$receiverExpr, $beforeStmts, $afterStmts] = $this->parseExprWithCapturedStmts($property->var);
         $this->appendCapturedStmtLinesToContext($beforeStmts);
 
-        if ($this->isNativeObjectClass($receiverClass)) {
-            $tmp = $this->genTmpVarName();
-            $this->addLocalVar($tmp, $this->getNativeObjectPointerType($receiverClass));
-            $this->addNativeObject($tmp, $receiverClass);
-            $cleanup = $tmp . ' = nullptr;';
-        } else {
-            $tmp = $this->addTmpVar(Type::VAR);
-            $this->addObject($tmp, $receiverClass);
-            $cleanup = $tmp . '.unset();';
-        }
-
-        $this->addBeforeStmtLine($tmp . ' = ' . $receiverExpr . ';');
-        $this->appendCapturedStmtLinesToContext($afterStmts);
-        $this->addAfterStmtLine($cleanup);
+        $tmp = $this->addObjectTmpVar($receiverClass, Type::VAR);
+        $this->materializeStatementTemporary($tmp, $receiverExpr, $afterStmts);
 
         $stableProperty = clone $property;
         $stableProperty->var = new Variable($tmp, $property->var->getAttributes());
@@ -1512,7 +1500,7 @@ trait AssignOpTrait
             // object handlers, and a Variant also covers dynamically resolved
             // receivers whose concrete class is known only at runtime.
             $receiverTmp = $this->addTmpVar(Type::VAR);
-            $this->addBeforeStmtLine($receiverTmp . ' = ' . $receiverExpr . ';');
+            $this->assignTemporaryValue($receiverTmp, $receiverExpr);
             $this->appendCapturedStmtLinesToContext($receiverAfter);
             $objectExpr = $receiverTmp;
         }
@@ -1539,9 +1527,9 @@ trait AssignOpTrait
         $this->addBeforeStmtLine($result . ' = ' . $value . ';');
         $this->appendCapturedStmtLinesToContext($rightAfter);
 
-        $this->addAfterStmtLine($current . '.unset();');
+        $this->scheduleTemporaryCleanup($current);
         if ($receiverTmp !== null) {
-            $this->addAfterStmtLine($receiverTmp . '.unset();');
+            $this->scheduleTemporaryCleanup($receiverTmp);
         }
 
         // Execute the checked write at the expression point. If Zend rejects
@@ -1791,18 +1779,9 @@ trait AssignOpTrait
             }
             [$object, $before, $after] = $this->parseExprWithCapturedStmts($receiver->var);
             $class = $this->detectClassOfExpr($receiver->var);
-            if ($this->isNativeObjectClass($class)) {
-                $stableObject = $this->genTmpVarName();
-                $this->addLocalVar($stableObject, $this->getNativeObjectPointerType($class));
-                $this->addNativeObject($stableObject, $class);
-                $cleanup = $stableObject . ' = nullptr;';
-            } else {
-                $stableObject = $this->addTmpVar(Type::OBJECT);
-                if ($class !== '') {
-                    $this->addObject($stableObject, $class);
-                }
+            $stableObject = $this->addObjectTmpVar($class);
+            if (!$this->isNativeObjectClass($class)) {
                 $object = 'php::toObject(' . $object . ')';
-                $cleanup = $stableObject . '.unset();';
             }
             $before[] = $stableObject . ' = ' . $object . ';';
             foreach ($after as $line) {
@@ -1814,7 +1793,7 @@ trait AssignOpTrait
             foreach ($propertyBefore as $line) {
                 $before[] = $line;
             }
-            $propertyAfter[] = $cleanup;
+            $propertyAfter[] = $this->getTemporaryCleanup($stableObject);
             return [$container, $before, $propertyAfter];
         }
         return $this->parseExprWithCapturedStmts($receiver, writable: true);
@@ -2488,10 +2467,7 @@ trait AssignOpTrait
         if ($isReceiver && $this->isNativeObjectClass($class)) {
             // Boxing a raw Native pointer in a Variant would coerce it to
             // bool; keep the typed pointer slot instead.
-            $tmp = $this->genTmpVarName();
-            $this->addLocalVar($tmp, $this->getNativeObjectPointerType($class));
-            $this->addNativeObject($tmp, $class);
-            $cleanup = $tmp . ' = nullptr;';
+            $tmp = $this->addObjectTmpVar($class);
         } elseif ($writableContainer && $this->resolveRefReturningCall($sub) !== false) {
             // A call result used as an array write target may be a reference to
             // external storage. Boxing it in a Variant applies normal PHP value
@@ -2501,20 +2477,16 @@ trait AssignOpTrait
             // assigning a normal value to it still provides the disposable
             // temporary container required by PHP.
             $tmp = $this->addTmpVar(Type::REF);
-            $cleanup = $tmp . '.unset();';
         } else {
             // Keep the value in a Variant: the rewritten target then goes
             // through the generic Zend handlers, which also covers receivers
             // whose concrete class is known only at runtime.
             $tmp = $this->addTmpVar(Type::VAR);
-            $cleanup = $tmp . '.unset();';
         }
-        $this->addBeforeStmtLine($tmp . ' = ' . $code . ';');
-        $this->appendCapturedStmtLinesToContext($after);
         // The temporary must not outlive the statement: PHP destroys the
         // target's receiver/container at the end of the statement, and a
         // function-scoped Variant would defer destructors to function exit.
-        $this->addAfterStmtLine($cleanup);
+        $this->materializeStatementTemporary($tmp, $code, $after);
         return new Variable($tmp, $sub->getAttributes());
     }
 

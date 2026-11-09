@@ -132,6 +132,21 @@ trait CompilationStateTrait
         return $var;
     }
 
+    /** Keep Native pointer storage separate from Zend-backed object temporaries. */
+    protected function addObjectTmpVar(string $class, string $storageType = Type::OBJECT): string
+    {
+        if ($this->isNativeObjectClass($class)) {
+            $var = $this->addTmpVar($this->getNativeObjectPointerType($class));
+            $this->addNativeObject($var, $class);
+        } else {
+            $var = $this->addTmpVar($storageType);
+            if ($class !== '') {
+                $this->addObject($var, $class);
+            }
+        }
+        return $var;
+    }
+
     protected function addStaticVar(Variable $var, string $name, string $type): string
     {
         if ($this->hasVar($name)) {

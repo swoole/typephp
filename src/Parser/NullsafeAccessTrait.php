@@ -144,7 +144,7 @@ trait NullsafeAccessTrait
 
         // C++ temporaries are function-scoped; release their zvals at the PHP statement boundary.
         foreach (array_reverse($ownedTmpVars) as $ownedTmpVar) {
-            $this->addAfterStmtLine($ownedTmpVar . '.unset();');
+            $this->scheduleTemporaryCleanup($ownedTmpVar);
         }
         return "{$tmpFn}()";
     }

@@ -2252,6 +2252,53 @@ abstract class CompilerBase implements PropertyAccessContext
         $this->context->statements->addAfter($line);
     }
 
+    protected function assignTemporaryValue(string $temporary, string $value, bool $preserveReference = false): void
+    {
+        if ($preserveReference) {
+            // Ordinary assignment dereferences returned References. Clear a
+            // reused Variant first so copyFrom() cannot write through an alias
+            // retained by an earlier iteration.
+            $this->addBeforeStmtLine($temporary . '.unset();');
+            $this->addBeforeStmtLine($temporary . '.copyFrom(php::Var(' . $value . ').const_ptr());');
+        } else {
+            $this->addBeforeStmtLine($temporary . ' = ' . $value . ';');
+        }
+    }
+
+    /** Build cleanup for a temporary known to own a Native root or a PHPX zval. */
+    protected function getTemporaryCleanup(string $temporary): string
+    {
+        return $this->isNativeObjectVar($temporary)
+            ? $temporary . ' = nullptr;'
+            : $temporary . '.unset();';
+    }
+
+    protected function scheduleTemporaryCleanup(string $temporary): void
+    {
+        if ($this->isNativeObjectVar($temporary)
+            || in_array($this->getRawVarType($temporary), [Type::VAR, Type::STR, Type::ARRAY, Type::OBJECT, Type::REF], true)
+        ) {
+            $this->addAfterStmtLine($this->getTemporaryCleanup($temporary));
+        }
+    }
+
+    /**
+     * Complete the value's captured cleanup before statement evaluation, then
+     * keep its materialized value alive until the consuming statement ends.
+     *
+     * @param list<string> $afterStmts
+     */
+    protected function materializeStatementTemporary(
+        string $temporary,
+        string $value,
+        array $afterStmts = [],
+        bool $preserveReference = false,
+    ): void {
+        $this->assignTemporaryValue($temporary, $value, $preserveReference);
+        $this->appendCapturedStmtLinesToContext($afterStmts);
+        $this->scheduleTemporaryCleanup($temporary);
+    }
+
     /**
      * For statements containing sub-statements (for/foreach, etc.), check
      * whether the currently pending code is empty. If not, the pending

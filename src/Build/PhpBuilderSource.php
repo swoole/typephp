@@ -30,7 +30,9 @@ final class PhpBuilderSource
         $external = [];
         $sources = [];
         $pecl = new PeclExtensionSource($this->cacheDirectory, $this->output, $this->proxy);
-        foreach (SapiExtensionRequirements::merge($extensions) as $extension) {
+        foreach (SapiExtensionConfiguration::withoutCoreExtensions(
+            SapiExtensionRequirements::merge($extensions),
+        ) as $extension) {
             $directoryName = str_replace('-', '_', $extension);
             if (is_dir($officialSource . '/ext/' . $directoryName)) {
                 continue;

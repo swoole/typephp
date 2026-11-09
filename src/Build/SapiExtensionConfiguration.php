@@ -15,6 +15,28 @@ final class SapiExtensionConfiguration
         'core', 'date', 'hash', 'json', 'pcre', 'random', 'reflection', 'spl', 'standard',
     ];
 
+    /** Whether php-src always compiles the extension into the runtime. */
+    public static function isCoreExtension(string $extension): bool
+    {
+        return in_array($extension, self::CORE_EXTENSIONS, true);
+    }
+
+    /**
+     * Drop the extensions that php-src always builds. Normalized names are
+     * expected; callers use this before resolving anything through PECL, since
+     * these names have no `ext/` directory to match.
+     *
+     * @param list<string> $extensions
+     * @return list<string>
+     */
+    public static function withoutCoreExtensions(array $extensions): array
+    {
+        return array_values(array_filter(
+            $extensions,
+            static fn (string $extension): bool => !self::isCoreExtension($extension),
+        ));
+    }
+
     /**
      * @param list<string> $extensions
      * @return list<string>
@@ -30,7 +52,7 @@ final class SapiExtensionConfiguration
                 continue;
             }
             $visited[$extension] = true;
-            if (in_array($extension, self::CORE_EXTENSIONS, true)) {
+            if (self::isCoreExtension($extension)) {
                 continue;
             }
             if ($extension === 'opcache') {

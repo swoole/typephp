@@ -1348,6 +1348,14 @@ abstract class Preprocessor extends CompilerBase
             return $type;
         }
 
+        // Nullable object references retain the existing Zend reference ABI:
+        // aliases may replace the handle, so they cannot be fixed Object slots.
+        if ($this->getNullableObjectTypeNode($param->type) !== null
+            && !$this->isNativeObjectClass($class)) {
+            $argInfo->class = '';
+            return Type::REF;
+        }
+
         // A precise scalar/string/array reference is represented by a C++ T&.
         // Nullable, union, variadic and defaulted reference parameters still
         // require a Zend reference because their active value/storage cannot
@@ -1481,7 +1489,8 @@ abstract class Preprocessor extends CompilerBase
             $argInfo->variadic = $param->variadic;
             $argInfo->property = $param->isPromoted();
             $argInfo->immutable = \TypePhp\Transform\CompileTimeAttribute::consume($param, 'Immutable');
-            if ($param->type === null || $param->type instanceof NullableType) {
+            if ($param->type === null || $param->type instanceof NullableType
+                || $this->getNullableObjectTypeNode($param->type) !== null) {
                 $argInfo->nullable = $argInfo->stdContainer === null && $argInfo->typedArray === null;
             }
             if (($param->byRef && $param->type !== null && !Type::isTypedRefType($type))
@@ -1673,7 +1682,8 @@ abstract class Preprocessor extends CompilerBase
         }
         $functionDef->exported = !($this->classDef?->exported === false || $this->hasNoExportAttribute($v));
         $functionDef->returnClass = $class;
-        $functionDef->returnNullable = $nullableNativeReturn !== null;
+        $functionDef->returnNullable = $nullableNativeReturn !== null
+            || $this->getNullableObjectTypeNode($v->returnType) !== null;
         $functionDef->returnTypeStr = $v->returnType === null
             ? ''
             : $this->typeCheckNodeToString($v->returnType);
@@ -2425,19 +2435,7 @@ abstract class Preprocessor extends CompilerBase
         // validation (callable as an intersection/DNF member is rejected
         // there, ahead of the property-specific rule, matching Zend).
         [$type, $class] = $this->resolveTypeDecl($typeNode, self::DECL_TYPE_OF_PROPERTY);
-        // Nullable Zend objects use php::Var storage, but their single class
-        // declaration still provides the method signature needed to prepare
-        // by-reference arguments. Keep that metadata without narrowing the
-        // storage type or assuming the runtime value is non-null.
-        if ($typeNode instanceof NullableType && $typeNode->type instanceof Node\Name) {
-            [$nullableType, $nullableClass] = $this->resolveTypeDecl(
-                $typeNode->type,
-                self::DECL_TYPE_OF_PROPERTY,
-            );
-            if ($nullableType === Type::OBJECT) {
-                $class = $nullableClass;
-            }
-        }
+        $nullable = $nullable || $this->getNullableObjectTypeNode($typeNode) !== null;
         // `callable` is a runtime-context type (a string or array may or may
         // not be callable depending on scope), so Zend forbids it in property
         // types entirely - bare, nullable, or as a union member.

@@ -195,6 +195,36 @@ runs:
         output="$("${smoke_binary}")"
         test "${output}" = '${{ inputs.smoke-output }}'
 
+    - name: Build typephp-mcp
+      shell: bash
+      run: |
+        export PHP_HOME="$(php-config --prefix)"
+        bash tools/typephp-mcp/build.sh
+        test -x tools/typephp-mcp/typephp_mcp
+
+    - name: Run typephp-mcp native smoke
+      shell: bash
+      run: |
+        # Point check_code at the compiler this job just built, so it never
+        # depends on the auto-detection order.
+        export TYPEPHP_MCP_TPC="${PWD}/tpc"
+        # 10 minute wall-clock limit: a wedged process must fail the stage
+        # rather than hold the job open. GNU timeout is missing on macOS, and
+        # a plain fallback there let a non-replying server hang the job
+        # forever, so use perl (shipped with macOS) as the watchdog.
+        run_smoke() {
+          if command -v timeout >/dev/null 2>&1; then
+            timeout 600 "$@"
+          elif command -v perl >/dev/null 2>&1; then
+            perl -e 'alarm shift; exec @ARGV' 600 "$@"
+          else
+            echo "[smoke] ERROR: neither timeout nor perl is available for the watchdog" >&2
+            return 1
+          fi
+        }
+        run_smoke php tools/typephp-mcp/tests/mcp-binary-smoke.php tools/typephp-mcp/typephp_mcp "${{ github.workspace }}"
+        run_smoke php tools/typephp-mcp/tests/mcp-binary-smoke.php --interpreted "${{ github.workspace }}"
+
     - name: Show native dependencies
       shell: bash
       run: |

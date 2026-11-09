@@ -37,6 +37,7 @@ Pay particular attention to `unset($obj->prop)` and assigning `null` on fixed-va
 class User {
     public int $id = 0;
     public Profile $profile;
+    public ?Profile $optionalProfile = null;
 }
 
 $user = new User();
@@ -44,18 +45,23 @@ unset($user->id); // ❌ AOT does not allow relying on this semantics
 $user->id = null; // ❌ This likewise changes the int property to null
 
 unset($user->profile); // ✅ Object properties may enter the null/unset state
-$user->profile = null; // ✅ Object properties may be explicitly set to null
+$user->profile = null; // ❌ This property does not accept null
+$user->optionalProfile = null; // ✅ Nullable object properties accept null
 ```
 
 In PHP, `unset($obj->prop)` lets an object property detach from its current value state, subsequently behaving as an uninitialized or null state; assigning `null` to a fixed-value-type property also changes the value state to null. From the AOT type system's perspective, this is equivalent to changing the property from its declared `int`, `float`, `bool`, `string`, `array` to a `null`/uninitialized state. The AOT compiler does not allow these fixed-value-type properties to change type, so a property is always of its declared type.
 
 Concrete class object properties use static object type rules: a non-null assignment must satisfy the `is-a` relationship, so assigning a subclass object to a base-class property is allowed, while assigning an unrelated object or a base-class object to a subclass property is not. Non-nullable properties can be `unset()`, but cannot be assigned `null`.
 
+For a named class `T`, `?T` and `T|null` retain the ordinary typed-object representation (`php::Object`) and class information in parameters, return values, inferred locals and properties. The handle itself can hold null. Native method calls use the ordinary typed-object path without an extra nullable-receiver check; PHPX protects property access and dynamic method calls. `?->` still short-circuits on null, including argument evaluation. Declaration boundaries continue to validate the permitted class and nullability. Nullable scalar types and other unions retain dynamic storage; by-reference nullable object parameters retain the Zend reference ABI.
+
+Known typed-object arguments and returns do not repeat class/nullability checks already established by static analysis or their input boundary. `T` and `?T` use the same generated native-call path. A conversion from `?T` to non-nullable `T` retains a runtime check when the compiler cannot prove the value is non-null; dynamic inputs retain their required boundary validation.
+
 Correct practices:
 
 - Do not use `unset()` or assign `null` to fixed-value-type object properties of type `int`, `float`, `bool`, `string`, or `array`.
 - If a property may be empty in business terms, explicitly declare it as a nullable type, e.g. `public ?int $id = null;`, and use assignment to express state changes.
-- If an object property is declared as a concrete class name, a non-null assignment must use the declared class itself; do not rely on PHP's subclass-compatible assignment semantics.
+- If an object property is declared as a concrete class name, a non-null assignment must satisfy the declared class, including compatible subclasses.
 - If a property needs to hold arbitrary PHP values, declare it as a variable/general type rather than declaring it as a native type and then attempting `unset()` or writing another type into it.
 
 ---

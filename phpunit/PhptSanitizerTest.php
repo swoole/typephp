@@ -31,8 +31,17 @@ if (getenv('EMIT_ASAN_REPORT') === 'stderr') {
     fwrite(STDERR, "==123==ASan runtime does not come first in initial library list\n");
     exit(1);
 }
-if (getenv('EMIT_ASAN_REPORT') === '1' && preg_match('/log_path="([^"]+)"/', $options, $matches)) {
-    file_put_contents($matches[1] . '.' . getmypid(), "ERROR: AddressSanitizer: heap-buffer-overflow\n");
+$mode = getenv('EMIT_ASAN_REPORT');
+if (in_array($mode, ['1', 'warning', 'warning-error', 'unknown'], true) && preg_match('/log_path="([^"]+)"/', $options, $matches)) {
+    $warning = "==123==WARNING: ASan is ignoring requested __asan_handle_no_return: stack type: default top: 0x1; bottom 0x2; size: 0x3\n"
+        . "False positive error reports may follow\nFor details see https://github.com/google/sanitizers/issues/189\n";
+    $diagnostic = match ($mode) {
+        'warning' => $warning,
+        'warning-error' => $warning . "ERROR: AddressSanitizer: heap-use-after-free\n",
+        'unknown' => "Unknown sanitizer startup failure\n",
+        default => "ERROR: AddressSanitizer: heap-buffer-overflow\n",
+    };
+    file_put_contents($matches[1] . '.' . getmypid(), $diagnostic);
 }
 $payload = json_encode(['allocator' => getenv('USE_ZEND_ALLOC'), 'options' => $options]);
 file_put_contents(getenv('TYPEPHP_SANITIZER_EVIDENCE'), $payload . "\n", FILE_APPEND | LOCK_EX);
@@ -65,7 +74,7 @@ PHP;
         self::assertSame(0, $result['status'], $result['output']);
         $commands = $this->commands();
         self::assertSame(['--sanitize', 'undefined', '--sanitize', 'address'], array_slice($commands[0], 0, 4));
-        self::assertContains('--debug', $commands[0]);
+        self::assertNotContains('--debug', $commands[0]);
         self::assertSame(['--job', '1'], array_slice($commands[0], -2));
         self::assertStringContainsString('"allocator":"0"', file_get_contents($this->directory . '/runtime.jsonl'));
     }
@@ -111,6 +120,31 @@ PHP;
         self::assertSame(1, $result['status'], $result['output']);
         self::assertStringNotContainsString('XFAIL ', $result['output']);
         self::assertSame([], glob($this->directory . '/startup.log.sanitizer-*'));
+    }
+
+    /** @dataProvider diagnosticModes */
+    public function testOnlyKnownFiberWarningsAreNonFatal(string $mode, int $expectedStatus): void
+    {
+        $this->fixture('diagnostic', $expectedStatus !== 0);
+        $path = $this->directory . '/diagnostic.phpt';
+        file_put_contents($path, preg_replace('/EMIT_ASAN_REPORT=\d/', 'EMIT_ASAN_REPORT=' . $mode, file_get_contents($path)));
+        $result = $this->harness(['--sanitize', 'address', 'diagnostic.phpt']);
+        self::assertSame($expectedStatus, $result['status'], $result['output']);
+        self::assertNotEmpty(glob($this->directory . '/diagnostic.log.sanitizer-*'));
+        if ($expectedStatus === 0) {
+            self::assertStringContainsString('ASan Fiber warning retained', $result['output']);
+        } else {
+            self::assertStringNotContainsString('XFAIL ', $result['output']);
+        }
+    }
+
+    public static function diagnosticModes(): array
+    {
+        return [
+            'Fiber warning only' => ['warning', 0],
+            'error after Fiber warning' => ['warning-error', 1],
+            'unknown diagnostic' => ['unknown', 1],
+        ];
     }
 
     /** @dataProvider invalidOptions */

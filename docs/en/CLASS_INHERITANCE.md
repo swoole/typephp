@@ -35,21 +35,18 @@ interface BaseInterface {}
 class MyClass implements BaseInterface {}
 ```
 
-### Rule 3: Cannot Inherit Internal Classes
+### Rule 3: Native Classes and Plain Zend Classes Cannot Inherit from Each Other
 
 ```php
-// ❌ Wrong: inheriting a PHP internal class
+// ✅ Correct: inheriting a Zend internal class (detected via
+// Reflection::isInternalClass at compile time)
 class MyArray extends ArrayObject {}
-// Compile error: Class `MyArray` Cannot inherit built-in class `ArrayObject`
+class MyDb extends PDO {}
 
-// ✅ Correct: use the composition pattern
-class MyContainer {
-    private ArrayObject $storage;
-    
-    public function __construct() {
-        $this->storage = new ArrayObject();
-    }
-}
+// ❌ Wrong: a Native class inheriting from a Zend class (or vice versa)
+// class MyNative extends SomeZendClass {}   // Native cannot extend Zend
+// class MyZend extends SomeNativeClass {}   // Zend cannot extend Native
+// Compile error: Native and ZendVM-backed classes cannot inherit from each other
 ```
 
 ---
@@ -73,27 +70,31 @@ class MyContainer {
 
 ### Checking Code Location
 
-The relevant implementation is in `src/Php/Translator.php`:
+The relevant implementation is in `src/Translator.php` (inheritance checks) and
+`src/Preprocessor.php` (internal-class detection):
 
 ```php
-if ($extends) {
-    $parentClass = $this->getParentClass($class->extends);
-    if ($this->hasNativeClass($parentClass)) {
-        // The parent class is a defined native class
-        $parent = $this->getClassDef($parentClass);
+// src/Translator.php — compile-time inheritance checks (v0.9.5)
+if ($this->classDef->extends and !$this->classDef->inheritedFromInternalClass) {
+    $parentClass = $this->getNamespacedClassName($this->parseIdentifier($class->extends));
+    if ($this->hasClass($parentClass)) {
+        $parent = $this->getClass($parentClass);
+        if ($this->classDef->nativeObject !== $parent->nativeObject) {
+            $this->fatalError($class,
+                'Native and ZendVM-backed classes cannot inherit from each other');
+        }
         if ($parent->flags & Modifiers::FINAL) {
             $this->fatalError($class, "Class `{$this->class}` cannot extend final class `{$parentClass}`");
         }
-        $this->classDef->extends = $parentClass;
+        $this->assertReadonlyInheritanceContract($class, $parentClass, ...);
     } else {
-        // Check whether it is a PHP internal class
-        if (Reflection::isInternalClass($parentClass)) {
-            $this->fatalError($class, "Class `{$this->class}` Cannot inherit built-in class `$parentClass`");
-        } else {
-            $this->fatalError($class, "Class `{$this->class}` inherits from a non-existent class `$parentClass`");
-        }
+        $this->fatalError($class, "Class `{$this->class}` inherits from a non-existent class `{$parentClass}`");
     }
 }
+// src/Preprocessor.php — internal-class detection: when the parent is a
+// built-in class, inheritedFromInternalClass is set and only the readonly
+// contract is checked against the host runtime's reflection. Inheriting
+// built-in classes is allowed.
 ```
 
 ---
@@ -312,31 +313,32 @@ class MyService {
 }
 ```
 
-### Example 3: Inheriting a PHP Internal Class
+### Example 3: A Native Class Inheriting from a Zend Class
 
 ```php
 <?php
-// ❌ Wrong: cannot inherit PDO
-class MyDatabase extends PDO {
-    // ...
-}
+// ❌ Wrong: a Zend class inheriting from a Native class (or the reverse)
+class MyNative extends SomeZendClass {}
 
 function main() {
-    $db = new MyDatabase('mysql:host=localhost;dbname=test');
+    $obj = new MyNative();
 }
 ?>
 ```
 
 **Compile error**:
 ```
-Fatal error: Class `MyDatabase` Cannot inherit built-in class `PDO`
+Fatal error: Native and ZendVM-backed classes cannot inherit from each other
 in /path/to/file.php on line X
 ```
 
-**Solution**:
+**Note**: inheriting Zend internal classes (such as `PDO` or `ArrayObject`) is
+**allowed**; composition remains a recommended style but is not enforced by the
+compiler.
+
 ```php
 <?php
-// ✅ Use the composition pattern
+// ✅ Composition pattern (recommended style, not enforced)
 class MyDatabase {
     private PDO $connection;
     
@@ -532,7 +534,7 @@ class EnhancedStorage {
 | **Check timing** | Compile time | Runtime |
 | **Error discovery** | Reports an error immediately at compile time | Reports an error only when the code is executed |
 | **autoload support** | ❌ Not supported as a parent class | ✅ Fully supported |
-| **Inheriting internal classes** | ❌ Forbidden | ✅ Allowed (partially) |
+| **Inheriting internal classes** | ✅ Allowed (Zend internal classes; readonly contract checked via reflection) | ✅ Allowed (partially) |
 | **Performance impact** | No runtime overhead | Has runtime checking overhead |
 
 ---
@@ -566,5 +568,5 @@ A: The use of traits is likewise restricted. Traits must be visible at compile t
 
 ---
 
-**Last updated**: March 20, 2024
-**Applicable version**: PHP AOT Compiler v1.x
+**Last updated**: October 2026 (aligned with v0.9.5 behavior: Zend internal classes can be inherited)
+**Applicable version**: PHP AOT Compiler v0.9.5

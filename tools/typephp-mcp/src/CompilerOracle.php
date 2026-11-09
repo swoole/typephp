@@ -1,0 +1,1096 @@
+<?php
+
+/**
+ * L3 compiler oracle: run `tpc --dry` on a file.
+ *
+ * The compiler is a compiled tpc binary when one is available
+ * (TYPEPHP_MCP_TPC, or tpc/tpc.exe in the repository root), otherwise the
+ * interpreted `php bin/tpc.php`. The compiled form is preferred because it
+ * needs neither a PHP interpreter nor the phpy extension.
+ *
+ * --dry only generates C++, so it validates the TypePHP subset (the #1 AI
+ * failure mode) without compiling or linking. The result names the stage that
+ * actually ran (generate) so callers do not mistake it for a compile/link
+ * check; compile and link are separate stages this tool does not run.
+ *
+ * Lifetime controls: the compiler runs as a controlled child process with a
+ * timeout, an output budget and (on POSIX) a per-process virtual-memory cap
+ * inherited by every process of the tree. On timeout the whole tree is
+ * killed (SIGKILL after a grace period, including the direct child), the
+ * temporary build directory is removed, and the call fails with a tool error
+ * so the MCP server stays responsive instead of blocking on a stuck compiler.
+ *
+ * Tool-execution failures (missing file, missing PHP, compiler could not
+ * start or did not finish) raise CompilerOracle::ToolFailure; the MCP layer
+ * maps that to isError: true. User code that fails the check is NOT a tool
+ * failure - it returns a normal structured result with diagnostics.
+ *
+ * Note: tpc still detects the host toolchain at startup (it fatals when no
+ * C/C++ compiler is on PATH), so check_code makes sure an MSVC cl is
+ * reachable before spawning the compiler.
+ */
+/**
+ * A tool-execution failure: the check could not run at all (missing input,
+ * missing toolchain, compiler timeout). The MCP layer maps this to
+ * isError: true, as opposed to a normal result reporting that user code
+ * failed the check.
+ */
+final class CompilerOracleToolFailure extends RuntimeException
+{
+}
+
+final class CompilerOracle
+{
+    public const STAGE_GENERATE = 'generate';
+
+    private const DEFAULT_TIMEOUT_SECONDS = 120;
+
+    private const DEFAULT_OUTPUT_LIMIT_BYTES = 65536;
+
+    private const DEFAULT_MEMORY_LIMIT_MB = 4096;
+
+    private const PROBE_TIMEOUT_SECONDS = 10;
+
+    /**
+     * Cached compiler command prefix, resolved once per process.
+     *
+     * @var string|null
+     */
+    private static $compilerPrefix = null;
+
+    /**
+     * @return array{code: int, output: string, timedOut: bool}
+     */
+    public static function check(string $file, RepoRoot $root): string
+    {
+        $resolved = $file;
+        if (!is_file($resolved)) {
+            $inside = $root->resolveInside($file);
+            $resolved = is_string($inside) ? $inside : '';
+        }
+        if ($resolved === '' || (!is_file($resolved) && !is_dir($resolved))) {
+            throw new CompilerOracleToolFailure(
+                'File not found: ' . $file . "\nPass an absolute path, or a path relative to the repo root."
+            );
+        }
+        // Always hand the compiler an absolute, fully resolved path: it runs
+        // with cwd set to the file's directory (see below), where a path
+        // relative to the server's cwd would no longer resolve.
+        //
+        // Realpath must come BEFORE the type check. An alias.php symlink to
+        // project.yml passes a suffix test on the given path while the
+        // compiler would open the YAML, re-entering exactly the project
+        // configuration path this tool must not take.
+        $absolute = realpath($resolved);
+        if (is_string($absolute) && $absolute !== '') {
+            $resolved = $absolute;
+        }
+        // Only single-file checks are allowed. Directory and project.yml
+        // inputs make tpc parse the project configuration, where `php-builder:
+        // {}` reaches SapiPhpBuilder even under --dry (prepare() runs before
+        // the dry-run return) and starts a real php-src build - exactly the
+        // uncontrolled make/cmake this tool must never trigger (AGENTS.md).
+        // A .php file keeps tpc in single-file mode: no YAML is parsed, and
+        // the php-builder path is unreachable (verified by interception).
+        // The check uses the resolved target, so a symlink cannot smuggle a
+        // non-PHP file past it.
+        $extension = strtolower(pathinfo($resolved, PATHINFO_EXTENSION));
+        if (!is_file($resolved) || $extension !== 'php') {
+            throw new CompilerOracleToolFailure(
+                'check_code only accepts a PHP source file, got: ' . $file . "\n"
+                . 'Pass a .php file. Directory and project.yml inputs are rejected because tpc would parse the'
+                . ' project configuration, which can start a real runtime build (php-builder) even under --dry.'
+            );
+        }
+
+        // Resolving the compiler also validates that one is reachable at all
+        // (a compiled tpc, or PHP able to run bin/tpc.php).
+        self::compilerPrefix($root);
+
+        self::ensureHostToolchain();
+
+        $buildDir = self::buildDir($resolved, $root);
+        if (!mkdir($buildDir, 0777, true)) {
+            // sys_get_temp_dir() can resolve to an unusable location when a
+            // client strips TMP/TEMP; retry under the OS temp constant.
+            $fallback = rtrim(self::fallbackTempDir(), '/\\') . '/typephp-mcp-dry-' . uniqid();
+            if (!mkdir($fallback, 0777, true)) {
+                throw new CompilerOracleToolFailure('Cannot create build directory: ' . $fallback);
+            }
+            $buildDir = $fallback;
+        }
+
+        try {
+            // Run the compiler in the directory that contains the file: tpc
+            // derives the generated output path by relativizing the source
+            // path against its own cwd, and a path it cannot relativize ends
+            // up joined onto the build directory verbatim (a drive letter
+            // inside a directory name on Windows), which then fails to write.
+            $result = self::runTpc($root, [
+                '--dry',
+                $resolved,
+                '--build-dir',
+                $buildDir,
+                '--no-color',
+                '--no-progress',
+            // null lets timeoutSeconds() consult TYPEPHP_MCP_COMPILE_TIMEOUT:
+            // passing the constant here made the documented override dead
+            // code, so the error message pointed at a setting that did
+            // nothing.
+            ], null, dirname($resolved));
+            if (self::isEnvironmentFailure($result['output'])) {
+                throw new CompilerOracleToolFailure(
+                    'The compiler could not run: ' . self::environmentFailureSummary($result['output'])
+                    . "\nThis is a tool/environment problem, not a verdict on the code being checked."
+                );
+            }
+            return self::format($resolved, $root, $result);
+        } finally {
+            self::removeDir($buildDir);
+        }
+    }
+
+    /**
+     * Run `php bin/tpc.php <args>` with a bounded lifetime and return the
+     * merged output plus exit code. Throws ToolFailure when the compiler
+     * could not be started or did not finish within the timeout.
+     *
+     * @param array<int, string> $args
+     * @return array{code: int, output: string, timedOut: bool}
+     */
+    public static function runTpc(RepoRoot $root, array $args, ?int $timeoutSeconds = null, ?string $cwd = null): array
+    {
+        return self::runProcess(
+            self::buildCommand($root, $args),
+            self::timeoutSeconds($timeoutSeconds),
+            self::outputLimit(),
+            $cwd ?? $root->path()
+        );
+    }
+
+    /**
+     * tpc --version probe used by get_index_info. Bounded like the check
+     * itself so a stuck PHP cannot hang the server.
+     */
+    public static function tpcVersion(RepoRoot $root): string
+    {
+        try {
+            $result = self::runTpc($root, ['--version', '--no-color'], self::PROBE_TIMEOUT_SECONDS);
+        } catch (CompilerOracleToolFailure $error) {
+            return 'unknown';
+        }
+        foreach (explode("\n", $result['output']) as $line) {
+            if (preg_match('/v\d+\.\d+\.\d+/', $line, $m) === 1) {
+                return $m[0];
+            }
+        }
+        return 'unknown';
+    }
+
+    /**
+     * Assemble the command line.
+     *
+     * On POSIX the compiler runs in a shell that applies `ulimit -v` before
+     * exec where the platform supports it. That is a PER-PROCESS address-space
+     * cap inherited by each descendant, not a shared budget for the tree: N
+     * children can each reach the cap. It is kept because it still stops one
+     * runaway process from taking the machine down, but it must not be
+     * described as a total cap. A real whole-tree limit needs a cgroup, which
+     * this tool does not create.
+     *
+     * macOS does not implement `ulimit -v` at all, so the shell probes for it
+     * first and, when it is unavailable, runs the compiler without a cap
+     * rather than refusing to work - refusing would make check_code unusable
+     * on that platform while protecting nothing.
+     *
+     * tpc --dry only generates C++ (no make/link), so this stage does not
+     * spawn a compiler farm. A real compile/link tier would additionally need
+     * the shared build lock and serial Make/CMake jobs (see AGENTS.md).
+     */
+    private static function buildCommand(RepoRoot $root, array $args): string
+    {
+        $parts = [self::compilerPrefix($root)];
+        foreach ($args as $arg) {
+            $parts[] = escapeshellarg($arg);
+        }
+        $command = implode(' ', $parts);
+        if (stripos(PHP_OS, 'WIN') !== 0) {
+            $limitMb = self::memoryLimitMb();
+            if ($limitMb < 1) {
+                throw new CompilerOracleToolFailure(
+                    'TYPEPHP_MCP_COMPILE_MEMORY_LIMIT_MB must be a positive number of MiB.'
+                );
+            }
+            // Probe the capability, and never claim a cap that was not
+            // applied: on macOS `ulimit -v` is accepted by the shell but
+            // ineffective, so the shell checks that the limit actually took.
+            $guard = 'if ulimit -v ' . ($limitMb * 1024) . ' 2>/dev/null && [ "$(ulimit -v)" != "unlimited" ]; then :; else echo "typephp-mcp: no per-process memory cap on this platform" >&2; fi;';
+            $command = 'bash -c ' . escapeshellarg($guard . ' exec ' . $command);
+        }
+        return $command;
+    }
+
+    /**
+     * Command prefix that runs the compiler.
+     *
+     * A compiled tpc binary is preferred when one is available (TYPEPHP_MCP_TPC,
+     * or tpc/tpc.exe in the repository root): it needs neither a PHP
+     * interpreter nor the phpy extension. That matters on Windows, where the
+     * release package ships tpc.exe while the interpreted `php bin/tpc.php`
+     * only works with phpy loaded. Falls back to the interpreted compiler.
+     */
+    private static function compilerPrefix(RepoRoot $root): string
+    {
+        if (self::$compilerPrefix !== null) {
+            return self::$compilerPrefix;
+        }
+        self::$compilerPrefix = self::resolveCompilerPrefix($root);
+        return self::$compilerPrefix;
+    }
+
+    private static function resolveCompilerPrefix(RepoRoot $root): string
+    {
+        $override = getenv('TYPEPHP_MCP_TPC');
+        if (is_string($override) && $override !== '' && is_file($override)) {
+            return escapeshellarg($override);
+        }
+        // Prefer a compiled tpc, but only when it actually runs: a binary that
+        // cannot start (missing runtime DLLs, missing mbstring) must not be
+        // preferred over a working interpreted compiler. One bounded --version
+        // probe per process decides it.
+        foreach (self::tpcBinaryNames() as $name) {
+            $candidate = $root->path() . '/' . $name;
+            if (!is_file($candidate)) {
+                continue;
+            }
+            try {
+                $probe = self::runProcess(
+                    escapeshellarg($candidate) . ' --version --no-color',
+                    self::PROBE_TIMEOUT_SECONDS,
+                    8192
+                );
+            } catch (CompilerOracleToolFailure $error) {
+                continue;
+            }
+            if ($probe['code'] === 0) {
+                return escapeshellarg($candidate);
+            }
+        }
+        $php = self::phpBinary();
+        if ($php === '') {
+            throw new CompilerOracleToolFailure(
+                "No TypePHP compiler found: no runnable tpc/tpc.exe in the repository root and no PHP on PATH.\n"
+                . 'check_code needs `tpc --dry`, or `php bin/tpc.php --dry` (which needs the phpy extension).'
+                . "\nSet TYPEPHP_MCP_TPC to a tpc binary, or TYPEPHP_MCP_PHP to a php executable."
+            );
+        }
+        return escapeshellarg($php) . ' ' . escapeshellarg($root->path() . '/bin/tpc.php');
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private static function tpcBinaryNames(): array
+    {
+        return stripos(PHP_OS, 'WIN') === 0 ? ['tpc.exe', 'tpc'] : ['tpc', 'tpc.exe'];
+    }
+
+    /**
+     * Whether any compiler invocation is possible (a compiled tpc, or PHP able
+     * to run bin/tpc.php). Lets callers skip cleanly instead of failing.
+     */
+    public static function hasCompiler(RepoRoot $root): bool
+    {
+        try {
+            self::compilerPrefix($root);
+        } catch (CompilerOracleToolFailure $error) {
+            return false;
+        }
+        return true;
+    }
+
+    /**
+     * Execute a command with timeout, output budget and tree kill.
+     *
+     * The child's stdout/stderr are drained continuously (stored output is
+     * capped, reading is not, so the child can never block on a full pipe),
+     * and the process is reaped before returning.
+     *
+     * Windows needs more than the deadline loop: stream_select() and fread()
+     * on a process pipe may ignore the timeout there, so a silent compiler
+     * kept the loop blocked past its budget (measured on Windows PHP 8.4 ZTS:
+     * a 1 s budget returned "success" after 4.2 s, once the child finally
+     * wrote). A watchdog process kills the tree at the deadline, which closes
+     * the pipe and releases the blocked read; the elapsed time is re-checked
+     * afterwards so data that arrives late is never accepted as success.
+     *
+     * @return array{code: int, output: string, timedOut: bool}
+     */
+    private static function runProcess(string $command, int $timeoutSeconds, int $outputLimitBytes, ?string $cwd = null): array
+    {
+        $descriptors = [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']];
+        $process = proc_open($command, $descriptors, $pipes, $cwd);
+        if (!is_resource($process)) {
+            throw new CompilerOracleToolFailure('Cannot start the TypePHP compiler process.');
+        }
+        fclose($pipes[0]);
+        stream_set_blocking($pipes[1], false);
+        stream_set_blocking($pipes[2], false);
+
+        $status = @proc_get_status($process);
+        $pid = is_array($status) && isset($status['pid']) ? (int) $status['pid'] : 0;
+
+        $output = '';
+        $timedOut = false;
+        $deadline = microtime(true) + $timeoutSeconds;
+        // Windows may ignore the timeout on a blocked pipe read; the watchdog
+        // kills the tree at the deadline so that read can return.
+        $watchdog = self::armWatchdog($pid, $timeoutSeconds);
+        if (stripos(PHP_OS, 'WIN') === 0 && $watchdog === null) {
+            // Without the watchdog a silent compiler blocks the read past its
+            // budget (measured: a 1 s budget returned only after the child
+            // finished at 4.2 s). Fail fast instead of running unprotected:
+            // the just-started compiler is reaped before reporting.
+            self::terminateTree($process);
+            @fclose($pipes[1]);
+            @fclose($pipes[2]);
+            @proc_close($process);
+            throw new CompilerOracleToolFailure(
+                'The Windows compile watchdog could not be created (unwritable temporary directory or process creation failure),'
+                . ' so the compiler cannot be bounded. Fix TMP/TEMP, or raise TYPEPHP_MCP_COMPILE_TIMEOUT after making the directory writable.'
+            );
+        }
+        while (true) {
+            $remaining = $deadline - microtime(true);
+            if ($remaining <= 0) {
+                $timedOut = true;
+                break;
+            }
+            $read = [$pipes[1], $pipes[2]];
+            $write = null;
+            $except = null;
+            $ready = @stream_select($read, $write, $except, (int) ceil($remaining), (int) round(($remaining - floor($remaining)) * 1000000));
+            if ($ready === false) {
+                // select() cannot monitor these handles (Windows process pipes
+                // in some builds). Poll instead so the deadline and the
+                // watchdog still bound the wait.
+                foreach ([$pipes[1], $pipes[2]] as $stream) {
+                    $chunk = (string) @fread($stream, 65536);
+                    if ($chunk === '') {
+                        continue;
+                    }
+                    $room = $outputLimitBytes - strlen($output);
+                    if ($room > 0) {
+                        $output .= $room >= strlen($chunk) ? $chunk : substr($chunk, 0, $room);
+                    }
+                }
+                $status = proc_get_status($process);
+                if (!$status['running']) {
+                    break;
+                }
+                usleep(10000);
+                continue;
+            }
+            if ($ready > 0) {
+                foreach ($read as $stream) {
+                    $chunk = (string) @fread($stream, 65536);
+                    if ($chunk === '') {
+                        continue;
+                    }
+                    $room = $outputLimitBytes - strlen($output);
+                    if ($room > 0) {
+                        $output .= $room >= strlen($chunk) ? $chunk : substr($chunk, 0, $room);
+                    }
+                }
+            }
+            $status = proc_get_status($process);
+            if (!$status['running']) {
+                // Final drain: the child may have written between the select
+                // and the status check.
+                foreach ([$pipes[1], $pipes[2]] as $stream) {
+                    $chunk = (string) @fread($stream, 65536);
+                    if ($chunk !== '') {
+                        $room = $outputLimitBytes - strlen($output);
+                        if ($room > 0) {
+                            $output .= $room >= strlen($chunk) ? $chunk : substr($chunk, 0, $room);
+                        }
+                    }
+                }
+                break;
+            }
+        }
+
+        self::disarmWatchdog($watchdog);
+
+        // A blocked read returns only when the child writes or dies, so data
+        // can arrive long after the budget (measured: a 1 s budget "succeeded"
+        // after 4.2 s). The watchdog has killed the tree by now - never accept
+        // the late data as success.
+        if (!$timedOut && microtime(true) >= $deadline) {
+            $timedOut = true;
+        }
+
+        if ($timedOut) {
+            self::terminateTree($process);
+            // Close the output pipes before reaping: proc_close() waits for
+            // EOF on them, and a descendant that inherited the write ends
+            // would otherwise keep the server blocked forever.
+            @fclose($pipes[1]);
+            @fclose($pipes[2]);
+            @proc_close($process);
+            throw new CompilerOracleToolFailure(
+                'The TypePHP compiler did not finish within ' . $timeoutSeconds
+                . ' seconds and was killed. Raise TYPEPHP_MCP_COMPILE_TIMEOUT for huge projects.'
+            );
+        }
+        @fclose($pipes[1]);
+        @fclose($pipes[2]);
+        $code = @proc_close($process);
+        return ['code' => $code, 'output' => $output, 'timedOut' => false];
+    }
+
+    /**
+     * Kill the compiler tree at the deadline (Windows only).
+     *
+     * stream_select()/fread() on a Windows process pipe may block until the
+     * child writes or exits, ignoring the timeout, so runProcess() cannot end
+     * a silent compiler on its own. This helper sleeps past the deadline and
+     * then kills the whole tree; that closes the pipe write ends, which
+     * releases the blocked read.
+     *
+     * The helper is gated by a sentinel file: it fires only while the file
+     * still exists, and the normal path deletes it before disarming. A
+     * recycled pid is therefore never killed after a successful call, and a
+     * crash of this process still leaves the watchdog armed (the sentinel
+     * survives) - which is the right outcome for a wedged compiler.
+     *
+     * Built from cmd.exe built-ins only (ping, if, taskkill): the server runs
+     * as an AOT binary where no PHP interpreter is guaranteed to exist.
+     *
+     * @return array{process: resource, sentinel: string}|null
+     */
+    private static function armWatchdog(int $pid, int $timeoutSeconds): ?array
+    {
+        if (stripos(PHP_OS, 'WIN') !== 0 || $pid <= 0 || $timeoutSeconds <= 0) {
+            return null;
+        }
+        $sentinel = sys_get_temp_dir() . '/typephp-mcp-watchdog-' . getmypid() . '-' . mt_rand(100000, 999999);
+        if (@file_put_contents($sentinel, '1') === false) {
+            return null;
+        }
+        // ping -n N waits about N-1 seconds (the first packet is immediate),
+        // so N = timeout + 1 fires just past the deadline.
+        $command = 'ping -n ' . ($timeoutSeconds + 1) . ' 127.0.0.1 >nul & if exist '
+            . escapeshellarg($sentinel) . ' taskkill /PID ' . $pid . ' /T /F >nul 2>&1';
+        // stdio goes to NUL, not to pipes: a pipe's write ends are inherited
+        // by the ping child, and reaping the helper would then block in
+        // proc_close() until that child exits on its own (measured: 19 s).
+        $watchdog = @proc_open($command, [
+            0 => ['file', 'NUL', 'r'],
+            1 => ['file', 'NUL', 'w'],
+            2 => ['file', 'NUL', 'w'],
+        ], $pipes);
+        if (!is_resource($watchdog)) {
+            @unlink($sentinel);
+            return null;
+        }
+        return ['process' => $watchdog, 'sentinel' => $sentinel];
+    }
+
+    /**
+     * Disarm the watchdog: delete the gate first, then stop the helper tree.
+     *
+     * Removing the sentinel before terminating keeps the helper from killing
+     * anything even if it outlives this call (a ping child keeps running for
+     * a moment after cmd.exe is terminated, then sees no sentinel and does
+     * nothing). stdio is NUL rather than a pipe, so reaping the helper never
+     * waits for that child.
+     *
+     * proc_terminate() only kills the direct cmd.exe; its ping child would
+     * stay behind for the rest of the armed delay (nearly the full compile
+     * timeout, so up to two minutes per call) and would accumulate across
+     * calls. The whole tree is killed with taskkill /T before reaping.
+     *
+     * @param array{process: resource, sentinel: string}|null $watchdog
+     */
+    private static function disarmWatchdog(?array $watchdog): void
+    {
+        if ($watchdog === null) {
+            return;
+        }
+        @unlink($watchdog['sentinel']);
+        $status = @proc_get_status($watchdog['process']);
+        $pid = is_array($status) && isset($status['pid']) ? (int) $status['pid'] : 0;
+        if ($pid > 0) {
+            $discard = [];
+            @exec('taskkill /PID ' . $pid . ' /T /F 2>nul', $discard, $discardCode);
+        }
+        @proc_terminate($watchdog['process'], 9);
+        @proc_close($watchdog['process']);
+    }
+
+    /**
+     * Kill the compiler and every descendant, then wait for them to be gone.
+     *
+     * proc_terminate() only signals the direct child: on POSIX the command is
+     * started through a shell, and the compiler itself can fork (php-builder,
+     * make, cl). Killing just the parent left those running, still able to
+     * write into the build directory that check() is about to delete. So the
+     * descendants are collected first, then signalled from the leaves up, and
+     * the caller only proceeds once none of them is alive.
+     *
+     * The direct child only receives SIGTERM first: after the grace period
+     * it is SIGKILLed too. A child that ignores SIGTERM would otherwise
+     * survive this method and block the caller's proc_close() forever, and
+     * runProcess() would report "was killed" while the compiler was still
+     * running. Only when the whole tree is confirmed dead does the caller
+     * reclaim the process and delete the build directory.
+     *
+     * Windows collects the tree the same way and hands the whole thing to
+     * taskkill /T, which is done before the parent is signalled - signalling
+     * the parent first would break the parent chain the /T walk relies on.
+     */
+    private static function terminateTree(mixed $process): void
+    {
+        if (!is_resource($process)) {
+            return;
+        }
+        $status = @proc_get_status($process);
+        $pid = is_array($status) && isset($status['pid']) ? (int) $status['pid'] : 0;
+
+        if (stripos(PHP_OS, 'WIN') === 0) {
+            if ($pid > 0) {
+                $discard = [];
+                @exec('taskkill /PID ' . $pid . ' /T /F 2>nul', $discard, $discardCode);
+            }
+            @proc_terminate($process, 9);
+            self::waitForExit($process, 5);
+            return;
+        }
+
+        // Collect descendants before signalling anything: once the parent is
+        // gone the trees are reparented and can no longer be found.
+        $tree = self::descendantPids($pid);
+        @proc_terminate($process, 15);
+        foreach (array_reverse($tree) as $childPid) {
+            $discard = [];
+            @exec('kill -TERM ' . $childPid . ' 2>/dev/null', $discard, $discardCode);
+        }
+        usleep(200000);
+        // The grace period is over: SIGKILL everything still running,
+        // including the direct child - it only got SIGTERM so far.
+        foreach (array_reverse($tree) as $childPid) {
+            $discard = [];
+            @exec('kill -KILL ' . $childPid . ' 2>/dev/null', $discard, $discardCode);
+        }
+        if ($pid > 0) {
+            $discard = [];
+            @exec('kill -KILL ' . $pid . ' 2>/dev/null', $discard, $discardCode);
+        }
+        // Descendants were reparented to init, so kill -0 stops reporting
+        // them once they are gone. The direct child is OUR child: after
+        // SIGKILL it lingers as a zombie until proc_close() reaps it, so it
+        // must not go through runningPids()/waitUntilGone() - its liveness
+        // is checked via proc_get_status() in waitForExit() below.
+        $stillRunning = self::runningPids($tree);
+        if ($stillRunning !== []) {
+            self::waitUntilGone($stillRunning, 5);
+        }
+        self::waitForExit($process, 5);
+    }
+
+    /**
+     * PIDs of every live descendant of $pid (depth-first).
+     *
+     * @return array<int, int>
+     */
+    private static function descendantPids(int $pid): array
+    {
+        if ($pid <= 0) {
+            return [];
+        }
+        $parents = self::processParents();
+        $children = [];
+        foreach ($parents as $childPid => $parentPid) {
+            $children[$parentPid][] = $childPid;
+        }
+        $collected = [];
+        $queue = [$pid];
+        while ($queue !== []) {
+            $current = array_shift($queue);
+            foreach ($children[$current] ?? [] as $childPid) {
+                if (in_array($childPid, $collected, true)) {
+                    continue;
+                }
+                $collected[] = $childPid;
+                $queue[] = $childPid;
+            }
+        }
+        return $collected;
+    }
+
+    /**
+     * pid => ppid for every visible process.
+     *
+     * @return array<int, int>
+     */
+    private static function processParents(): array
+    {
+        $output = [];
+        @exec('ps -A -o pid= -o ppid= 2>/dev/null', $output);
+        $map = [];
+        foreach ($output as $line) {
+            $line = trim((string) $line);
+            if ($line === '') {
+                continue;
+            }
+            $fields = preg_split('/\s+/', $line) ?: [];
+            if (count($fields) < 2 || !is_numeric($fields[0]) || !is_numeric($fields[1])) {
+                continue;
+            }
+            $map[(int) $fields[0]] = (int) $fields[1];
+        }
+        return $map;
+    }
+
+    /**
+     * @param array<int, int> $pids
+     * @return array<int, int>
+     */
+    private static function runningPids(array $pids): array
+    {
+        $alive = [];
+        foreach ($pids as $pid) {
+            $discard = [];
+            $code = 0;
+            @exec('kill -0 ' . $pid . ' 2>/dev/null', $discard, $code);
+            if ($code === 0) {
+                $alive[] = $pid;
+            }
+        }
+        return $alive;
+    }
+
+    /**
+     * @param array<int, int> $pids
+     */
+    private static function waitUntilGone(array $pids, int $seconds): void
+    {
+        $deadline = microtime(true) + $seconds;
+        while (microtime(true) < $deadline) {
+            if (self::runningPids($pids) === []) {
+                return;
+            }
+            usleep(50000);
+        }
+    }
+
+    /**
+     * Wait for the direct child to be reaped, bounded.
+     */
+    private static function waitForExit(mixed $process, int $seconds): void
+    {
+        if (!is_resource($process)) {
+            return;
+        }
+        $deadline = microtime(true) + $seconds;
+        while (microtime(true) < $deadline) {
+            $status = @proc_get_status($process);
+            if (!is_array($status) || empty($status['running'])) {
+                return;
+            }
+            usleep(50000);
+        }
+    }
+
+    /**
+     * Signals that the generate stage never got far enough to judge the
+     * user's code: a missing embed library, a missing SDK import library, or
+     * a compiler binary that is not executable.
+     *
+     * @var array<int, string>
+     */
+    private const ENVIRONMENT_FAILURE_MARKERS = [
+        'The host PHP embed library is missing',
+        'The host PHP installation does not provide an Embed SAPI library',
+        'Neither php8ts.lib nor php8.lib found',
+        'php8embed.lib not found',
+        'No TypePHP compiler found',
+        'Permission denied',
+        'is not recognized as an internal or external command',
+        'cannot execute binary file',
+    ];
+
+    /**
+     * Whether the output describes a broken toolchain rather than invalid
+     * user code. Without this, a missing SDK came back as a normal FAILED
+     * result and the client concluded the code was at fault.
+     */
+    private static function isEnvironmentFailure(string $output): bool
+    {
+        foreach (self::ENVIRONMENT_FAILURE_MARKERS as $marker) {
+            if (stripos($output, $marker) !== false) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static function environmentFailureSummary(string $output): string
+    {
+        foreach (self::ENVIRONMENT_FAILURE_MARKERS as $marker) {
+            $position = stripos($output, $marker);
+            if ($position === false) {
+                continue;
+            }
+            $line = substr($output, $position, 300);
+            $break = strpos($line, "\n");
+            if ($break !== false) {
+                $line = substr($line, 0, $break);
+            }
+            return trim($line);
+        }
+        return 'the compiler exited before it could analyse the file';
+    }
+
+    /**
+     * Render the check result. The status line names the stage that actually
+     * ran and the diagnostic count; diagnostics carry file, line, column and
+     * severity parsed from the compiler output.
+     *
+     * @param array{code: int, output: string, timedOut: bool} $result
+     */
+    private static function format(string $file, RepoRoot $root, array $result): string
+    {
+        $diagnostics = self::parseDiagnostics($result['output'], $root);
+        $relative = $root->relativeFrom($file);
+        if ($result['code'] === 0) {
+            $lines = [
+                'OK stage=' . self::STAGE_GENERATE . ' file=' . $relative
+                . ' diagnostics=' . count($diagnostics),
+                'Note: stage=generate runs `tpc --dry` (C++ generation only). The compile and link stages are not run, so their errors are not covered.',
+            ];
+            if ($diagnostics !== []) {
+                $lines[] = 'Diagnostics:';
+                $lines = array_merge($lines, self::renderDiagnostics($diagnostics));
+            }
+            return TextUtil::clip(implode("\n", $lines), 4000);
+        }
+        $lines = [
+            'FAILED stage=' . self::STAGE_GENERATE . ' exit=' . $result['code']
+            . ' file=' . $relative . ' diagnostics=' . count($diagnostics),
+        ];
+        if ($diagnostics !== []) {
+            $lines[] = 'Diagnostics:';
+            $lines = array_merge($lines, self::renderDiagnostics($diagnostics));
+        } else {
+            $lines[] = 'Diagnostics: (none parsed; raw compiler output follows)';
+        }
+        foreach (self::keptLines($result['output']) as $line) {
+            $lines[] = $line;
+            if (count($lines) >= 40) {
+                break;
+            }
+        }
+        return TextUtil::clip(implode("\n", $lines), 4000);
+    }
+
+    /**
+     * Parse "Fatal error: <message> in <file>:<line>[:<col>]" lines.
+     *
+     * @return array<int, array{severity: string, message: string, file: string, line: int, column: int}>
+     */
+    private static function parseDiagnostics(string $output, RepoRoot $root): array
+    {
+        $diagnostics = [];
+        foreach (explode("\n", $output) as $line) {
+            $matched = preg_match(
+                '/^(Fatal error|Parse error|Compile error|Error|Warning|Notice):\s+(.+?)\s+in\s+(.+?):(\d+)(?::(\d+))?\s*$/',
+                $line,
+                $matches
+            );
+            if ($matched !== 1) {
+                continue;
+            }
+            $diagnostics[] = [
+                'severity' => self::severityFor($matches[1]),
+                'message' => $matches[2],
+                'file' => self::relativeDiagnosticPath($matches[3], $root),
+                'line' => (int) $matches[4],
+                'column' => isset($matches[5]) && $matches[5] !== '' ? (int) $matches[5] : 0,
+            ];
+        }
+        return $diagnostics;
+    }
+
+    private static function severityFor(string $label): string
+    {
+        if (str_starts_with($label, 'Warning')) {
+            return 'warning';
+        }
+        if (str_starts_with($label, 'Notice')) {
+            return 'notice';
+        }
+        return 'error';
+    }
+
+    private static function relativeDiagnosticPath(string $path, RepoRoot $root): string
+    {
+        $normalized = str_replace('\\', '/', $path);
+        $real = realpath($normalized);
+        $candidate = is_string($real) && $real !== '' ? str_replace('\\', '/', $real) : $normalized;
+        if (str_starts_with($candidate, $root->path() . '/')) {
+            return $root->relativeFrom($candidate);
+        }
+        return $candidate;
+    }
+
+    /**
+     * @param array<int, array{severity: string, message: string, file: string, line: int, column: int}> $diagnostics
+     * @return array<int, string>
+     */
+    private static function renderDiagnostics(array $diagnostics): array
+    {
+        $lines = [];
+        foreach ($diagnostics as $diagnostic) {
+            $lines[] = '- [' . $diagnostic['severity'] . '] ' . $diagnostic['file'] . ':'
+                . $diagnostic['line'] . ($diagnostic['column'] > 0 ? ':' . $diagnostic['column'] : '')
+                . ' ' . $diagnostic['message'];
+        }
+        return $lines;
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private static function keptLines(string $output): array
+    {
+        $kept = [];
+        foreach (explode("\n", $output) as $line) {
+            $trimmed = trim($line);
+            if ($trimmed === '') {
+                continue;
+            }
+            if (str_starts_with($trimmed, '#')) {
+                continue;
+            }
+            if (str_starts_with($trimmed, 'Stack trace')) {
+                continue;
+            }
+            if (str_starts_with($trimmed, 'thrown in')) {
+                continue;
+            }
+            if (str_starts_with($trimmed, 'Initialized platform')) {
+                continue;
+            }
+            $kept[] = $trimmed;
+            if (count($kept) >= 20) {
+                break;
+            }
+        }
+        return $kept;
+    }
+
+    private static function timeoutSeconds(?int $explicit): int
+    {
+        if ($explicit !== null) {
+            return $explicit;
+        }
+        $override = getenv('TYPEPHP_MCP_COMPILE_TIMEOUT');
+        if (is_string($override) && $override !== '' && is_numeric($override)) {
+            $value = (int) $override;
+            if ($value > 0) {
+                return $value;
+            }
+        }
+        return self::DEFAULT_TIMEOUT_SECONDS;
+    }
+
+    private static function outputLimit(): int
+    {
+        $override = getenv('TYPEPHP_MCP_COMPILE_OUTPUT_LIMIT');
+        if (is_string($override) && $override !== '' && is_numeric($override)) {
+            $value = (int) $override;
+            if ($value > 0) {
+                return $value;
+            }
+        }
+        return self::DEFAULT_OUTPUT_LIMIT_BYTES;
+    }
+
+    private static function memoryLimitMb(): int
+    {
+        $override = getenv('TYPEPHP_MCP_COMPILE_MEMORY_LIMIT_MB');
+        if (is_string($override) && $override !== '' && is_numeric($override)) {
+            $value = (int) $override;
+            if ($value > 0) {
+                return $value;
+            }
+        }
+        return self::DEFAULT_MEMORY_LIMIT_MB;
+    }
+
+    /**
+     * MCP clients do not always inherit a developer PATH, but tpc resolves the
+     * host toolchain before doing anything else. Prepend the MSVC bin located
+     * through vswhere when no cl is reachable; putenv propagates to the
+     * proc_open() children of this process on Windows.
+     */
+    private static function ensureHostToolchain(): void
+    {
+        if (stripos(PHP_OS, 'WIN') !== 0) {
+            return;
+        }
+        if (self::hasClOnPath()) {
+            return;
+        }
+        $binDir = self::findMsvcBinDir();
+        if ($binDir === null) {
+            return;
+        }
+        $path = getenv('PATH');
+        putenv('PATH=' . $binDir . ';' . (is_string($path) ? $path : ''));
+    }
+
+    private static function hasClOnPath(): bool
+    {
+        $path = getenv('PATH');
+        if (!is_string($path) || $path === '') {
+            return false;
+        }
+        foreach (explode(';', $path) as $dir) {
+            if ($dir !== '' && is_file($dir . '\cl.exe')) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Locate the newest MSVC x64 host bin directory via vswhere.
+     */
+    protected static function findMsvcBinDir(): ?string
+    {
+        $programFiles = getenv('ProgramFiles(x86)');
+        if (!is_string($programFiles) || $programFiles === '') {
+            // Standard x64 Windows location; the variable may be absent when a
+            // client sanitizes the environment.
+            $programFiles = 'C:\Program Files (x86)';
+        }
+        $vswhere = $programFiles . '\Microsoft Visual Studio\Installer\vswhere.exe';
+        if (!is_file($vswhere)) {
+            return null;
+        }
+        $output = [];
+        $code = -1;
+        exec('"' . $vswhere . '" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath 2>nul', $output, $code);
+        $installPath = count($output) > 0 && is_string($output[0]) ? trim($output[0]) : '';
+        if ($installPath === '' || !is_dir($installPath)) {
+            return null;
+        }
+        $msvcRoot = $installPath . '\VC\Tools\MSVC';
+        if (!is_dir($msvcRoot)) {
+            return null;
+        }
+        $versions = scandir($msvcRoot);
+        if (!is_array($versions)) {
+            return null;
+        }
+        $latest = '';
+        foreach ($versions as $version) {
+            if ($version === '.' || $version === '..') {
+                continue;
+            }
+            if (is_dir($msvcRoot . '\\' . $version) && strcmp($version, $latest) > 0) {
+                $latest = $version;
+            }
+        }
+        if ($latest === '') {
+            return null;
+        }
+        $binDir = $msvcRoot . '\\' . $latest . '\bin\Hostx64\x64';
+        return is_dir($binDir) ? $binDir : null;
+    }
+
+    public static function phpBinary(): string
+    {
+        $override = getenv('TYPEPHP_MCP_PHP');
+        if (is_string($override) && $override !== '' && is_file($override)) {
+            return $override;
+        }
+        try {
+            $result = self::runProcess('php -v', self::PROBE_TIMEOUT_SECONDS, 8192);
+        } catch (CompilerOracleToolFailure $error) {
+            return '';
+        }
+        if ($result['code'] === 0) {
+            return 'php';
+        }
+        return '';
+    }
+
+    /**
+     * Temporary build directory for a --dry run.
+     *
+     * It must live on the same volume as the source file: tpc derives each
+     * generated .cc path by stripping the build directory's common prefix
+     * from the source directory and appending the remainder, so a build
+     * directory on another volume (C: temp vs D: project, or the reverse)
+     * makes it append the whole absolute path instead - a path that can never
+     * be created.
+     *
+     * It must also stay OUT of the source tree: a directory created next to
+     * the file gets picked up while the compiler enumerates sources, and
+     * scanning its own generated .cc files recursed until the process died
+     * (0xC0000005 on Windows CI). The repository's build/ directory has both
+     * properties for files in the checkout; anything else falls back to the
+     * file's directory. check() removes it in a finally block.
+     */
+    private static function buildDir(string $sourceFile, RepoRoot $root): string
+    {
+        $relative = $root->relativeFrom($sourceFile);
+        if ($relative !== $sourceFile) {
+            $buildRoot = $root->path() . '/build';
+            if ((is_dir($buildRoot) || mkdir($buildRoot, 0777, true)) && is_writable($buildRoot)) {
+                return $buildRoot . '/.typephp-mcp-dry-' . uniqid();
+            }
+        }
+        $dir = dirname($sourceFile);
+        if (is_dir($dir) && is_writable($dir)) {
+            return $dir . '/.typephp-mcp-dry-' . uniqid();
+        }
+        $base = sys_get_temp_dir();
+        if (!is_dir($base) || !is_writable($base)) {
+            $base = self::fallbackTempDir();
+        }
+        return rtrim($base, '/\\') . '/typephp-mcp-dry-' . uniqid();
+    }
+
+    private static function fallbackTempDir(): string
+    {
+        return str_starts_with(PHP_OS, 'WIN') ? 'C:\\Windows\\Temp' : '/tmp';
+    }
+
+    private static function removeDir(string $dir): void
+    {
+        if (!is_dir($dir)) {
+            return;
+        }
+        $entries = scandir($dir);
+        if (!is_array($entries)) {
+            return;
+        }
+        foreach ($entries as $entry) {
+            if ($entry === '.' || $entry === '..') {
+                continue;
+            }
+            $path = $dir . '/' . $entry;
+            if (is_dir($path)) {
+                self::removeDir($path);
+            } else {
+                unlink($path);
+            }
+        }
+        rmdir($dir);
+    }
+}

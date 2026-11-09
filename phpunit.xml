@@ -4,5 +4,8 @@
     <testsuite name="Tests">
       <directory suffix="Test.php">./phpunit</directory>
     </testsuite>
+    <testsuite name="TypePhpMcpTests">
+      <directory suffix="Test.php">./tools/typephp-mcp/tests</directory>
+    </testsuite>
   </testsuites>
 </phpunit>

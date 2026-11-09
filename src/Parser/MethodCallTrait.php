@@ -796,6 +796,15 @@ trait MethodCallTrait
             }
         }
 
+        // A typed Object slot may hold null, and its declared class is not
+        // proof of the runtime subclass. Reuse the property receiver's safe
+        // signature/visibility fallback for these handles as well.
+        $typedObjectReceiver = $this->isVarExpr($expr->var)
+            && $object !== 'this_'
+            && $this->isTypedObject($object)
+            && !$this->isNativeObjectClass($class);
+        $typedPropertyReceiver = $typedPropertyReceiver || $typedObjectReceiver;
+
         $magicMethod = false;
         $method = $this->methodNameToStr($expr->name, literal: true);
         // Keep the statically named method available to every later branch.
@@ -913,7 +922,9 @@ trait MethodCallTrait
 
         // Method calls that can be lowered to a native call
         if (($this->isVarExpr($expr->var) || $materializedNativeReceiver || $materializedTypedPropertyReceiver || $materializedUserReceiver)
-            and $this->isNamedMethod($expr->name)) {
+            && !$typedPropertyHasInaccessibleMethod
+            && $typedPropertyLexicalPrivateClass === ''
+            && $this->isNamedMethod($expr->name)) {
             $type = $this->getVarType($object);
             if ($class !== '' && $this->isNativeObjectClass($class)) {
                 // Native objects have their own C++ virtual thunk for an
@@ -1108,10 +1119,9 @@ trait MethodCallTrait
                     return 'typephp_call_method_scoped_cached(' . $object . ', ' . $methodPtr . ', '
                         . $this->getCallableScopeExpr() . ', ' . $this->getMethodCallCache() . ')';
                 }
-                // The method is already a stable zend_function* from the
-                // project symbol cache. A second callable cache would only
-                // add guards before the same direct call.
-                return 'php::callScoped(' . $object . ', ' . $methodPtr . ', ' . $this->getCallableScopeExpr() . ')';
+                // Scoped dispatch resolves a name; its Variant overload
+                // must never receive the cached zend_function* pointer.
+                return 'php::callScoped(' . $object . ', ' . $method . ', ' . $this->getCallableScopeExpr() . ')';
             }
             if (!$resolvedMethodPtr) {
                 if (!$cacheMethod) {

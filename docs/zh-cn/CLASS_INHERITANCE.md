@@ -35,21 +35,17 @@ interface BaseInterface {}
 class MyClass implements BaseInterface {}
 ```
 
-### 规则三：不能继承内部类（Internal Class）
+### 规则三：Native 类与普通 Zend 类不能互相继承
 
 ```php
-// ❌ 错误：继承 PHP 内部类
+// ✅ 正确：继承 Zend 内部类（编译期按 Reflection::isInternalClass 判定）
 class MyArray extends ArrayObject {}
-// 编译错误：Class `MyArray` Cannot inherit built-in class `ArrayObject`
+class MyDb extends PDO {}
 
-// ✅ 正确：使用组合模式
-class MyContainer {
-    private ArrayObject $storage;
-    
-    public function __construct() {
-        $this->storage = new ArrayObject();
-    }
-}
+// ❌ 错误：Native 类与普通 Zend 类互继
+// class MyNative extends SomeZendClass {}   // Native 类不能继承 Zend 类
+// class MyZend extends SomeNativeClass {}   // Zend 类不能继承 Native 类
+// 编译错误：Native and ZendVM-backed classes cannot inherit from each other
 ```
 
 ---
@@ -73,27 +69,28 @@ class MyContainer {
 
 ### 检查代码位置
 
-相关实现在 `src/Php/Translator.php`：
+相关实现在 `src/Translator.php`（类继承检查）与 `src/Preprocessor.php`（内部类判定）：
 
 ```php
-if ($extends) {
-    $parentClass = $this->getParentClass($class->extends);
-    if ($this->hasNativeClass($parentClass)) {
-        // 父类是已定义的 native 类
-        $parent = $this->getClassDef($parentClass);
+// src/Translator.php — 编译期继承检查（v0.9.5）
+if ($this->classDef->extends and !$this->classDef->inheritedFromInternalClass) {
+    $parentClass = $this->getNamespacedClassName($this->parseIdentifier($class->extends));
+    if ($this->hasClass($parentClass)) {
+        $parent = $this->getClass($parentClass);
+        if ($this->classDef->nativeObject !== $parent->nativeObject) {
+            $this->fatalError($class,
+                'Native and ZendVM-backed classes cannot inherit from each other');
+        }
         if ($parent->flags & Modifiers::FINAL) {
             $this->fatalError($class, "Class `{$this->class}` cannot extend final class `{$parentClass}`");
         }
-        $this->classDef->extends = $parentClass;
+        $this->assertReadonlyInheritanceContract($class, $parentClass, ...);
     } else {
-        // 检查是否为 PHP 内部类
-        if (Reflection::isInternalClass($parentClass)) {
-            $this->fatalError($class, "Class `{$this->class}` Cannot inherit built-in class `$parentClass`");
-        } else {
-            $this->fatalError($class, "Class `{$this->class}` inherits from a non-existent class `$parentClass`");
-        }
+        $this->fatalError($class, "Class `{$this->class}` inherits from a non-existent class `{$parentClass}`");
     }
 }
+// src/Preprocessor.php — 内部类判定：父类是内置类时标记 inheritedFromInternalClass，
+// 后续只按宿主运行时反射校验 readonly 契约，允许继承。
 ```
 
 ---
@@ -312,31 +309,31 @@ class MyService {
 }
 ```
 
-### 示例三：继承 PHP 内部类
+### 示例三：Native 类与 Zend 类互继
 
 ```php
 <?php
-// ❌ 错误：不能继承 PDO
-class MyDatabase extends PDO {
-    // ...
-}
+// ❌ 错误：Zend 类继承 Native 类（或反向）
+class MyNative extends SomeZendClass {}
 
 function main() {
-    $db = new MyDatabase('mysql:host=localhost;dbname=test');
+    $obj = new MyNative();
 }
 ?>
 ```
 
 **编译错误**:
 ```
-Fatal error: Class `MyDatabase` Cannot inherit built-in class `PDO`
+Fatal error: Native and ZendVM-backed classes cannot inherit from each other
 in /path/to/file.php on line X
 ```
 
-**解决方案**:
+**说明**：继承 Zend 内部类（如 `PDO`、`ArrayObject`）是**允许**的；组合模式仍然是
+值得推荐的风格，但不是编译器强制要求。
+
 ```php
 <?php
-// ✅ 使用组合模式
+// ✅ 组合模式（推荐风格，非强制）
 class MyDatabase {
     private PDO $connection;
     
@@ -369,10 +366,10 @@ class UserService implements ServiceInterface {}
 class ProductService implements ServiceInterface {}
 ```
 
-### 2. 使用组合代替继承
+### 2. 优先组合而非继承
 
 ```php
-// ❌ 不推荐：继承内部类
+// ❌ 不推荐：为复用而继承（继承链过深或继承内部类以外的场景）
 class MyCollection extends ArrayCollection {
     // ...
 }
@@ -532,7 +529,7 @@ class EnhancedStorage {
 | **检查时机** | 编译期 | 运行时 |
 | **错误发现** | 编译时立即报错 | 执行到代码时才报错 |
 | **autoload 支持** | ❌ 不支持作为父类 | ✅ 完全支持 |
-| **继承内部类** | ❌ 禁止 | ✅ 允许（部分） |
+| **继承内部类** | ✅ 允许（Zend 内部类，readonly 契约按反射校验） | ✅ 允许（部分） |
 | **性能影响** | 无运行时开销 | 有运行时检查开销 |
 
 ---
@@ -566,5 +563,5 @@ A: Trait 的使用同样受到限制。Trait 必须在编译期可见，不能�
 
 ---
 
-**最后更新**: 2024 年 3 月 20 日  
-**适用版本**: PHP AOT Compiler v1.x
+**最后更新**: 2026 年 10 月（对齐 v0.9.5 实际行为：允许继承 Zend 内部类）  
+**适用版本**: PHP AOT Compiler v0.9.5

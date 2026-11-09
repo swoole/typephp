@@ -71,7 +71,7 @@ trait NameResolutionTrait
     /**
      * Upgrade the class-name Name node in a trait method parameter to Name\FullyQualified.
      * For qualified names (containing \) already resolved by parseTypeDecl(), upgrade the node type directly;
-     * for unresolved unqualified names (such as the inner type of a NullableType, which parseTypeDecl skips by returning TYPE_VAR),
+     * for unresolved unqualified names nested inside compound type declarations,
      * resolve them via useAliases/useNamespaces first and then upgrade.
      * gen_stub.php's SimpleType::fromNode() relies on isFullyQualified() to decide whether to re-resolve;
      * if the name is not upgraded to FullyQualified, the current namespace prefix is wrongly appended once the context is lost.
@@ -178,6 +178,25 @@ trait NameResolutionTrait
         return [$declaredType, $class];
     }
 
+    /** A single named object type with null retains the ordinary object ABI. */
+    protected function getNullableObjectTypeNode(?NodeAbstract $type): ?Node\Name
+    {
+        if ($type instanceof NullableType) {
+            return $type->type instanceof Node\Name ? $type->type : null;
+        }
+        if ($type instanceof UnionType && count($type->types) === 2) {
+            [$first, $second] = $type->types;
+            foreach ([[$first, $second], [$second, $first]] as [$object, $null]) {
+                if ($object instanceof Node\Name
+                    && $null instanceof Node\Identifier
+                    && strtolower($null->name) === 'null') {
+                    return $object;
+                }
+            }
+        }
+        return null;
+    }
+
     protected function parseTypeDecl(?NodeAbstract $type, int $what, string &$class): string
     {
         // An undefined type is treated as var (mixed, any)
@@ -185,6 +204,9 @@ trait NameResolutionTrait
             return Type::VAR;
         }
         $this->validateCompoundTypeDeclaration($type);
+        if (($objectType = $this->getNullableObjectTypeNode($type)) !== null) {
+            return $this->parseTypeDecl($objectType, $what, $class);
+        }
         if ($type instanceof UnionType || $type instanceof NullableType || $type instanceof IntersectionType) {
             // Complex types are uniformly treated as mixed/var at the static stage; the runtime typeCheck provides the fallback.
             return Type::VAR;

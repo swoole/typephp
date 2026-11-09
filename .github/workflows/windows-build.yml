@@ -348,6 +348,65 @@ jobs:
               throw 'The compiler did not produce tpc.exe'
           }
 
+      - name: Build typephp-mcp
+        shell: pwsh
+        # Build from the tool directory like build.bat does: tpc writes the
+        # executable next to project.yml, not next to the caller's cwd.
+        working-directory: tools/typephp-mcp
+        run: |
+          $ErrorActionPreference = 'Stop'
+          # The compiled compiler declares ZEND_MOD_REQUIRED for mbstring and
+          # links phpx.dll from the PHPX build directory, so it needs both the
+          # packaged php.ini and that directory on PATH - the same setup every
+          # other step that runs tpc.exe uses.
+          $env:PHPRC = Join-Path $env:PHP_HOME 'php.ini'
+          $env:PATH = "$env:PHPX_HOME\build;$env:PATH"
+          & ..\..\tpc.exe project.yml --job $env:BUILD_JOBS --no-progress
+          if ($LASTEXITCODE -ne 0) {
+              throw "typephp-mcp build failed with exit code $LASTEXITCODE"
+          }
+          $binary = Join-Path '${{ github.workspace }}' 'tools\typephp-mcp\typephp_mcp.exe'
+          if (-not (Test-Path $binary)) {
+              throw "typephp_mcp.exe was not generated: $binary"
+          }
+
+      - name: Run typephp-mcp native smoke
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $env:PHPRC = Join-Path $env:PHP_HOME 'php.ini'
+          # The AOT binary links PHPX and the PHP runtime; the dev-machine
+          # build script copies their DLLs next to the exe, CI uses PATH.
+          $env:PATH = "$env:PHPX_HOME\build;$env:PATH"
+          # Point check_code at the compiler this job just built. Relying on
+          # auto-detection would fall back to `php bin/tpc.php`, which needs
+          # the phpy extension this runner does not install.
+          $env:TYPEPHP_MCP_TPC = Join-Path '${{ github.workspace }}' 'tpc.exe'
+          $binary = Join-Path '${{ github.workspace }}' 'tools\typephp-mcp\typephp_mcp.exe'
+          # Hard wall-clock limit. Do NOT redirect the child's output: the MCP
+          # server spawns compiler children that inherit the handles, so a
+          # redirected stream never reaches EOF and reading it hangs the step
+          # forever (that is what kept this job open for 30+ minutes). Let the
+          # output go straight to the job log and only bound the wait.
+          $psi = [Diagnostics.ProcessStartInfo]::new()
+          $psi.FileName = (Get-Command php).Source
+          $psi.ArgumentList.Add('tools\typephp-mcp\tests\mcp-binary-smoke.php')
+          $psi.ArgumentList.Add($binary)
+          $psi.ArgumentList.Add('${{ github.workspace }}')
+          $psi.UseShellExecute = $false
+          $psi.WorkingDirectory = '${{ github.workspace }}'
+          $process = [Diagnostics.Process]::new()
+          $process.StartInfo = $psi
+          if (-not $process.Start()) { throw 'Unable to start the typephp-mcp smoke driver' }
+          if (-not $process.WaitForExit(600000)) {
+              $process.Kill($true)
+              $process.WaitForExit()
+              throw 'typephp-mcp native smoke exceeded its 10 minute limit'
+          }
+          if ($process.ExitCode -ne 0) {
+              throw "typephp-mcp native smoke failed with exit code $($process.ExitCode)"
+          }
+
       - name: Test bootstrap signatures
         shell: pwsh
         run: |

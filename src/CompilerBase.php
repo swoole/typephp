@@ -1676,6 +1676,34 @@ abstract class CompilerBase implements PropertyAccessContext
     }
 
     /**
+     * C++ symbol for an array-valued class constant.
+     *
+     * Class constants are emitted as php::Var objects inside the project
+     * namespace (exported via `using namespace`), while functions and methods
+     * are global-scope symbols of the `php_` callable ABI. Constant data is
+     * not part of that ABI, so its symbol deliberately does NOT start with
+     * `php_`: no user-declared function or method can ever produce a
+     * `class_const__` name, keeping the two symbol families disjoint even
+     * when a constant and a function/method share a spelling (MSVC C2872 /
+     * g++ "reference is ambiguous"). The constant name keeps its original
+     * case so two case-distinct constants in one class (`const A` +
+     * `const a`) also keep their own symbols instead of both lowering onto
+     * a single escaped (lowercased) spelling.
+     */
+    protected function getNativeClassConstName(string $name, string $ns = '', string $class = ''): string
+    {
+        $names = [];
+        if ($ns) {
+            $names[] = $this->escapeNamespace($ns);
+        }
+        if ($class) {
+            $names[] = $this->escapeClass($class);
+        }
+        $names[] = $name;
+        return 'class_const__' . implode(self::NAMESPACE_SEPARATOR, $names);
+    }
+
+    /**
      * Determine whether a class's symbol pointer is stable across the PHP
      * module lifetime (registered at MINIT, safe to cache across requests).
      * Compiled output (classes/interfaces compiled in this unit) and PHP
@@ -3204,15 +3232,29 @@ abstract class CompilerBase implements PropertyAccessContext
             }
         }
 
-        $exprCode = $this->convertExprType($expr, $returnType, $type);
-        if ($returnObjectCheckClass !== '') {
+        $nullableObjectReturn = !$this->context->inClosure
+            && $returnType === Type::OBJECT
+            && $this->functionDef->returnNullable;
+        $provenObjectReturn = $nullableObjectReturn && $this->functionDef->returnTypeCheck
+            && $this->compositeTypeRelation($v->expr, $this->functionDef->returnTypeCheck) === self::COMPOSITE_TYPE_MATCH;
+        // Preserve the raw null/object until the declared composite return
+        // check runs; the Object constructor accepts either validated value.
+        $exprCode = $nullableObjectReturn ? $expr : $this->convertExprType($expr, $returnType, $type);
+        if ($provenObjectReturn && $this->isNullExpr($v->expr)) {
+            $exprCode = 'php::Object{}';
+        }
+        if (!$nullableObjectReturn && $returnType === Type::OBJECT && $returnClass !== ''
+            && !$this->isObjectExpressionKnownNonNull($v->expr)) {
+            $returnObjectCheckClass = $returnClass;
+        }
+        if ($returnObjectCheckClass !== '' && !$nullableObjectReturn) {
             $exprCode = $this->convertObjectExpr($exprCode, $this->getClassEntryPtr($returnObjectCheckClass));
         }
         // Union/nullable return type: always use tmpVar for runtime check
         if ($this->shouldCheckClosureReturnType()) {
             [$code, $tmpVar] = $this->genClosureCheckedReturnAssignment($exprCode);
             $this->context->afterStmtLines[] = $this->getIndent() . 'return ' . $tmpVar . ';';
-        } elseif ($this->functionDef->returnTypeCheck && !$this->context->inClosure) {
+        } elseif ($this->functionDef->returnTypeCheck && !$this->context->inClosure && !$provenObjectReturn) {
             [$code, $tmpVar] = $this->genUnionCheckedReturnAssignment($exprCode);
             $this->context->afterStmtLines[] = $this->getIndent() . 'return ' . $tmpVar . ';';
         } elseif (!$this->isVarExpr($v->expr) and !$this->isScalar($v->expr)) {
@@ -3478,7 +3520,7 @@ abstract class CompilerBase implements PropertyAccessContext
                 }
                 $interfaceConstDef = $interfaceDef->constants[$const];
                 if ($interfaceConstDef->type === Type::ARRAY) {
-                    return self::PREFIX . $this->getNativeName($interfaceConstDef->name, $interfaceDef->namespace, $interfaceDef->name);
+                    return $this->getNativeClassConstName($interfaceConstDef->name, $interfaceDef->namespace, $interfaceDef->name);
                 }
                 if (!$interfaceConstDef->codegenFinalized) {
                     return false;
@@ -3513,7 +3555,7 @@ abstract class CompilerBase implements PropertyAccessContext
             $this->fatalError($expr, 'Constant `' . $classDef->getNamespacedName() . '::' . $const . '` is not accessible');
         }
         if ($constDef->type === Type::ARRAY) {
-            return self::PREFIX . $this->getNativeName($constDef->name, $classDef->namespace, $classDef->name);
+            return $this->getNativeClassConstName($constDef->name, $classDef->namespace, $classDef->name);
         } else {
             // Forward constant references may be encountered while the
             // declaration-expression pass is still visiting another file.
@@ -4278,7 +4320,11 @@ abstract class CompilerBase implements PropertyAccessContext
     ): string {
         $callArgs = $this->parseCallArgs($args, $funcName, $className);
         if ($requiresDynamicScope && $this->methodDef) {
-            return 'php::callScoped(' . $object . ', ' . $method . ', ' . $this->getCallableScopeExpr() . ', ' . $callArgs . ')';
+            // callScoped resolves a callable name in the lexical scope. Its
+            // Variant argument cannot accept zend_function*: C++ converts
+            // that pointer to bool, producing an invalid callback "1".
+            $scopedMethod = $funcName === '' ? $method : $this->getLiteralString($funcName);
+            return 'php::callScoped(' . $object . ', ' . $scopedMethod . ', ' . $this->getCallableScopeExpr() . ', ' . $callArgs . ')';
         }
         return $object . '.call(' . $method . ', ' . $callArgs . ')';
     }

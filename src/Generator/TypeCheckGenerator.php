@@ -365,6 +365,12 @@ trait TypeCheckGenerator
         if (empty($argInfo->typeCheck)) {
             return '';
         }
+        if ($argInfo->type === Type::OBJECT && $argInfo->nullable
+            && !$argInfo->variadic && !$argInfo->byRef) {
+            // Native calls and Zend wrappers validate dynamic inputs before
+            // entering the typed ABI. Rechecking every known Object is wasteful.
+            return '';
+        }
 
         $varName = $argInfo->name;
         if ($argInfo->variadic) {

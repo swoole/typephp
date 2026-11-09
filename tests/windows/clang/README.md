@@ -16,7 +16,7 @@ session in the compiler repository:
 ```powershell
 . .\tests\windows\clang\set-llvm-env.ps1 `
   -LlvmHome D:\workspace\tools\llvm-23.1.2 `
-  -VcToolsRoot 'C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207' `
+  -VcToolsRoot 'D:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207' `
   -WindowsSdkRoot 'C:\Program Files (x86)\Windows Kits\10' `
   -WindowsSdkVersion 10.0.26100.0
 

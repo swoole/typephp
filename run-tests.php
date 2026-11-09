@@ -2572,8 +2572,10 @@ $message
         }
     } else {
         $content = file_get_contents($test_file);
-        if (preg_match('/function main\(\)/', $content)) {
-            file_put_contents($test_file, $content. '<?php main(); ?>');
+        $main_call = get_test_main_call($content);
+        if ($main_call !== null) {
+            $prefix = str_ends_with(rtrim($content), '?>') ? '<?php ' : "\n";
+            file_put_contents($test_file, $content . $prefix . $main_call);
         }
     }
 
@@ -2655,8 +2657,12 @@ COMMAND $cmd
         foreach (glob($sanitizerPrefix . '.*') ?: [] as $report) {
             $diagnostic = file_get_contents($report);
             if (is_string($diagnostic) && $diagnostic !== '') {
-                $sanitizerFailure = true;
-                $out .= "\nSanitizer report: " . $report . "\n" . $diagnostic;
+                if (sanitizer_report_is_failure($diagnostic)) {
+                    $sanitizerFailure = true;
+                    $out .= "\nSanitizer report: " . $report . "\n" . $diagnostic;
+                } else {
+                    fwrite(STDERR, "ASan Fiber warning retained in " . $report . "\n");
+                }
             }
         }
     }
@@ -4588,6 +4594,22 @@ function parse_sanitize_option(string $value): array
     return $sanitizers;
 }
 
+function sanitizer_report_is_failure(string $diagnostic): bool
+{
+    // The prebuilt PHP runtime is not instrumented and does not notify ASan
+    // about Fiber stack switches. This specific informational warning is not
+    // a memory error. Keep its file, but do not alter the test's output.
+    // Any other content, including an error after the warning, remains fatal.
+    $remaining = preg_replace(
+        '~^==\d+==WARNING: ASan is ignoring requested __asan_handle_no_return:[^\n]*\n'
+        . 'False positive error reports may follow\n'
+        . 'For details see https://github\.com/google/sanitizers/issues/189(?:\n|$)~m',
+        '',
+        str_replace("\r\n", "\n", $diagnostic),
+    );
+    return trim($remaining ?? $diagnostic) !== '';
+}
+
 function configure_sanitizer_environment(array $env, array $sanitizers, ?string $reportPrefix = null): array
 {
     $log = $reportPrefix === null ? '' : ':log_path="' . str_replace('\\', '/', $reportPrefix) . '"';
@@ -4605,6 +4627,40 @@ function configure_sanitizer_environment(array $env, array $sanitizers, ?string 
             . ':halt_on_error=1:abort_on_error=0:print_stacktrace=1' . $log;
     }
     return $env;
+}
+
+/**
+ * Find the global entrypoint without matching methods, comments or strings.
+ * TypePHP accepts main() or main(int $argc, array $argv).
+ */
+function get_test_main_call(string $source): ?string
+{
+    $tokens = array_values(array_filter(token_get_all($source), static function ($token): bool {
+        return !is_array($token) || !in_array($token[0], [T_WHITESPACE, T_COMMENT, T_DOC_COMMENT], true);
+    }));
+    $depth = 0;
+    $namespace = '';
+    $namespace_depth = 0;
+    foreach ($tokens as $index => $token) {
+        if ($depth === 0 && is_array($token) && $token[0] === T_NAMESPACE) {
+            $namespace = '';
+            for ($next = $index + 1; isset($tokens[$next]) && $tokens[$next] !== '{' && $tokens[$next] !== ';'; $next++) {
+                $namespace .= is_array($tokens[$next]) ? $tokens[$next][1] : $tokens[$next];
+            }
+            $namespace_depth = ($tokens[$next] ?? null) === '{' ? 1 : 0;
+        } elseif ($token === '{' || (is_array($token) && in_array($token[0], [T_CURLY_OPEN, T_DOLLAR_OPEN_CURLY_BRACES], true))) {
+            $depth++;
+        } elseif ($token === '}') {
+            $depth--;
+        } elseif ($depth === $namespace_depth && $namespace === '' && is_array($token) && $token[0] === T_FUNCTION) {
+            $name = $tokens[$index + 1] ?? null;
+            if (is_array($name) && $name[0] === T_STRING && strcasecmp($name[1], 'main') === 0 && ($tokens[$index + 2] ?? null) === '(') {
+                $call = ($tokens[$index + 3] ?? null) === ')' ? 'main();' : 'main($argc, $argv);';
+                return $namespace_depth === 1 ? 'namespace { ' . $call . ' }' : $call;
+            }
+        }
+    }
+    return null;
 }
 
 function compile_php_file(string $file, string $compiler_args = ''): string
@@ -4635,7 +4691,7 @@ function compile_php_file(string $file, string $compiler_args = ''): string
         $binary_file = $binary_name;
     }
 
-    if (!str_contains($data, 'function main()')) {
+    if (get_test_main_call($data) === null) {
         file_put_contents($file, "<?php\nfunction main() {\n" . substr($data, 5, -2) . "\n}\n");
     }
 
@@ -4657,7 +4713,7 @@ function compile_php_file(string $file, string $compiler_args = ''): string
     }
     if ($aot_sanitize !== []) {
         // Append after --AOT_ARGS-- so per-test flags cannot turn this off.
-        $cmd .= ' --sanitize ' . escapeshellarg(implode(',', $aot_sanitize)) . ' --debug';
+        $cmd .= ' --sanitize ' . escapeshellarg(implode(',', $aot_sanitize));
     }
     foreach (get_aot_compiler_job_args() as $argument) {
         $compiler_output_args .= ' ' . escapeshellarg($argument);

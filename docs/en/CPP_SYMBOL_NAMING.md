@@ -308,6 +308,50 @@ TypePHP extensions must not separately compile or statically link a PHPX impleme
 `src/core/typephp_*.cc` only carries the TypePHP-specific `typephp_*` runtime; `php::` ZendAPI wrappers should be placed in core source files without the
 `typephp_` prefix, such as `src/core/scope.cc`.
 
+### 5.5 Class Constant Data Symbols
+
+Array-valued class constants are not callables and are not part of the `php_` export ABI. Each one is emitted as a `php::Var` object inside
+`typephp_project_<project>` (exported to generated translation units via `using namespace`), while functions and methods are global-scope `php_`
+callables. Constant data therefore uses a separate project-internal spelling that does **not** start with `php_`:
+
+```php
+namespace App;
+
+class User
+{
+    const ITEMS = [1, 2, 3];
+}
+```
+
+```cpp
+// Callable ABI (Section 5): global scope, normalized (lowercased) names.
+php::Bool php_app__user__save(php::Object &this_);
+
+// Class-constant data: project namespace, case-sensitive constant name,
+// no php_ prefix — internal data, not exported callable ABI.
+namespace typephp_project_<project> {
+extern php::Var class_const__app__user__ITEMS;
+}
+```
+
+Rationale:
+
+- The `php_` prefix maps user-declared functions and methods; it is a designed callable ABI that generated code, library stubs, and external C++
+  implementations must share. Array class constants are project-internal data and must not be presented as public ABI symbols.
+- Because every user-declared function or method maps to a `php_` name, a `class_const__` symbol can never be produced by user PHP code — this
+  is what keeps the data and callable symbol families disjoint. Merely inserting a marker segment after `php_` would not: a root-namespace
+  function such as `function const__box__items()` still maps to `php_const__box__items()` and would collide with a `php_`-prefixed constant
+  spelling through `using namespace` (MSVC C2872 / g++ "reference is ambiguous").
+- The constant name keeps its original case (PHP constants are case-sensitive) so two case-distinct constants in one class (`const A` +
+  `const a`) keep their own symbols instead of collapsing onto one escaped lowercase spelling.
+- The mapping is produced only by `getNativeClassConstName()` in `src/CompilerBase.php`; generated code must never rebuild this spelling by hand.
+
+Regression test:
+
+```text
+tests/compiler/const/array-const-method-name-collision.phpt
+```
+
 ## 6. Name Selection Flow
 
 When adding a C++ API, judge in the following order:
@@ -338,10 +382,11 @@ When adding or modifying generated helpers, check:
 - [ ] Stub and existing ABI are evaluated together when modifying the public callable mapping;
 - [ ] At least one compilation regression test is added for a user function with the same name.
 
-The current related regression test is:
+The current related regression tests are:
 
 ```text
 tests/compiler/basic/helper-symbol-collision.phpt
+tests/compiler/const/array-const-method-name-collision.phpt
 ```
 
 ## 8. Main Implementation Locations
@@ -349,6 +394,7 @@ tests/compiler/basic/helper-symbol-collision.phpt
 | Responsibility | File |
 | --- | --- |
 | `php_` callable prefix and combination separator | `src/CompilerBase.php` |
+| Array class-constant data symbols (`class_const__`, no `php_`) | `src/CompilerBase.php`, `src/Translator.php` |
 | Callable combination collision detection | `src/Preprocessor.php` |
 | `typephp_project_<project>` generation and project-private tables | `src/Translator.php` |
 | TypePHP extension prefix constants | `src/Metadata/Constants.php` |

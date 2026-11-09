@@ -104,6 +104,10 @@ trait DefaultArgumentGenerator
     private function convertDefaultArgumentValue(string $type, ArgInfo $argInfo): string
     {
         $value = $argInfo->default;
+        if ($type === Type::OBJECT && $argInfo->nullable
+            && $argInfo->defaultExpr !== null && $this->isNullExpr($argInfo->defaultExpr)) {
+            return 'php::Object{}';
+        }
         if ($argInfo->defaultType === $type) {
             return $value;
         }
@@ -115,7 +119,9 @@ trait DefaultArgumentGenerator
             Type::BOOL => $this->convertBoolExpr($value, $fromType),
             Type::STR => 'php::toString(' . $value . ')',
             Type::ARRAY => 'php::toArray(' . $value . ')',
-            Type::OBJECT => 'php::toObject(' . $value . ')',
+            Type::OBJECT => $argInfo->nullable
+                ? $this->convertNullableObjectExpr($value)
+                : 'php::toObject(' . $value . ')',
             default => $value,
         };
     }

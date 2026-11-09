@@ -11,6 +11,7 @@ use TypePhp\Type;
 
 use PhpParser\Node\Expr;
 use PhpParser\NodeAbstract;
+use TypePhp\Entity\ClassDef;
 use TypePhp\Generator\Symbol;
 use TypePhp\Resolver\Reflection;
 
@@ -159,10 +160,16 @@ trait ClassConstantFetchTrait
         if (($self or $this->isNameExpr($expr->class)) and $this->isIdExpr($expr->name)) {
             if ($this->hasClass($class)) {
                 $classDef = $this->getClass($class);
-                if ($classDef->enum) {
+                // zend_enum_get_case() assumes an existing case. Ordinary
+                // enum constants must use normal constant resolution instead.
+                // Unit enum cases have null values, so isset() is insufficient.
+                if ($classDef->enum && array_key_exists($const, $classDef->enumCases)) {
                     $expr->setAttribute(self::ATTR_LOWERED_TYPE, Type::OBJECT);
                     $ce = $this->getClassEntryPtr($class);
                     return 'php::getEnumCase(' . $ce . ', ' . $this->getLiteralString($const) . ')';
+                }
+                if ($classDef->enum && !$this->hasDeclaredEnumConstant($classDef, $const)) {
+                    $this->fatalError($expr, "Class constant `{$class}::{$const}` not found");
                 }
                 $nativeConst = $this->findNativeClassConst($expr, $class, $const);
                 if ($nativeConst) {
@@ -185,6 +192,24 @@ trait ClassConstantFetchTrait
         $name = $class . '::' . $const;
         $name = $this->getLiteralString($name);
         return Symbol::constant() . '(' . $name . ')';
+    }
+
+    private function hasDeclaredEnumConstant(ClassDef $class, string $name): bool
+    {
+        if ($class->hasConstant($name)) {
+            return true;
+        }
+        // Existence must not depend on whether a value can be inlined. Enum
+        // constants may also be inherited from implemented interfaces.
+        foreach ($this->getClassImplementedInterfaces($class) as $interface) {
+            if ($this->hasInterface($interface) && $this->getInterface($interface)->hasConstant($name)) {
+                return true;
+            }
+            if ($this->isInternalInterface($interface) && Reflection::getClass($interface)?->hasConstant($name)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     protected function parseDynamicClassConstFetch(Expr\ClassConstFetch $expr): string

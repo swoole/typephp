@@ -1,21 +1,20 @@
 <?php
 /**
- * This file is part of TypePHP.
+ * This file is part of TypePHP(AOT).
  *
- * @link     https://www.swoole.com/
+ * @link     https://www.swoole.com/aot/
  * @contact  service@swoole.com
  */
 
 namespace TypePhp\Parser;
 
-use TypePhp\Type;
-
-use TypePhp\Resolver\PropertyWriteTarget;
 use PhpParser\Node;
 use PhpParser\Node\ArrayItem;
 use PhpParser\Node\Expr;
 use PhpParser\Node\Expr\Variable;
 use PhpParser\NodeAbstract;
+use TypePhp\Resolver\PropertyWriteTarget;
+use TypePhp\Type;
 
 trait AssignOpTrait
 {
@@ -23,8 +22,7 @@ trait AssignOpTrait
         NodeAbstract $left,
         NodeAbstract $right,
         bool $resultUnused = false,
-    ): string
-    {
+    ): string {
         if ($left instanceof Expr\ArrayDimFetch && $left->dim !== null) {
             $this->assertNotNativeObjectArrayKey($left->dim);
         }
@@ -94,8 +92,7 @@ trait AssignOpTrait
         NodeAbstract $right,
         ?PropertyWriteTarget $target = null,
         bool $resultUnused = false,
-    ): string
-    {
+    ): string {
         if ($target !== null) {
             $this->assertCanAssignPropertyWrite($target, $right);
         }
@@ -302,22 +299,8 @@ trait AssignOpTrait
                         . $this->parseAssignToList($item->value, $itemExpr)
                         . PHP_EOL;
                 } else {
-                    // Destructuring is an indirect write form. It must not
-                    // inherit the direct-assignment initialization exception
-                    // for readonly properties.
-                    $writeTarget = $item->value;
-                    while ($writeTarget instanceof Expr\ArrayDimFetch) {
-                        $writeTarget = $writeTarget->var;
-                    }
-                    if ($writeTarget instanceof Expr\PropertyFetch) {
-                        $this->preparePropertyWriteTarget($writeTarget, false);
-                    }
-                    // Route every destructuring target through the normal
-                    // assignment pipeline. Existing native locals remain
-                    // native and receive the usual scalar conversion, while
-                    // typed properties retain their runtime type checks.
                     $code .= $this->getIndent()
-                        . $this->parseAssignFinally($item->value, $itemExpr)
+                        . $this->parseDestructuringWrite($item->value, $itemExpr)
                         . ';' . PHP_EOL;
                 }
             } else {
@@ -329,13 +312,25 @@ trait AssignOpTrait
         return $code . $this->getIndent() . '}';
     }
 
+    /** List assignment and foreach share indirect-write checks and conversions. */
+    protected function parseDestructuringWrite(Expr $target, Expr $value): string
+    {
+        $writeTarget = $target;
+        while ($writeTarget instanceof Expr\ArrayDimFetch) {
+            $writeTarget = $writeTarget->var;
+        }
+        if ($writeTarget instanceof Expr\PropertyFetch) {
+            $this->preparePropertyWriteTarget($writeTarget, false);
+        }
+        return $this->parseAssignFinally($target, $value);
+    }
+
     protected function parseAssignFinally(
         Expr $left,
         Expr $right,
         bool $foldIntoDeclaration = false,
         bool $resultUnused = false,
-    ): string
-    {
+    ): string {
         $this->assertImmutableMutationTarget($left);
         $this->recordImmutableAlias($left, $right);
         $typedArrayAssignment = $this->parseTypedArrayAssignment($left, $right);
@@ -534,7 +529,7 @@ trait AssignOpTrait
                 $this->assertCanAssignPropertyWrite($propertyWriteTarget, $right);
                 $rightExpr = $this->parseExprAsValue($right);
                 $rightExpr = $this->wrapPropertyWriteTypeCheck($propertyWriteTarget, $right, $rightExpr);
-                if ($def->type !== Type::VAR) {
+                if ($def->type !== Type::VAR && !($def->type === Type::OBJECT && $def->nullable)) {
                     $rightExpr = $this->convertExprFromType($def->type, $rightExpr);
                 }
                 return $this->promoteNativeObjectPropertyValue(
@@ -777,6 +772,11 @@ trait AssignOpTrait
         }
         $rightExprType = $this->detectTypeOfExpr($right);
         if ($propertyWriteTarget !== null && ($propertyDef = $this->getNativePropertyDef($left)) !== null) {
+            if ($propertyDef->type === Type::OBJECT && $propertyDef->nullable) {
+                // The write check already validated T|null. Preserve the value
+                // without a cast or an extra Object temporary for the zval slot.
+                return $var . ' = ' . $rightExpr;
+            }
             $effectiveRightType = $rightExprType === Type::VAR && $this->getFixedPropertyTypeCheckHelper($propertyDef) !== null
                 ? $propertyDef->type
                 : $rightExprType;
@@ -861,7 +861,7 @@ trait AssignOpTrait
         } else {
             $this->addLocalVar($tmp, Type::VAR);
         }
-        $call = $this->emitPropertyHookSetterCall($left, $setter, new Expr\Variable($tmp));
+        $call = $this->emitPropertyHookSetterCall($left, $setter, new Variable($tmp));
         return '((' . $tmp . ' = ' . $rightExpr . ', ' . $call . '), ' . $tmp . ')';
     }
 
@@ -1035,7 +1035,7 @@ trait AssignOpTrait
                 '**' => 'php::fn::pow(' . $read . ', ' . $this->parseExprAsValue($node->expr) . ')',
                 default => $read . ' ' . $binaryOp . ' (' . $this->parseExprAsValue($node->expr) . ')',
             };
-            $call = $this->emitPropertyHookSetterCall($node->var, $setter, new Expr\Variable($tmp));
+            $call = $this->emitPropertyHookSetterCall($node->var, $setter, new Variable($tmp));
             return '((' . $tmp . ' = ' . $value . ', ' . $call . '), ' . $tmp . ')';
         }
 
@@ -1215,7 +1215,7 @@ trait AssignOpTrait
         }
 
         if ($this->isAssignOpConcat($op)) {
-            if (!($node->expr instanceof Expr\BinaryOp\Concat)) {
+            if (!$node->expr instanceof Expr\BinaryOp\Concat) {
                 return $var . '.append(' . $this->parseExprAsValue($node->expr) . ')';
             }
             return $var . ' = php::toString(' . $this->parseFlattenedConcat($node->expr, [$var]) . ')';
@@ -2422,7 +2422,7 @@ trait AssignOpTrait
 
     private function isCoalesceTargetTrivialSubexpr(Expr $expr): bool
     {
-        return $expr instanceof Expr\Variable
+        return $expr instanceof Variable
             || $expr instanceof Node\Scalar
             || $expr instanceof Expr\ConstFetch
             || $expr instanceof Expr\ClassConstFetch;
@@ -2432,8 +2432,7 @@ trait AssignOpTrait
         Expr $sub,
         bool $isReceiver,
         bool $writableContainer = false,
-    ): Expr\Variable
-    {
+    ): Variable {
         [$code, $before, $after] = $this->parseExprWithCapturedStmts($sub);
         $this->appendCapturedStmtLinesToContext($before);
 
@@ -2468,12 +2467,11 @@ trait AssignOpTrait
         // target's receiver/container at the end of the statement, and a
         // function-scoped Variant would defer destructors to function exit.
         $this->context->afterStmtLines[] = $cleanup;
-        return new Expr\Variable($tmp, $sub->getAttributes());
+        return new Variable($tmp, $sub->getAttributes());
     }
 
     protected function getNormalAssignType(string $type): string
     {
         return $type === Type::REF || $type === Type::VOID ? Type::VAR : $type;
     }
-
 }

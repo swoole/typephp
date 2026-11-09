@@ -1,0 +1,18 @@
+name: typephp-mcp
+version: 1.0.0
+mode: bin
+cxx-std: c++17
+
+# PHP extensions the MCP server relies on (compiled into the binary as
+# ZEND_MOD_REQUIRED). stdlib/JSON/pcre cover the protocol and search layers.
+ext-deps:
+  - Core
+  - SPL
+  - date
+  - json
+  - pcre
+  - standard
+
+sources:
+  - main.php
+  - src

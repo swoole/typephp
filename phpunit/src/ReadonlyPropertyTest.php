@@ -1,6 +1,16 @@
 <?php
+/**
+ * This file is part of TypePHP(AOT).
+ *
+ * @link     https://www.swoole.com/aot/
+ * @contact  service@swoole.com
+ */
 
-class ReadonlyPropertyTest extends \BaseTest
+/**
+ * @internal
+ * @coversNothing
+ */
+class ReadonlyPropertyTest extends BaseTest
 {
     public function testDirectInitializationIsAllowedOutsideConstructor(): void
     {
@@ -41,6 +51,7 @@ class ReadonlyPropertyTest extends \BaseTest
             'readonly-write-coalesce.php',
             'readonly-write-list.php',
             'readonly-write-foreach.php',
+            'readonly-write-foreach-list.php',
         ] as $file) {
             $this->exec('only supports direct assignment', $file);
         }

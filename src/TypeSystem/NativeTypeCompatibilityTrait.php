@@ -354,18 +354,30 @@ trait NativeTypeCompatibilityTrait
         }
 
         if ($argInfo->type === Type::OBJECT) {
+            if ($argInfo->nullable) {
+                if ($this->isNullExpr($arg->value)) {
+                    return 'php::Object{}';
+                }
+                $class = $this->detectDeclaredClassOfExpr($arg->value);
+                if ($type === Type::OBJECT && $class !== '' && $declaredClass !== ''
+                    && $this->isObjectClassStaticallyAssignableTo($class, $declaredClass)) {
+                    return $expr;
+                }
+                return $this->convertNullableObjectExpr(
+                    $expr,
+                    $declaredClass !== '' ? $this->getClassEntryPtr($declaredClass) : '',
+                );
+            }
             if ($declaredClass !== '') {
                 $class = $this->detectDeclaredClassOfExpr($arg->value);
                 if ($class !== '') {
-                    // Native calls are a performance hot path. If the static phase
-                    // has already proven the argument is-a the declared type, do not
-                    // emit php::toObject($expr, target_ce) to repeat the runtime
-                    // check. If it cannot be proven but the right-hand side is a
-                    // known concrete object, it is necessarily incompatible, so fail
-                    // at compile time; other dynamic/external-library/any scenarios
-                    // keep php::toObject() as a runtime fallback.
+                    // Class and non-null proofs are compile-time facts. Keep
+                    // ordinary T -> T calls free of repeated boundary checks.
                     if ($this->isObjectClassStaticallyAssignableTo($class, $declaredClass)) {
-                        return $type === Type::OBJECT ? $expr : $this->convertObjectExpr($expr);
+                        if ($type === Type::OBJECT && $this->isObjectExpressionKnownNonNull($arg->value)) {
+                            return $expr;
+                        }
+                        return $this->convertObjectExpr($expr, $this->getClassEntryPtr($declaredClass));
                     }
                     if ($this->isKnownConcreteObjectExpr($arg->value, $class)) {
                         $argName = $argInfo->phpName ?: $this->unescapeVarName($argInfo->name);

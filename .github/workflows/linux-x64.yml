@@ -195,6 +195,7 @@ jobs:
         php: ["8.4", "8.5"]
     env:
       PHPX_HOME: ${{ github.workspace }}/third_party/phpx
+      TYPEPHP_MCP_REQUIRE_BINARY: '1'
 
     steps:
       - name: Checkout TypePHP
@@ -273,6 +274,19 @@ jobs:
       - name: Configure native library path
         shell: bash
         run: echo "LD_LIBRARY_PATH=${PHPX_HOME}/lib:$(php-config --prefix)/lib" >> "${GITHUB_ENV}"
+
+      - name: Build typephp-mcp
+        shell: bash
+        run: |
+          php_home="$(php-config --prefix)"
+          export PHP_HOME="${php_home}"
+          # Lock critical section first: fails fast and needs no toolchain.
+          bash tools/typephp-mcp/tests/build-lock-test.sh
+          bash tools/typephp-mcp/build.sh
+          test -x tools/typephp-mcp/typephp_mcp
+          # Pin check_code to the compiler built above rather than relying on
+          # the auto-detection order (the repository also ships bin/tpc.php).
+          echo "TYPEPHP_MCP_TPC=${PWD}/tpc" >> "${GITHUB_ENV}"
 
       - name: Run PHPUnit
         run: vendor/bin/phpunit
@@ -499,12 +513,36 @@ jobs:
           echo "PHP_INI_SCAN_DIR=${php_ini_dir}" >> "${GITHUB_ENV}"
           php --ri phpy
 
+      - name: Build ASan-compatible PHP 8.4 embed runtime
+        if: matrix.sanitize == 'address' && matrix.php == '8.4'
+        shell: bash
+        run: |
+          sudo apt-get install --yes libxml2-dev libssl-dev zlib1g-dev libonig-dev libsqlite3-dev libsodium-dev systemtap-sdt-dev
+          pkg-config --modversion libxml-2.0 openssl zlib libsodium
+          bash .github/scripts/build-asan-php.sh
+
+      - name: Upload ASan runtime build diagnostics
+        if: always() && matrix.sanitize == 'address' && matrix.php == '8.4'
+        uses: actions/upload-artifact@v4
+        with:
+          name: asan-runtime-linux-x64-php-${{ matrix.php }}-zts
+          if-no-files-found: warn
+          retention-days: 7
+          path: |
+            build/asan-php/*.log
+            build/asan-php/*.json
+            build/asan-php/host-configure.txt
+
       - name: Configure native library path
         shell: bash
         run: |
           test -f "${PHPX_HOME}/lib/libphpx.so"
           test -f "${PHP_HOME}/lib/libphp.so"
-          echo "LD_LIBRARY_PATH=${PHPX_HOME}/lib:${PHP_HOME}/lib" >> "${GITHUB_ENV}"
+          library_path="${PHPX_HOME}/lib:${PHP_HOME}/lib"
+          if [[ -n "${TYPEPHP_ASAN_PHP_LIB_DIR:-}" ]]; then
+            library_path="${TYPEPHP_ASAN_PHP_LIB_DIR}:${library_path}"
+          fi
+          echo "LD_LIBRARY_PATH=${library_path}" >> "${GITHUB_ENV}"
 
       - name: Show build environment
         run: |
@@ -512,16 +550,20 @@ jobs:
           php -v
           php --ini
           ldd ./tpc | grep -E 'libphp(x)?[0-9.]*\.so'
+          if [[ -n "${TYPEPHP_ASAN_PHP_LIB_DIR:-}" ]]; then
+            ldd ./tpc | grep -F "${TYPEPHP_ASAN_PHP_LIB_DIR}/libphp.so"
+          fi
           cmake --version
           c++ --version
 
       - name: Verify ASan reports fail PHPT
+        id: asan_canary
         if: matrix.sanitize == 'address'
         shell: bash
         run: bash .github/scripts/check-phpt-asan.sh
 
       - name: Upload ASan canary evidence
-        if: always() && matrix.sanitize == 'address'
+        if: always() && matrix.sanitize == 'address' && steps.asan_canary.outcome != 'skipped'
         uses: actions/upload-artifact@v4
         with:
           name: asan-canary-linux-x64-php-${{ matrix.php }}-zts
@@ -547,7 +589,7 @@ jobs:
             -w build/failed-tests.txt -W build/test-results.txt tests/compiler
 
       - name: Summarize PHPT compiler metrics
-        if: always()
+        if: always() && hashFiles('build/phpt-metrics/tpc-invocations.tsv') != ''
         shell: bash
         run: |
           python3 .github/scripts/summarize-tpc-metrics.py \
@@ -555,7 +597,7 @@ jobs:
             | tee build/phpt-metrics/tpc-invocations-summary.txt
 
       - name: Upload PHPT performance metrics
-        if: always()
+        if: always() && hashFiles('build/phpt-metrics/**') != ''
         uses: actions/upload-artifact@v4
         with:
           name: phpt-metrics-linux-x64-php-${{ matrix.php }}-zts${{ matrix.sanitize && '-asan' || '' }}
@@ -564,9 +606,15 @@ jobs:
           path: build/phpt-metrics
 
       - name: Package tested Linux compiler
-        if: startsWith(github.ref, 'refs/tags/') && !matrix.sanitize
+        if: startsWith(github.ref, 'refs/tags/')
         shell: bash
         run: |
+          # The PHPT matrix selects one mode per PHP version. Always rebuild
+          # release artifacts without sanitizers and with the packaged runtime.
+          export LD_LIBRARY_PATH="${PHPX_HOME}/lib:${PHP_HOME}/lib"
+          if [[ -n "${TYPEPHP_ASAN_PHP_LIB_DIR:-}" ]]; then
+            unset PHPRC TYPEPHP_ASAN_PHP_LIB_DIR
+          fi
           composer install --no-dev --prefer-dist --no-progress --classmap-authoritative
           php bin/tpc.php project-release.yml --job "${BUILD_JOBS}" --no-progress
           test -x ./tpc
@@ -576,7 +624,7 @@ jobs:
           test "$(find . -maxdepth 1 -name 'tpc_v*_linux_x64_php${{ matrix.php }}.*-zts.tar.gz' -type f | wc -l)" -eq 1
 
       - name: Upload Linux release package
-        if: startsWith(github.ref, 'refs/tags/') && !matrix.sanitize
+        if: startsWith(github.ref, 'refs/tags/')
         uses: actions/upload-artifact@v4
         with:
           name: release-linux-x64-php-${{ matrix.php }}-zts
@@ -584,11 +632,11 @@ jobs:
           retention-days: 1
           path: tpc_v*_linux_x64_php${{ matrix.php }}.*-zts.tar.gz
 
-      - name: Upload PHPT failure artifacts
-        if: failure()
+      - name: Upload PHPT diagnostics
+        if: always() && (failure() || matrix.sanitize != '')
         uses: actions/upload-artifact@v4
         with:
-          name: phpt-failures-linux-x64-php-${{ matrix.php }}-zts${{ matrix.sanitize && '-asan' || '' }}
+          name: ${{ matrix.sanitize && 'phpt-sanitizer-reports' || 'phpt-failures' }}-linux-x64-php-${{ matrix.php }}-zts${{ matrix.sanitize && '-asan' || '' }}
           if-no-files-found: ignore
           retention-days: 7
           path: |

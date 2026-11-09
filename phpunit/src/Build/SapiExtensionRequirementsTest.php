@@ -141,4 +141,16 @@ PHP);
         self::assertSame('example', $index->functionExtension('example_open'));
         self::assertSame('example', $index->classExtension('Example\Client'));
     }
+
+    public function testCoreExtensionsAreNeverFetchedFromPecl(): void
+    {
+        self::assertTrue(SapiExtensionConfiguration::isCoreExtension('standard'));
+        self::assertFalse(SapiExtensionConfiguration::isCoreExtension('sqlite3'));
+        self::assertSame(
+            ['curl', 'sqlite3'],
+            SapiExtensionConfiguration::withoutCoreExtensions(
+                SapiExtensionRequirements::merge(['Core', 'curl', 'standard', 'sqlite3']),
+            ),
+        );
+    }
 }

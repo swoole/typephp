@@ -37,3 +37,4 @@ tests/**/*.sh
 /tests/wasm/harness/node_modules/
 /ide-helper/
 /debug/
+/tools/typephp-mcp/build/

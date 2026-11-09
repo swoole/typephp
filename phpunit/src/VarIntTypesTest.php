@@ -1,8 +1,18 @@
 <?php
+/**
+ * This file is part of TypePHP(AOT).
+ *
+ * @link     https://www.swoole.com/aot/
+ * @contact  service@swoole.com
+ */
 
 use TypePhp\CompilerTest;
 use TypePhp\Exception\TestError;
 
+/**
+ * @internal
+ * @coversNothing
+ */
 final class VarIntTypesTest extends BaseTest
 {
     public function testRemovedNativeTypesDirectiveHasStableMigrationDiagnostic(): void
@@ -110,6 +120,20 @@ final class VarIntTypesTest extends BaseTest
         self::assertStringContainsString('php::Int index', $code);
         self::assertMatchesRegularExpression('/index = php::toInt\([^;]+\.item\(0L?/', $code);
         self::assertStringContainsString('php::toInt(', $code);
+    }
+
+    public function testForeachDestructuringConvertsExistingNativeTargets(): void
+    {
+        $code = $this->compileSource(
+            $this->createCompiler(),
+            TYPEPHP_ROOT_PATH . '/phpunit/code/foreach-destructuring-native-reuse.php',
+        );
+
+        foreach (['integer' => 'Int', 'floating' => 'Float', 'boolean' => 'Bool'] as $name => $conversion) {
+            self::assertMatchesRegularExpression('/' . $name . ' = php::to' . $conversion . '\([^;]+\.item\(/', $code);
+        }
+        self::assertStringContainsString('php::Str string', $code);
+        self::assertSame(2, preg_match_all('/integer = php::toInt\([^;]+\.item\(/', $code));
     }
 
     private function createCompiler(): CompilerTest

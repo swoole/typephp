@@ -381,7 +381,7 @@ class InheritanceErrorTest extends TestCase
         $cppFile = $compiler->convertFile($testFile);
         $extensionFile = $compiler->genExtension();
 
-        $this->assertStringContainsString('php_interfacearrayconstantcontract__items', file_get_contents($cppFile));
+        $this->assertStringContainsString('class_const__interfacearrayconstantcontract__ITEMS', file_get_contents($cppFile));
         $this->assertStringContainsString('php::updateConstant("InterfaceArrayConstantImpl", "ITEMS"', file_get_contents($extensionFile));
     }
 

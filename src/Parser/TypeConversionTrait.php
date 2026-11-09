@@ -9,6 +9,7 @@
 namespace TypePhp\Parser;
 
 use TypePhp\Type;
+use TypePhp\Analysis\SsaFlags;
 
 use PhpParser\Node;
 use PhpParser\NodeAbstract;
@@ -163,6 +164,80 @@ trait TypeConversionTrait
         }
 
         return $expr;
+    }
+
+    protected function convertNullableObjectExpr(string $expr, string $class = ''): string
+    {
+        $value = 'typephp_nullable_object_value';
+        return '([&](php::Var ' . $value . ') -> php::Object {'
+            . ' if (' . $value . '.isNull()) { return php::Object{' . $value . '}; }'
+            . ' return ' . $this->convertObjectExpr($value, $class) . ';'
+            . ' })(' . $expr . ')';
+    }
+
+    /** Prove non-null at compile time; an Object handle alone is not proof. */
+    protected function isObjectExpressionKnownNonNull(NodeAbstract $expr, array $visiting = []): bool
+    {
+        if ($expr instanceof Node\Expr\New_ || $expr instanceof Node\Expr\Cast\Object_) {
+            return true;
+        }
+        if ($expr instanceof Node\Expr\ErrorSuppress || $expr instanceof Node\Expr\Clone_) {
+            return $this->isObjectExpressionKnownNonNull($expr->expr, $visiting);
+        }
+        if ($expr instanceof Node\Expr\Variable && is_string($expr->name)) {
+            $name = $this->parseIdentifier($expr);
+            if ($name === 'this_') {
+                return true;
+            }
+            $ssa = $this->context->ssaBuilder;
+            if ($ssa === null || isset($visiting[$name])) {
+                return false;
+            }
+            $visiting[$name] = true;
+            $found = false;
+            foreach ($ssa->ssaVars as $variable) {
+                if ($variable->origName !== $expr->name) {
+                    continue;
+                }
+                $flags = $variable->flags;
+                if ($flags & (SsaFlags::REFERENCE | SsaFlags::ESCAPED | SsaFlags::KILLED | SsaFlags::UNDEFINED)) {
+                    return false;
+                }
+                if ($flags & SsaFlags::PHI) {
+                    continue;
+                }
+                $found = true;
+                if ($flags & SsaFlags::PARAM) {
+                    $nonNullParameter = false;
+                    foreach ($this->functionDef?->argInfoList ?? [] as $argument) {
+                        if ($argument->name === $name) {
+                            $nonNullParameter = $argument->type === Type::OBJECT && !$argument->nullable
+                                && !$argument->byRef && !$argument->variadic;
+                            break;
+                        }
+                    }
+                    if (!$nonNullParameter) {
+                        return false;
+                    }
+                } elseif (!$variable->definition instanceof Node\Stmt\Expression
+                    || !$variable->definition->expr instanceof Node\Expr\Assign
+                    || !$this->isObjectExpressionKnownNonNull($variable->definition->expr->expr, $visiting)) {
+                    return false;
+                }
+            }
+            return $found;
+        }
+        if ($expr instanceof Node\Expr\PropertyFetch || $expr instanceof Node\Expr\StaticPropertyFetch) {
+            $property = $this->getNativePropertyDef($expr);
+            return $property !== null && $property->type === Type::OBJECT && !$property->nullable;
+        }
+        if ($expr instanceof Node\Expr\FuncCall || $expr instanceof Node\Expr\MethodCall
+            || $expr instanceof Node\Expr\StaticCall) {
+            $function = $this->resolveCalledFunctionDef($expr);
+            return $function !== null && $function->returnType === Type::OBJECT
+                && !$function->returnNullable && !$this->typeNodeAllowsNull($function->returnTypeNode);
+        }
+        return false;
     }
 
     protected function convertArrayExpr(string $expr): string

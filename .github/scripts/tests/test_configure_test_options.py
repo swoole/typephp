@@ -18,11 +18,18 @@ class TestOptionsTest(unittest.TestCase):
             {"php": "8.4", "sanitize": ""}, {"php": "8.5", "sanitize": ""}
         ])
 
-    def test_body_flag_adds_both_asan_versions(self):
+    def test_body_flag_selects_only_both_asan_versions(self):
         options = module.test_options("fix: constants\n\n--sanitize\n", "refs/pull/172/merge")
-        self.assertEqual(options["phpt_matrix"]["include"][2:], [
+        self.assertEqual(options["phpt_matrix"]["include"], [
             {"php": "8.4", "sanitize": "address"}, {"php": "8.5", "sanitize": "address"}
         ])
+
+    def test_sanitize_does_not_duplicate_phpt_on_push_or_release(self):
+        for ref in ("refs/heads/master", "refs/tags/v1.0"):
+            options = module.test_options("fix: runtime --sanitize", ref)
+            self.assertTrue(options["run_tests"])
+            self.assertEqual(len(options["phpt_matrix"]["include"]), 2)
+            self.assertTrue(all(entry["sanitize"] == "address" for entry in options["phpt_matrix"]["include"]))
 
     def test_skip_tests_wins_on_branches_and_pull_requests(self):
         for ref in ("refs/heads/master", "refs/pull/172/merge"):

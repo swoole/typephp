@@ -38,6 +38,7 @@ AOT 编译器要求对象属性在整个生命周期内始终保持声明时的�
 class User {
     public int $id = 0;
     public Profile $profile;
+    public ?Profile $optionalProfile = null;
 }
 
 $user = new User();
@@ -45,18 +46,23 @@ unset($user->id); // ❌ AOT 不允许依赖这种语义
 $user->id = null; // ❌ 这同样会把 int 属性改成 null
 
 unset($user->profile); // ✅ 对象属性可进入 null/unset 状态
-$user->profile = null; // ✅ 对象属性可显式设置为 null
+$user->profile = null; // ❌ 该属性未声明允许 null
+$user->optionalProfile = null; // ✅ 可空对象属性允许赋值 null
 ```
 
 在 PHP 中，`unset($obj->prop)` 可以让对象属性脱离当前值状态，后续表现为未初始化或空值状态；对固定值类型属性赋值 `null` 也会把值状态改成空值。从 AOT 的类型系统角度看，这等价于把属性从声明的 `int`、`float`、`bool`、`string`、`array` 改变为 `null`/未初始化状态。AOT 编译器不允许这些固定值类型属性改变类型，因此属性永远是声明时的类型。
 
 具体类对象属性使用静态对象类型规则：非空赋值必须满足 `is-a` 关系，因此允许把子类对象赋给基类属性，不允许把无继承关系的对象或基类对象赋给子类属性。非 nullable 属性可以 `unset()`，但不能赋值为 `null`。
 
+对于具名类 `T`，`?T` 和 `T|null` 在参数、返回值、推导出的局部变量和属性中保留普通 typed object 表示（`php::Object`）及类信息，对象句柄本身可以保存 null。Native method call 沿用普通 typed object 路径，不增加 nullable 接收者检查；属性访问和动态方法调用由 PHPX 提供保护。`?->` 仍在 null 时短路，且不计算调用参数。声明边界继续校验允许的类与空值。可空标量和其他联合类型保留动态存储；引用形式的可空对象参数保留 Zend reference ABI。
+
+已知 typed object 的传参和返回不重复执行静态分析或输入边界已经确立的类与空值校验，`T` 与 `?T` 沿用相同的 native 调用路径。`?T` 转为非 nullable 的 `T` 时，只有编译器无法证明非空才保留运行时检查；动态输入仍保留必要的边界校验。
+
 正确做法：
 
 - 不要对 `int`、`float`、`bool`、`string`、`array` 固定值类型对象属性使用 `unset()` 或赋值 `null`。
 - 如果属性业务上可能为空，应显式声明为可空类型，例如 `public ?int $id = null;`，并用赋值表达状态变化。
-- 如果对象属性声明为具体类名，非空赋值必须使用声明类本身，不要依赖 PHP 的子类兼容赋值语义。
+- 如果对象属性声明为具体类名，非空赋值必须满足声明类约束，可以使用兼容的子类对象。
 - 如果属性需要保存任意 PHP 值，应声明为可变类型/通用类型，而不是声明为原生类型后再尝试 `unset()` 或写入其他类型。
 
 ---

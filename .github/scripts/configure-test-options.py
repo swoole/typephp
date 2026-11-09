@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Select optional PHPT sanitizer jobs from the tested commit message."""
+"""Choose normal or ASan PHPT jobs from the tested commit message."""
 
 import json
 import os
@@ -10,9 +10,8 @@ import subprocess
 def test_options(message, ref):
     flags = set(re.findall(r"(?<!\S)--(?:skip-tests|sanitize)(?!\S)", message))
     run_tests = ref.startswith("refs/tags/") or "--skip-tests" not in flags
-    entries = [{"php": version, "sanitize": ""} for version in ("8.4", "8.5")]
-    if "--sanitize" in flags:
-        entries += [{"php": version, "sanitize": "address"} for version in ("8.4", "8.5")]
+    sanitizer = "address" if "--sanitize" in flags else ""
+    entries = [{"php": version, "sanitize": sanitizer} for version in ("8.4", "8.5")]
     return {"run_tests": run_tests, "phpt_matrix": {"include": entries}}
 
 

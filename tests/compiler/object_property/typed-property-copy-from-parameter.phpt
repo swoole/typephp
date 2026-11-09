@@ -39,6 +39,26 @@ final class PropertyCopyDestination
         $this->number = $cond ? $source->number : 0;
         $this->number = $source->number ?: 99;
     }
+
+    public static function multiplyStatic(): void
+    {
+        self::$staticNumber *= 1.5;
+    }
+
+    public static function divideStatic(): void
+    {
+        self::$staticNumber /= 0.5;
+    }
+
+    public static function multiplyStaticByProperty(PropertyCopySource $source): void
+    {
+        self::$staticNumber *= $source->amount;
+    }
+
+    public static function divideStaticByProperty(PropertyCopySource $source): void
+    {
+        self::$staticNumber /= $source->amount;
+    }
 }
 
 function main(): void
@@ -61,6 +81,24 @@ function main(): void
 
     $destination->assignExpressions($source, true);
     var_dump($destination->number, $destination->amount);
+
+    PropertyCopyDestination::$staticNumber = 10;
+    PropertyCopyDestination::multiplyStatic();
+    var_dump(PropertyCopyDestination::$staticNumber);
+
+    PropertyCopyDestination::$staticNumber = 10;
+    PropertyCopyDestination::divideStatic();
+    var_dump(PropertyCopyDestination::$staticNumber);
+
+    $source->amount = 1.5;
+    PropertyCopyDestination::$staticNumber = 10;
+    PropertyCopyDestination::multiplyStaticByProperty($source);
+    var_dump(PropertyCopyDestination::$staticNumber);
+
+    $source->amount = 0.5;
+    PropertyCopyDestination::$staticNumber = 10;
+    PropertyCopyDestination::divideStaticByProperty($source);
+    var_dump(PropertyCopyDestination::$staticNumber);
 }
 ?>
 --EXPECT--
@@ -74,3 +112,7 @@ int(5)
 float(0.75)
 int(5)
 float(1.25)
+int(15)
+int(20)
+int(15)
+int(20)

@@ -1,4 +1,10 @@
 <?php
+/**
+ * This file is part of TypePHP(AOT).
+ *
+ * @link     https://www.swoole.com/aot/
+ * @contact  service@swoole.com
+ */
 
 class NativePropertyWriteSource
 {
@@ -19,6 +25,10 @@ class NativePropertyWriteLoweredStorageBox
         $this->amount += $source->amount;
         self::$staticNumber += $source->number;
         self::$staticAmount += $source->amount;
+        self::$staticNumber *= 1.5;
+        self::$staticNumber /= 0.5;
+        self::$staticNumber *= $source->amount;
+        self::$staticNumber /= $source->amount;
     }
 
     public function testExpressions(NativePropertyWriteSource $source, bool $cond): void

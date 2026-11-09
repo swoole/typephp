@@ -1219,7 +1219,16 @@ trait AssignOpTrait
         ) {
             $rightType = $this->detectTypeOfExpr($node->expr);
             $effectiveRightType = $this->resolveNativePropertyRightStorageType($node->expr, $expr, $rightType);
-            $expr = $this->convertNativePropertyWriteExpr($def->type, $effectiveRightType, $expr);
+            if ($effectiveRightType === Type::VAR) {
+                $targetType = $rightType === Type::VAR ? $def->type : $rightType;
+                $expr = $this->convertExprFromType($targetType, $expr);
+            }
+            if ($def->type === Type::INT
+                && in_array($op, ['%=', '&=', '|=', '^=', '<<=', '>>='], true)
+                && $rightType !== Type::INT
+            ) {
+                $expr = $this->convertIntExpr($expr);
+            }
         }
         return $var . ' ' . $op . ' (' . $expr . ')';
     }

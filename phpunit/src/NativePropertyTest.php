@@ -256,6 +256,12 @@ class NativePropertyTest extends BaseTest
         $this->assertStringContainsString('_object_prop_this___amount += (php::toFloat(', $code);
         $this->assertStringContainsString('typephp_static_int_ref(_typephp_static_property_0().direct_ptr()) += (php::toInt(', $code);
         $this->assertStringContainsString('typephp_static_float_ref(_typephp_static_property_1().direct_ptr()) += (php::toFloat(', $code);
+        $this->assertStringContainsString('typephp_static_int_ref(_typephp_static_property_0().direct_ptr()) *= (1.5);', $code);
+        $this->assertStringContainsString('typephp_static_int_ref(_typephp_static_property_0().direct_ptr()) /= (0.5);', $code);
+        $this->assertStringContainsString('typephp_static_int_ref(_typephp_static_property_0().direct_ptr()) *= (php::toFloat(', $code);
+        $this->assertStringContainsString('typephp_static_int_ref(_typephp_static_property_0().direct_ptr()) /= (php::toFloat(', $code);
+        $this->assertStringNotContainsString('php::toInt(1.5)', $code);
+        $this->assertStringNotContainsString('php::toInt(0.5)', $code);
         $this->assertMatchesRegularExpression('/_object_prop_this___number = php::toInt\(\(\(tmp_var_\d+\) \+ \(1L+\)\)\);/', $code);
         $this->assertMatchesRegularExpression('/_object_prop_this___amount = php::toFloat\(\(\(tmp_var_\d+\) \+ \(0\.5\)\)\);/', $code);
         $this->assertStringContainsString('_object_prop_this___number = php::toInt(-(source.attr(', $code);

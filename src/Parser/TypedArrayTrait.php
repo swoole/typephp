@@ -371,7 +371,7 @@ trait TypedArrayTrait
             if ($name === 'key') {
                 $key = $this->guardTypedArrayValue($definition, $argument, $this->parseExprAsValue($argument), true);
                 $values[$name] = $this->addTmpVar($definition['keyType']);
-                $this->context->beforeStmtLines[] = $values[$name] . ' = ' . $key . ';';
+                $this->addBeforeStmtLine($values[$name] . ' = ' . $key . ';');
             } else {
                 $values[$name] = $this->parseOrderedOperand($argument, false, true);
             }
@@ -435,7 +435,7 @@ trait TypedArrayTrait
         // Snapshot a key before lowering a RHS that might hoist side effects.
         if ($key !== '') {
             $keyVar = $this->addTmpVar($def['keyType']);
-            $this->context->beforeStmtLines[] = $keyVar . ' = ' . $key . ';';
+            $this->addBeforeStmtLine($keyVar . ' = ' . $key . ';');
             $key = $keyVar;
         }
         $value = $this->guardTypedArrayValue($def, $right, $this->parseExprAsValue($right));

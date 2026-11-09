@@ -677,14 +677,14 @@ trait FuncCallOptimizer
             $array = $this->parseIdentifier($arg->var);
             if ($arg->dim !== null) {
                 $tmpRef = $this->genTmpVarName();
-                $this->context->beforeStmtLines[] = 'auto&& ' . $tmpRef . ' = ' . $array . '.item(' . $this->identifierToStr($arg->dim) . ', true);';
+                $this->addBeforeStmtLine('auto&& ' . $tmpRef . ' = ' . $array . '.item(' . $this->identifierToStr($arg->dim) . ', true);');
                 return $tmpRef;
             }
         }
         if ($this->isPropertyFetch($arg) and $this->isVarExpr($arg->var)) {
             $obj = $this->parseIdentifier($arg->var);
             $tmpRef = $this->genTmpVarName();
-            $this->context->beforeStmtLines[] = 'auto&& ' . $tmpRef . ' = ' . $obj . '.attr(' . $this->propertyNameToStr($arg->name) . ', php::AttrMode::Update);';
+            $this->addBeforeStmtLine('auto&& ' . $tmpRef . ' = ' . $obj . '.attr(' . $this->propertyNameToStr($arg->name) . ', php::AttrMode::Update);');
             return $tmpRef;
         }
         return $this->getArg($expr, $i);
@@ -1379,8 +1379,8 @@ trait FuncCallOptimizer
         foreach ($funcDef->argInfoList as $i => $argInfo) {
             if ($argInfo->variadic) {
                 $tmpVar = $this->addTmpVar(Type::ARRAY);
-                $this->context->beforeStmtLines[] = $tmpVar . ' = ' . $this->genArray($list) . ';';
-                $this->context->beforeStmtLines[] = $tmpVar . '.merge(' . $argInfo->name . ');';
+                $this->addBeforeStmtLine($tmpVar . ' = ' . $this->genArray($list) . ';');
+                $this->addBeforeStmtLine($tmpVar . '.merge(' . $argInfo->name . ');');
                 return $tmpVar;
             }
             $list[] = $argInfo->name;

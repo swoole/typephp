@@ -716,7 +716,7 @@ trait UniversalMethodCall
 
         // Evaluate receiver into temp var to avoid double evaluation
         $streamVar = $this->addTmpVar(Type::VAR);
-        $this->context->beforeStmtLines[] = $streamVar . ' = ' . $receiver . ';';
+        $this->addBeforeStmtLine($streamVar . ' = ' . $receiver . ';');
 
         $methodCall = match ($def['handler']) {
             'php_fn'        => $this->genUniversalPhpFn('php::toStream(' . $streamVar . ')', $def['fn'], $expr->args, $def['receiver_pos'] ?? 0, $def['const_args'] ?? []),
@@ -733,7 +733,7 @@ trait UniversalMethodCall
         }
 
         $tmpVar = $this->addTmpVar(Type::VAR);
-        $this->context->beforeStmtLines[] = "{$tmpVar} = {$methodCall};";
+        $this->addBeforeStmtLine("{$tmpVar} = {$methodCall};");
         return $tmpVar;
     }
 
@@ -948,8 +948,8 @@ trait UniversalMethodCall
         foreach ($args as $arg) {
             $argExprs[] = $this->parseExpr($arg->value);
         }
-        $this->context->beforeStmtLines[] = $tmpRef . ' = ' . $receiver . '.toReference();';
-        $this->context->beforeStmtLines[] = $tmpVar . ' = php::call(' . $this->getFuncPtr($phpFunc) . ', php::ArgList{' . implode(', ', $argExprs) . '});';
+        $this->addBeforeStmtLine($tmpRef . ' = ' . $receiver . '.toReference();');
+        $this->addBeforeStmtLine($tmpVar . ' = php::call(' . $this->getFuncPtr($phpFunc) . ', php::ArgList{' . implode(', ', $argExprs) . '});');
         return $tmpVar;
     }
 }

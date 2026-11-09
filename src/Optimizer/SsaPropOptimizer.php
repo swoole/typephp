@@ -859,9 +859,9 @@ trait SsaPropOptimizer
         $refGetter = $objName . '.attr(' . $id . ', php::AttrMode::Update)';
         $zvalMacro = $this->getZvalValueMacroForPropType($cType);
         if ($zvalMacro !== null) {
-            $this->context->beforeStmtLines[] = $cType . ' &' . $propVar . ' = ' . $zvalMacro . '(' . $refGetter . '.unwrap_ptr());';
+            $this->addBeforeStmtLine($cType . ' &' . $propVar . ' = ' . $zvalMacro . '(' . $refGetter . '.unwrap_ptr());');
         } else {
-            $this->context->beforeStmtLines[] = Type::VAR . ' ' . $propVar . ' = ' . $refGetter . ';';
+            $this->addBeforeStmtLine(Type::VAR . ' ' . $propVar . ' = ' . $refGetter . ';');
         }
         $this->context->hoistedProps[$objName][$propName] = true;
 

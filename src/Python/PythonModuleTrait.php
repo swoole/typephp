@@ -220,7 +220,7 @@ trait PythonModuleTrait
         }
 
         $receiver = $this->addTmpVar(Type::VAR);
-        $this->context->beforeStmtLines[] = $receiver . ' = ' . $this->parseExpr($expr->name) . ';';
+        $this->addBeforeStmtLine($receiver . ' = ' . $this->parseExpr($expr->name) . ';');
         if ($expr->args === []) {
             return 'php::python::call(' . $receiver . ')';
         }

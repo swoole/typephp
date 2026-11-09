@@ -587,8 +587,8 @@ trait NativeClassSupportTrait
         // active iterator. Validate that captured pointer once before rewind,
         // rather than repeating a null check for every protocol method.
         $iterator = $this->materializeNativeObjectReceiver($iteratorExpr, $iteratorClass);
-        $this->context->beforeStmtLines[] = 'php::nativeGcRequireObject('
-            . $iterator . ', "' . addslashes($iteratorClass) . '");';
+        $this->addBeforeStmtLine('php::nativeGcRequireObject('
+            . $iterator . ', "' . addslashes($iteratorClass) . '");');
         $this->markNativeObjectNonNull($iterator);
         $iteratorExpr = new Node\Expr\Variable($iterator, $iteratorExpr->getAttributes());
 
@@ -1507,11 +1507,11 @@ trait NativeClassSupportTrait
         $object = $this->genTmpVarName();
         $this->addLocalVar($object, $this->getNativeObjectPointerType($class));
         $this->addNativeObject($object, $class);
-        $this->context->beforeStmtLines[] = $object . ' = ' . $receiver . ';';
+        $this->addBeforeStmtLine($object . ' = ' . $receiver . ';');
         $this->appendCapturedStmtLinesToContext($afterStmts);
         // Keep the temporary in the precise root frame while the complete PHP
         // statement executes, then release that root at statement end.
-        $this->context->afterStmtLines[] = $object . ' = nullptr;';
+        $this->addAfterStmtLine($object . ' = nullptr;');
         return $object;
     }
 

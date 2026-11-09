@@ -305,10 +305,10 @@ trait NativeTypeCompatibilityTrait
 
                 $reference = $this->addTmpVar(Type::REF);
                 $wrapper = $this->genTmpVarName();
-                $this->context->beforeStmtLines[] = $reference . ' = ' . $this->convertToRef($arg->value) . ';';
-                $this->context->beforeStmtLines[] = 'php::RefWrap<' . $expectedType . '> '
-                    . $wrapper . '(' . $reference . ');';
-                $this->context->afterStmtLines[] = $wrapper . '.commit();';
+                $this->addBeforeStmtLine($reference . ' = ' . $this->convertToRef($arg->value) . ';');
+                $this->addBeforeStmtLine('php::RefWrap<' . $expectedType . '> '
+                    . $wrapper . '(' . $reference . ');');
+                $this->addAfterStmtLine($wrapper . '.commit();');
                 return $wrapper . '.typed()';
             }
 

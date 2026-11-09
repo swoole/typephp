@@ -626,7 +626,7 @@ trait ClosureGenerator
             }
         }
 
-        $this->context->beforeStmtLines[] = $code;
+        $this->addBeforeStmtLine($code);
 
         // Even a static closure inherits the outer called scope for late
         // static binding. It still cannot access $this because it was not

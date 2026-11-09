@@ -966,15 +966,15 @@ trait AssignOpTrait
                 $property->name = new Variable($this->parseOrderedOperand($property->name, false, true));
             }
             $current = $this->addTmpVar(Type::VAR);
-            $this->context->beforeStmtLines[] = $current . ' = ' . $this->parseExprAsValue($property) . ';';
+            $this->addBeforeStmtLine($current . ' = ' . $this->parseExprAsValue($property) . ';');
             [$right, $before, $after] = $this->parseExprWithCapturedStmts($node->expr);
             $this->appendCapturedStmtLinesToContext($before);
             $result = $this->addTmpVar(Type::VAR);
-            $this->context->beforeStmtLines[] = $result . ' = '
-                . $this->emitDynamicBinaryOp($current, $right, $this->removeAssignOp($op)) . ';';
+            $this->addBeforeStmtLine($result . ' = '
+                . $this->emitDynamicBinaryOp($current, $right, $this->removeAssignOp($op)) . ';');
             $this->appendCapturedStmtLinesToContext($after);
-            $this->context->afterStmtLines[] = $current . '.unset();';
-            $this->context->afterStmtLines[] = $result . '.unset();';
+            $this->addAfterStmtLine($current . '.unset();');
+            $this->addAfterStmtLine($result . '.unset();');
             return $this->parseAssign(new Expr\Assign($property, new Variable($result)));
         }
 
@@ -1159,18 +1159,18 @@ trait AssignOpTrait
             $binaryOp = $this->removeAssignOp($op);
 
             if ($binaryOp === '.') {
-                $this->context->beforeStmtLines[] = "{$tmpVar} = " .
+                $this->addBeforeStmtLine("{$tmpVar} = " .
                     $this->parseFlattenedConcat($node->expr, [
                         $this->prepareConcatOperand($this->convertVarType($tmpVar, $readVar), $type),
-                    ]) . ';';
+                    ]) . ';');
             } elseif ($type === Type::BIGINT || $type === Type::DECIMAL || $type === Type::BIGFLOAT) {
                 $bigAssign = $this->parseBigAssignOpExpr($readVar, $type, $expr, $rightType, $binaryOp, $node->var, $node->expr);
-                $this->context->beforeStmtLines[] = "{$tmpVar} = {$bigAssign};";
+                $this->addBeforeStmtLine("{$tmpVar} = {$bigAssign};");
             } else {
-                $this->context->beforeStmtLines[] = "{$tmpVar} = " .
+                $this->addBeforeStmtLine("{$tmpVar} = " .
                     $this->convertVarType($tmpVar, $readVar) . ' ' .
                     $binaryOp . ' ' .
-                    $this->convertExprType($expr, $type, $rightType) . ';';
+                    $this->convertExprType($expr, $type, $rightType) . ';');
             }
 
             if ($isGlobals) {
@@ -1188,14 +1188,14 @@ trait AssignOpTrait
             $this->addLocalVar($tmpVar, Type::VAR);
             $readProperty = $this->emitDynamicPropertyFetchRead($node->var, $propertyWriteTarget);
             if ($this->isAssignOpConcat($op)) {
-                $this->context->beforeStmtLines[] = "{$tmpVar} = " .
+                $this->addBeforeStmtLine("{$tmpVar} = " .
                     $this->parseFlattenedConcat($node->expr, [
                         $this->prepareConcatOperand($readProperty, $this->detectTypeOfExpr($node->var)),
-                    ]) . ';';
+                    ]) . ';');
             } elseif ($this->isAssignOpPow($op)) {
-                $this->context->beforeStmtLines[] = "{$tmpVar} = php::fn::pow({$readProperty}, {$expr});";
+                $this->addBeforeStmtLine("{$tmpVar} = php::fn::pow({$readProperty}, {$expr});");
             } else {
-                $this->context->beforeStmtLines[] = "{$tmpVar} = {$readProperty} {$binaryOp} ({$expr});";
+                $this->addBeforeStmtLine("{$tmpVar} = {$readProperty} {$binaryOp} ({$expr});");
             }
             // The write is part of the compound-assignment expression. Apart
             // from matching PHP's sequencing, this ensures a materialized
@@ -1294,9 +1294,9 @@ trait AssignOpTrait
             $cleanup = $tmp . '.unset();';
         }
 
-        $this->context->beforeStmtLines[] = $tmp . ' = ' . $receiverExpr . ';';
+        $this->addBeforeStmtLine($tmp . ' = ' . $receiverExpr . ';');
         $this->appendCapturedStmtLinesToContext($afterStmts);
-        $this->context->afterStmtLines[] = $cleanup;
+        $this->addAfterStmtLine($cleanup);
 
         $stableProperty = clone $property;
         $stableProperty->var = new Variable($tmp, $property->var->getAttributes());
@@ -1512,7 +1512,7 @@ trait AssignOpTrait
             // object handlers, and a Variant also covers dynamically resolved
             // receivers whose concrete class is known only at runtime.
             $receiverTmp = $this->addTmpVar(Type::VAR);
-            $this->context->beforeStmtLines[] = $receiverTmp . ' = ' . $receiverExpr . ';';
+            $this->addBeforeStmtLine($receiverTmp . ' = ' . $receiverExpr . ';');
             $this->appendCapturedStmtLinesToContext($receiverAfter);
             $objectExpr = $receiverTmp;
         }
@@ -1527,8 +1527,8 @@ trait AssignOpTrait
         // Read before evaluating the RHS, matching PHP compound-assignment
         // order even when the RHS itself emits prerequisite statements.
         $current = $this->addTmpVar(Type::VAR);
-        $this->context->beforeStmtLines[] = $current . ' = '
-            . $this->emitDynamicPropertyTargetRead($target) . ';';
+        $this->addBeforeStmtLine($current . ' = '
+            . $this->emitDynamicPropertyTargetRead($target) . ';');
 
         [$rightExpr, $rightBefore, $rightAfter] = $this->parseExprWithCapturedStmts($node->expr);
         $this->appendCapturedStmtLinesToContext($rightBefore);
@@ -1536,12 +1536,12 @@ trait AssignOpTrait
         $result = $this->addTmpVar(Type::VAR);
         $binaryOp = $this->removeAssignOp($op);
         $value = $this->emitDynamicBinaryOp($current, $rightExpr, $binaryOp);
-        $this->context->beforeStmtLines[] = $result . ' = ' . $value . ';';
+        $this->addBeforeStmtLine($result . ' = ' . $value . ';');
         $this->appendCapturedStmtLinesToContext($rightAfter);
 
-        $this->context->afterStmtLines[] = $current . '.unset();';
+        $this->addAfterStmtLine($current . '.unset();');
         if ($receiverTmp !== null) {
-            $this->context->afterStmtLines[] = $receiverTmp . '.unset();';
+            $this->addAfterStmtLine($receiverTmp . '.unset();');
         }
 
         // Execute the checked write at the expression point. If Zend rejects
@@ -2041,7 +2041,7 @@ trait AssignOpTrait
             $this->fatalError($expr, 'Cannot assign reference to ' . $this->parseIdentifier($expr->expr));
         }
 
-        $this->context->beforeStmtLines[] = $rightExpr . ';';
+        $this->addBeforeStmtLine($rightExpr . ';');
         if ($propertyReferenceTarget !== null) {
             [$object, $member, $scope] = $propertyReferenceTarget;
             return 'typephp_rebind_property_reference('
@@ -2521,12 +2521,12 @@ trait AssignOpTrait
             $tmp = $this->addTmpVar(Type::VAR);
             $cleanup = $tmp . '.unset();';
         }
-        $this->context->beforeStmtLines[] = $tmp . ' = ' . $code . ';';
+        $this->addBeforeStmtLine($tmp . ' = ' . $code . ';');
         $this->appendCapturedStmtLinesToContext($after);
         // The temporary must not outlive the statement: PHP destroys the
         // target's receiver/container at the end of the statement, and a
         // function-scoped Variant would defer destructors to function exit.
-        $this->context->afterStmtLines[] = $cleanup;
+        $this->addAfterStmtLine($cleanup);
         return new Variable($tmp, $sub->getAttributes());
     }
 

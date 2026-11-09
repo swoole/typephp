@@ -314,9 +314,9 @@ trait MethodCallTrait
         $object = $this->genTmpVarName();
         $this->addLocalVar($object, Type::OBJECT);
         $this->addObject($object, $class);
-        $this->context->beforeStmtLines[] = $object . ' = ' . $receiver . ';';
+        $this->addBeforeStmtLine($object . ' = ' . $receiver . ';');
         $this->appendCapturedStmtLinesToContext($afterStmts);
-        $this->context->afterStmtLines[] = $object . '.unset();';
+        $this->addAfterStmtLine($object . '.unset();');
         return $object;
     }
 
@@ -438,7 +438,7 @@ trait MethodCallTrait
 
         if ($this->getVarType($object) !== Type::OBJECT) {
             $tmpObject = $this->genTmpVarName();
-            $this->context->beforeStmtLines[] = Type::OBJECT . ' ' . $tmpObject . ' = ' . $object . ';';
+            $this->addBeforeStmtLine(Type::OBJECT . ' ' . $tmpObject . ' = ' . $object . ';');
             $object = $tmpObject;
         }
 
@@ -462,7 +462,7 @@ trait MethodCallTrait
     {
         if ($this->getVarType($object) != Type::OBJECT) {
             $tmpVar = $this->genTmpVarName();
-            $this->context->beforeStmtLines[] = Type::OBJECT . ' ' . $tmpVar . ' = ' . $object . ';';
+            $this->addBeforeStmtLine(Type::OBJECT . ' ' . $tmpVar . ' = ' . $object . ';');
             $object = $tmpVar;
         }
         if (count($args) === 0) {
@@ -969,10 +969,10 @@ trait MethodCallTrait
                 $this->fatalError($expr, "Cannot call method `{$methodName}()` on variable of type {$type}");
             }
             if ($this->debug) {
-                $this->context->beforeStmtLines[] = $this->formatCppLineComment(
+                $this->addBeforeStmtLine($this->formatCppLineComment(
                     'Method Call: ',
                     $object . '->' . $this->parseIdentifier($expr->name) . '()'
-                );
+                ));
             }
             $nativeFunc = false;
             try {
@@ -1213,7 +1213,7 @@ trait MethodCallTrait
         [$value, $beforeStmts, $afterStmts] = $this->parseExprWithCapturedStmts($target);
         $this->appendCapturedStmtLinesToContext($beforeStmts);
         $classVar = $this->addTmpVar(Type::VAR);
-        $this->context->beforeStmtLines[] = $classVar . ' = ' . $value . ';';
+        $this->addBeforeStmtLine($classVar . ' = ' . $value . ';');
         $this->appendCapturedStmtLinesToContext($afterStmts);
 
         return $classVar;
@@ -1387,10 +1387,10 @@ trait MethodCallTrait
             $calledCe = $this->getCalledCeExpr();
             $fn = $calledCe . ', php::getMethod(' . $calledCe . ', ' . $methodPtr . ')';
             if ($this->debug) {
-                $this->context->beforeStmtLines[] = $this->formatCppLineComment(
+                $this->addBeforeStmtLine($this->formatCppLineComment(
                     'Static Method Call: ',
                     'static::' . $method . '()'
-                );
+                ));
             }
             $placeHolder = $this->genArray([$this->getCalledClassExpr(), $methodPtr]);
             // Used to resolve the method signature when detecting by-reference arguments (late static binding is resolved within the current class hierarchy)
@@ -1415,10 +1415,10 @@ trait MethodCallTrait
             $rtFunc = $method;
             $rtClass = $class;
             if ($this->debug) {
-                $this->context->beforeStmtLines[] = $this->formatCppLineComment(
+                $this->addBeforeStmtLine($this->formatCppLineComment(
                     'Static Method Call: ',
                     $class . '::' . $method . '()'
-                );
+                ));
             }
 
             if ($canUseDirectCallScope) {

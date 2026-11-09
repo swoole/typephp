@@ -146,7 +146,7 @@ trait FunctionCallTrait
         [$leftExpr, $beforeStmts, $afterStmts] = $this->parseExprWithCapturedStmts($expr->left);
         $this->appendCapturedStmtLinesToContext($beforeStmts);
         $value = $this->addTmpVar(Type::VAR);
-        $this->context->beforeStmtLines[] = $value . ' = ' . $leftExpr . ';';
+        $this->addBeforeStmtLine($value . ' = ' . $leftExpr . ';');
         $this->appendCapturedStmtLinesToContext($afterStmts);
 
         $directCall = $this->parsePipeFirstClassCallable($expr->right, $value);
@@ -393,7 +393,7 @@ trait FunctionCallTrait
             $placeHolder = $this->getLiteralString($functionTarget['target']);
             $fn = $this->getFuncPtr($name);
             if ($this->debug) {
-                $this->context->beforeStmtLines[] = $this->formatCppLineComment('Func Call: ', $name . '()');
+                $this->addBeforeStmtLine($this->formatCppLineComment('Func Call: ', $name . '()'));
             }
         } else {
             $this->compilationStatistics->record(
@@ -401,7 +401,7 @@ trait FunctionCallTrait
                 'function-call',
             );
             $tmpVar = $this->addTmpVar(Type::VAR);
-            $this->context->beforeStmtLines[] = $tmpVar . ' = ' . $this->parseExpr($expr->name) . ';';
+            $this->addBeforeStmtLine($tmpVar . ' = ' . $this->parseExpr($expr->name) . ';');
             $placeHolder = $fn = $tmpVar;
             $name = '';
         }

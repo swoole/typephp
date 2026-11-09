@@ -75,7 +75,7 @@ trait NullsafeAccessTrait
                 }
                 $object = $this->addTmpVar(Type::OBJECT);
                 $ownedTmpVars[] = $object;
-                $this->context->beforeStmtLines[] = $this->getIndent() . $object . ' = ' . $this->parseIdentifier($expr) . ';';
+                $this->addBeforeStmtLine($this->getIndent() . $object . ' = ' . $this->parseIdentifier($expr) . ';');
                 break;
             }
         }
@@ -144,11 +144,11 @@ trait NullsafeAccessTrait
         $code .= $this->getIndent() . "return {$object};" . PHP_EOL;
         $this->indentLevel--;
         $code .= $this->getIndent() . '};';
-        $this->context->beforeStmtLines[] = $code;
+        $this->addBeforeStmtLine($code);
 
         // C++ temporaries are function-scoped; release their zvals at the PHP statement boundary.
         foreach (array_reverse($ownedTmpVars) as $ownedTmpVar) {
-            $this->context->afterStmtLines[] = $ownedTmpVar . '.unset();';
+            $this->addAfterStmtLine($ownedTmpVar . '.unset();');
         }
         return "{$tmpFn}()";
     }

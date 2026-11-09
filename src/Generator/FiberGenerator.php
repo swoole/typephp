@@ -193,16 +193,16 @@ trait FiberGenerator
         }
         [$value, $beforeStmts, $afterStmts] = $this->parseExprWithCapturedStmts($expr);
         foreach ($beforeStmts as $stmt) {
-            $this->context->beforeStmtLines[] = $stmt;
+            $this->addBeforeStmtLine($stmt);
         }
         if (!$force && !$afterStmts) {
             return $value;
         }
 
         $tmpVar = $this->addTmpVar(Type::VAR);
-        $this->context->beforeStmtLines[] = $tmpVar . ' = ' . $value . ';';
+        $this->addBeforeStmtLine($tmpVar . ' = ' . $value . ';');
         foreach ($afterStmts as $stmt) {
-            $this->context->beforeStmtLines[] = $stmt;
+            $this->addBeforeStmtLine($stmt);
         }
         return $tmpVar;
     }

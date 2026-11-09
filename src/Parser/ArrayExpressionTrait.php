@@ -315,7 +315,7 @@ trait ArrayExpressionTrait
         $tmpVar = $this->genTmpVarName();
         $this->addLocalVar($tmpVar, Type::ARRAY);
         // Release the temporary variable to avoid array copies when the array is modified
-        $this->context->beforeStmtLines[] = $this->getIndent() . $tmpVar . '.clean();';
+        $this->addBeforeStmtLine($this->getIndent() . $tmpVar . '.clean();');
 
         $items = $node->items;
         foreach ($items as $item) {
@@ -344,17 +344,17 @@ trait ArrayExpressionTrait
                 );
             }
             if ($item->unpack) {
-                $this->context->beforeStmtLines[] = $this->getIndent() . $tmpVar . '.merge(' . $value . ');';
+                $this->addBeforeStmtLine($this->getIndent() . $tmpVar . '.merge(' . $value . ');');
             } elseif ($item->key) {
                 if ($orderedKey === null) {
                     $this->assertExprCanBeUsedAsValue($item->key, 'array key');
                     $orderedKey = $this->parseArrayKey($item->key);
                 }
                 $method = $item->byRef ? 'set' : 'setValue';
-                $this->context->beforeStmtLines[] = $this->getIndent() . $tmpVar . '.' . $method . '(' . $orderedKey . ', ' . $value . ');';
+                $this->addBeforeStmtLine($this->getIndent() . $tmpVar . '.' . $method . '(' . $orderedKey . ', ' . $value . ');');
             } else {
                 $method = $item->byRef ? 'append' : 'appendValue';
-                $this->context->beforeStmtLines[] = $this->getIndent() . $tmpVar . '.' . $method . '(' . $value . ');';
+                $this->addBeforeStmtLine($this->getIndent() . $tmpVar . '.' . $method . '(' . $value . ');');
             }
         }
 

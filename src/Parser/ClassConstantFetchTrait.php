@@ -303,7 +303,7 @@ trait ClassConstantFetchTrait
         [$value, $beforeStmts, $afterStmts] = $this->parseExprWithCapturedStmts($expr);
         $tmpVar = $this->addTmpVar(Type::VAR);
         $this->appendCapturedStmtLinesToContext($beforeStmts);
-        $this->context->beforeStmtLines[] = $tmpVar . ' = ' . $value . ';';
+        $this->addBeforeStmtLine($tmpVar . ' = ' . $value . ';');
         $this->appendCapturedStmtLinesToContext($afterStmts);
         return $tmpVar;
     }

@@ -319,7 +319,7 @@ trait CallArgumentGenerator
                     // call inside a loop aggregates into an empty array every
                     // iteration instead of accumulating arguments.
                     $variadicVar = $this->addTmpVar(Type::ARRAY);
-                    $this->context->beforeStmtLines[] = $variadicVar . '.unset();';
+                    $this->addBeforeStmtLine($variadicVar . '.unset();');
                     if ($argInfo->byRef) {
                         // The aggregation array owns the second reference to
                         // every caller slot. Release it before every
@@ -335,8 +335,8 @@ trait CallArgumentGenerator
                         // releases during C++ exception unwinding into a PHP
                         // catch block.
                         $cleanupGuard = $this->genTmpVarName();
-                        $this->context->beforeStmtLines[] = 'php::ArrayCleanupGuard ' . $cleanupGuard
-                            . '{' . $variadicVar . '};';
+                        $this->addBeforeStmtLine('php::ArrayCleanupGuard ' . $cleanupGuard
+                            . '{' . $variadicVar . '};');
                         array_splice(
                             $this->context->afterStmtLines,
                             $afterStmtStart,
@@ -347,17 +347,17 @@ trait CallArgumentGenerator
                 }
                 if ($arg->unpack) {
                     $method = $argInfo->byRef ? 'mergeReferences' : 'merge';
-                    $this->context->beforeStmtLines[] = $variadicVar . '.' . $method
-                        . '(' . $this->parseArrayArg($arg) . ');';
+                    $this->addBeforeStmtLine($variadicVar . '.' . $method
+                        . '(' . $this->parseArrayArg($arg) . ');');
                 } elseif ($variadicName !== null) {
                     $value = $this->getTypeConvertedArg($arg, $argInfo, $callableName, $variadicArgIndex);
                     $method = $argInfo->byRef ? 'set' : 'setValue';
-                    $this->context->beforeStmtLines[] = $variadicVar . '.' . $method . '('
-                        . $this->getLiteralString($variadicName) . ', ' . $value . ');';
+                    $this->addBeforeStmtLine($variadicVar . '.' . $method . '('
+                        . $this->getLiteralString($variadicName) . ', ' . $value . ');');
                 } else {
                     $value = $this->getTypeConvertedArg($arg, $argInfo, $callableName, $variadicArgIndex);
                     $method = $argInfo->byRef ? 'append' : 'appendValue';
-                    $this->context->beforeStmtLines[] = $variadicVar . '.' . $method . '(' . $value . ');';
+                    $this->addBeforeStmtLine($variadicVar . '.' . $method . '(' . $value . ');');
                 }
             }
 
@@ -618,14 +618,14 @@ trait CallArgumentGenerator
                     $hasUnpack = true;
                     if (!$forceArrayArgs && $separateNamedArgs) {
                         $callArgs = $this->ensureCallArgs($argsVar, $list_args);
-                        $this->context->beforeStmtLines[] = $callArgs . '.appendUnpacked(' . $this->parseArrayArg($arg) . ');';
+                        $this->addBeforeStmtLine($callArgs . '.appendUnpacked(' . $this->parseArrayArg($arg) . ');');
                         if ($arg->getAttribute(self::ATTR_SCOPED_CALLBACK) === 'normalize-unpacked') {
-                            $this->context->beforeStmtLines[] = 'php::normalizeCallableClass('
-                                . $callArgs . ', 0, ' . $this->getCallableScopeExpr() . ');';
+                            $this->addBeforeStmtLine('php::normalizeCallableClass('
+                                . $callArgs . ', 0, ' . $this->getCallableScopeExpr() . ');');
                         }
                     } else {
                         $arrayArgs = $this->ensureCallArrayArgs($arrayArgsVar, $list_args);
-                        $this->context->beforeStmtLines[] = $arrayArgs . '.merge(' . $this->parseArrayArg($arg) . ');';
+                        $this->addBeforeStmtLine($arrayArgs . '.merge(' . $this->parseArrayArg($arg) . ');');
                     }
                     continue;
                 }
@@ -649,12 +649,12 @@ trait CallArgumentGenerator
                     $value = $this->wrapScopedCallbackArg($arg, $value);
                     if ($separateNamedArgs) {
                         $namedArgsArray = $this->ensureCallNamedArgs($namedArgsVar);
-                        $this->context->beforeStmtLines[] = $namedArgsArray . '.set(' . $this->getLiteralString($arg->name->name) . ', ' . $value . ');';
+                        $this->addBeforeStmtLine($namedArgsArray . '.set(' . $this->getLiteralString($arg->name->name) . ', ' . $value . ');');
                     } else {
                         $arrayArgs = $this->ensureCallArrayArgs($arrayArgsVar, $list_args);
                         $method = $forceArrayArgs ? 'setValue' : 'set';
-                        $this->context->beforeStmtLines[] = $arrayArgs . '.' . $method . '('
-                            . $this->getLiteralString($arg->name->name) . ', ' . $value . ');';
+                        $this->addBeforeStmtLine($arrayArgs . '.' . $method . '('
+                            . $this->getLiteralString($arg->name->name) . ', ' . $value . ');');
                     }
                     continue;
                 }
@@ -711,7 +711,7 @@ trait CallArgumentGenerator
                         // Global variable passed as a by-reference argument
                         if ($byRef) {
                             $ref = $this->addTmpVar(Type::REF);
-                            $this->context->beforeStmtLines[] = $ref . ' = ' . $globalVar . '.toReference();';
+                            $this->addBeforeStmtLine($ref . ' = ' . $globalVar . '.toReference();');
                             $this->addPositionalCallArg('&' . $ref, $arrayArgsVar, $list_args, $forceArrayArgs);
                         } else {
                             $this->addPositionalCallArg(
@@ -754,7 +754,7 @@ trait CallArgumentGenerator
                         }
                         $tmpRef = $this->genTmpVarName();
                         $this->addLocalVar($tmpRef, Type::REF);
-                        $this->context->beforeStmtLines[] = $tmpRef . ' = ' . $this->parseChainedExpr($arg->value, self::OP_REFVAL) . ';';
+                        $this->addBeforeStmtLine($tmpRef . ' = ' . $this->parseChainedExpr($arg->value, self::OP_REFVAL) . ';');
                         $this->addPositionalCallArg('&' . $tmpRef, $arrayArgsVar, $list_args, $forceArrayArgs);
                         continue;
                     }
@@ -815,7 +815,7 @@ trait CallArgumentGenerator
     {
         if ($argsVar === null) {
             $argsVar = $this->genTmpVarName();
-            $this->context->beforeStmtLines[] = Type::ARGS . ' ' . $argsVar . '{' . Symbol::argList() . '{' . implode(', ', $listArgs) . '}};';
+            $this->addBeforeStmtLine(Type::ARGS . ' ' . $argsVar . '{' . Symbol::argList() . '{' . implode(', ', $listArgs) . '}};');
             $listArgs = [];
         }
         return $argsVar;
@@ -825,7 +825,7 @@ trait CallArgumentGenerator
     {
         if ($arrayArgsVar === null) {
             $arrayArgsVar = $this->genTmpVarName();
-            $this->context->beforeStmtLines[] = Type::ARRAY . ' ' . $arrayArgsVar . '{' . implode(', ', $listArgs) . '};';
+            $this->addBeforeStmtLine(Type::ARRAY . ' ' . $arrayArgsVar . '{' . implode(', ', $listArgs) . '};');
             $listArgs = [];
         }
         return $arrayArgsVar;
@@ -835,7 +835,7 @@ trait CallArgumentGenerator
     {
         if ($namedArgsVar === null) {
             $namedArgsVar = $this->genTmpVarName();
-            $this->context->beforeStmtLines[] = Type::ARRAY . ' ' . $namedArgsVar . ';';
+            $this->addBeforeStmtLine(Type::ARRAY . ' ' . $namedArgsVar . ';');
         }
         return $namedArgsVar;
     }
@@ -870,7 +870,7 @@ trait CallArgumentGenerator
     ): void {
         if ($arrayArgsVar !== null) {
             $method = $appendByValue ? 'appendValue' : 'append';
-            $this->context->beforeStmtLines[] = $arrayArgsVar . '.' . $method . '(' . $value . ');';
+            $this->addBeforeStmtLine($arrayArgsVar . '.' . $method . '(' . $value . ');');
         } else {
             $listArgs[] = $value;
         }
@@ -980,7 +980,7 @@ trait CallArgumentGenerator
             if ($array === 'GLOBALS') {
                 $globalVar = $this->parseGlobalsArrayDimFetch($arg->value);
                 $ref = $this->addTmpVar(Type::REF);
-                $this->context->beforeStmtLines[] = $ref . ' = ' . $globalVar . '.toReference();';
+                $this->addBeforeStmtLine($ref . ' = ' . $globalVar . '.toReference();');
                 return '&' . $ref;
             }
             if (!$this->hasVar($array)) {
@@ -998,7 +998,7 @@ trait CallArgumentGenerator
 
         $tmpRef = $this->genTmpVarName();
         $this->addLocalVar($tmpRef, Type::REF);
-        $this->context->beforeStmtLines[] = $tmpRef . ' = ' . $this->parseChainedExpr($arg->value, self::OP_REFVAL) . ';';
+        $this->addBeforeStmtLine($tmpRef . ' = ' . $this->parseChainedExpr($arg->value, self::OP_REFVAL) . ';');
         return '&' . $tmpRef;
     }
 
@@ -1051,7 +1051,7 @@ trait CallArgumentGenerator
             if ($array === 'GLOBALS') {
                 $globalVar = $this->parseGlobalsArrayDimFetch($inner);
                 $ref = $this->addTmpVar(Type::REF);
-                $this->context->beforeStmtLines[] = $ref . ' = ' . $globalVar . '.toReference();';
+                $this->addBeforeStmtLine($ref . ' = ' . $globalVar . '.toReference();');
                 return '&' . $ref;
             }
             if (!$this->hasVar($array)) {
@@ -1087,7 +1087,7 @@ trait CallArgumentGenerator
             // and replace the actual argument with it
             $tmpVar = $this->genTmpVarName();
             $this->addLocalVar($tmpVar, Type::REF);
-            $this->context->beforeStmtLines[] = $tmpVar . ' = ' . $this->parseExpr($arg->value) . '.toReference();';
+            $this->addBeforeStmtLine($tmpVar . ' = ' . $this->parseExpr($arg->value) . '.toReference();');
             $name = $tmpVar;
         }
         // For dynamic calls, the argument list is Variant rather than Reference,
@@ -1114,9 +1114,9 @@ trait CallArgumentGenerator
 
         $wrapper = $this->genTmpVarName();
         $this->context->typedRefBridgeScopes[$scopeIndex][$root] = $wrapper;
-        $this->context->beforeStmtLines[] = 'php::RefWrap<' . $valueType . '> '
-            . $wrapper . '(' . $name . ');';
-        $this->context->afterStmtLines[] = $wrapper . '.commit();';
+        $this->addBeforeStmtLine('php::RefWrap<' . $valueType . '> '
+            . $wrapper . '(' . $name . ');');
+        $this->addAfterStmtLine($wrapper . '.commit();');
         return $wrapper;
     }
 

@@ -41,7 +41,7 @@ trait ExceptionControlFlowTrait
             // Evaluate and retain the exception before releasing its receiver
             // or other operand temporaries. Cleanup after throw is unreachable.
             $tmpVar = $this->addTmpVar(Type::VAR);
-            $this->context->beforeStmtLines[] = $tmpVar . ' = ' . $ex . ';';
+            $this->addBeforeStmtLine($tmpVar . ' = ' . $ex . ';');
             $this->appendCapturedStmtLinesToContext($afterStmts);
             return 'php::throwValue(php::takeValue(' . $tmpVar . '))';
         }

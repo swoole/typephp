@@ -2226,6 +2226,16 @@ abstract class CompilerBase implements PropertyAccessContext
         return '// ' . $class . ' [' . $v->getStartLine() . ':' . $v->getEndLine() . ']';
     }
 
+    protected function addBeforeStmtLine(string $line): void
+    {
+        $this->context->beforeStmtLines[] = $line;
+    }
+
+    protected function addAfterStmtLine(string $line): void
+    {
+        $this->context->afterStmtLines[] = $line;
+    }
+
     /**
      * For statements containing sub-statements (for/foreach, etc.), check
      * whether the currently pending code is empty. If not, the pending
@@ -3194,7 +3204,7 @@ abstract class CompilerBase implements PropertyAccessContext
                 ? $tmpVar
                 : 'php::nativeRequireObject(' . $tmpVar . ', "'
                     . addslashes($nativeReturnClass) . '")';
-            $this->context->afterStmtLines[] = $this->getIndent() . 'return ' . $finalReturn . ';';
+            $this->addAfterStmtLine($this->getIndent() . 'return ' . $finalReturn . ';');
             return $tmpVar . ' = ' . $returnExpr . ';';
         }
         $expr = $this->parseExprAsValue($v->expr);
@@ -3258,10 +3268,10 @@ abstract class CompilerBase implements PropertyAccessContext
         // Union/nullable return type: always use tmpVar for runtime check
         if ($this->shouldCheckClosureReturnType()) {
             [$code, $tmpVar] = $this->genClosureCheckedReturnAssignment($exprCode);
-            $this->context->afterStmtLines[] = $this->getIndent() . 'return ' . $tmpVar . ';';
+            $this->addAfterStmtLine($this->getIndent() . 'return ' . $tmpVar . ';');
         } elseif ($this->functionDef->returnTypeCheck && !$this->context->inClosure && !$provenObjectReturn) {
             [$code, $tmpVar] = $this->genUnionCheckedReturnAssignment($exprCode);
-            $this->context->afterStmtLines[] = $this->getIndent() . 'return ' . $tmpVar . ';';
+            $this->addAfterStmtLine($this->getIndent() . 'return ' . $tmpVar . ';');
         } elseif (!$this->isVarExpr($v->expr) and !$this->isScalar($v->expr)) {
             // If return uses an Indirect statement, the variable may be
             // destructed early, producing a dangling pointer. Assign the
@@ -3274,7 +3284,7 @@ abstract class CompilerBase implements PropertyAccessContext
             $code = $tmpVar . ' = (' . $exprCode . ');' . PHP_EOL;
             // Parsing the expression may insert statements, so the return
             // statement must be appended at the end rather than returned directly.
-            $this->context->afterStmtLines[] = $this->getIndent() . 'return ' . $tmpVar . ';';
+            $this->addAfterStmtLine($this->getIndent() . 'return ' . $tmpVar . ';');
         } else {
             $code = 'return ' . $exprCode . ';';
         }
@@ -4117,13 +4127,13 @@ abstract class CompilerBase implements PropertyAccessContext
             $read = $this->emitPropertyHookGetterCall($var, $getter);
             if ($isPre) {
                 $set = $this->emitPropertyHookSetterCall($var, $setter, new Variable($tmpVar));
-                $this->context->beforeStmtLines[] = "{$tmpVar} = {$read} {$op} 1; {$set};";
+                $this->addBeforeStmtLine("{$tmpVar} = {$read} {$op} 1; {$set};");
             } else {
                 $nextVar = $this->genTmpVarName();
                 $this->addLocalVar($nextVar, Type::VAR);
                 $set = $this->emitPropertyHookSetterCall($var, $setter, new Variable($nextVar));
-                $this->context->beforeStmtLines[] = "{$tmpVar} = {$read};";
-                $this->context->afterStmtLines[] = "{$nextVar} = {$tmpVar} {$op} 1; {$set};";
+                $this->addBeforeStmtLine("{$tmpVar} = {$read};");
+                $this->addAfterStmtLine("{$nextVar} = {$tmpVar} {$op} 1; {$set};");
             }
             return $tmpVar;
         }
@@ -4134,10 +4144,10 @@ abstract class CompilerBase implements PropertyAccessContext
         $tmpVar = $this->genTmpVarName();
         $this->addLocalVar($tmpVar, Type::VAR);
         if ($isPre) {
-            $this->context->beforeStmtLines[] = "{$tmpVar} = " . $this->emitDynamicPropertyFetchRead($var, $target) . " {$op} 1; " . $this->emitDynamicPropertyFetchWrite($var, $tmpVar, $target) . ';';
+            $this->addBeforeStmtLine("{$tmpVar} = " . $this->emitDynamicPropertyFetchRead($var, $target) . " {$op} 1; " . $this->emitDynamicPropertyFetchWrite($var, $tmpVar, $target) . ';');
         } else {
-            $this->context->beforeStmtLines[] = "{$tmpVar} = " . $this->emitDynamicPropertyFetchRead($var, $target) . ';';
-            $this->context->afterStmtLines[] = $this->emitDynamicPropertyFetchWrite($var, "{$tmpVar} {$op} 1", $target) . ';';
+            $this->addBeforeStmtLine("{$tmpVar} = " . $this->emitDynamicPropertyFetchRead($var, $target) . ';');
+            $this->addAfterStmtLine($this->emitDynamicPropertyFetchWrite($var, "{$tmpVar} {$op} 1", $target) . ';');
         }
 
         return $tmpVar;
@@ -4607,8 +4617,8 @@ abstract class CompilerBase implements PropertyAccessContext
             $prop = $this->propertyNameToStr($expr->var->name);
             $tmpVar = $this->genTmpVarName();
             $this->addLocalVar($tmpVar, Type::VAR);
-            $this->context->beforeStmtLines[] = $tmpVar . ' = ' . Symbol::getStaticProperty() . '(' . $class . ', ' . $prop . ');';
-            $this->context->afterStmtLines[] = Symbol::setStaticProperty() . '(' . $class . ', ' . $prop . ', ' . $tmpVar . ' ' . $op . ' 1);';
+            $this->addBeforeStmtLine($tmpVar . ' = ' . Symbol::getStaticProperty() . '(' . $class . ', ' . $prop . ');');
+            $this->addAfterStmtLine(Symbol::setStaticProperty() . '(' . $class . ', ' . $prop . ', ' . $tmpVar . ' ' . $op . ' 1);');
 
             return $tmpVar;
         }
@@ -4735,13 +4745,13 @@ abstract class CompilerBase implements PropertyAccessContext
                     && $this->canEmbedAnonymousClassOpcode()) {
                     $opcodePath = $this->embedAnonymousClassCode($className, $classCode);
                     $this->localHeaders[] = 'typephp_opcode_table.h';
-                    $this->context->beforeStmtLines[] = 'typephp_opcode_table_require("'
-                        . $this->escapeString($opcodePath) . '");';
+                    $this->addBeforeStmtLine('typephp_opcode_table_require("'
+                        . $this->escapeString($opcodePath) . '");');
                 } else {
-                    $this->context->beforeStmtLines[] = 'static THREAD_LOCAL bool ' . $className . '_defined = false;';
+                    $this->addBeforeStmtLine('static THREAD_LOCAL bool ' . $className . '_defined = false;');
                     $this->addConstData($className . '_code', $classCode);
-                    $this->context->beforeStmtLines[] = 'if (!' . $className . '_defined) {'
-                        . $className . '_defined = true; php::eval((const char *)' . $className . '_code);}';
+                    $this->addBeforeStmtLine('if (!' . $className . '_defined) {'
+                        . $className . '_defined = true; php::eval((const char *)' . $className . '_code);}');
                 }
                 $className = '\\' . $className;
                 $cePtr     = $this->getClassEntryPtr($className);
@@ -4918,7 +4928,7 @@ abstract class CompilerBase implements PropertyAccessContext
             [$value, $beforeStmts, $afterStmts] = $this->parseExprWithCapturedStmts($expr->expr);
             $tmpVar = $this->addTmpVar(Type::VAR);
             $this->appendCapturedStmtLinesToContext($beforeStmts);
-            $this->context->beforeStmtLines[] = $tmpVar . ' = ' . $value . ';';
+            $this->addBeforeStmtLine($tmpVar . ' = ' . $value . ';');
             $this->appendCapturedStmtLinesToContext($afterStmts);
             return 'php::instanceOf(' . $tmpVar . ', ' . $this->identifierToStr($expr->class) . ')';
         }
@@ -5316,7 +5326,7 @@ abstract class CompilerBase implements PropertyAccessContext
             } else {
                 $var = $this->genTmpVarName();
                 $this->addLocalVar($var, Type::VAR);
-                $this->context->beforeStmtLines[] = $var . '=' . $this->parseExpr($expr) . ';';
+                $this->addBeforeStmtLine($var . '=' . $this->parseExpr($expr) . ';');
                 break;
             }
             $expr = $expr->var;
@@ -5376,7 +5386,7 @@ abstract class CompilerBase implements PropertyAccessContext
 
         $key = $this->addTmpVar(Type::VAR);
         $keyExpr = $this->parseOrderedOperand($access->dim, false);
-        $this->context->beforeStmtLines[] = $key . ' = ' . $keyExpr . ';';
+        $this->addBeforeStmtLine($key . ' = ' . $keyExpr . ';');
         $stableAccess = new Expr\ArrayDimFetch(
             $receiver,
             new Variable($key, $access->dim->getAttributes()),
@@ -5850,10 +5860,10 @@ abstract class CompilerBase implements PropertyAccessContext
     protected function parseErrorSuppress(Expr\ErrorSuppress $expr): string
     {
         $tmpVar = $this->genTmpVarName();
-        $this->context->beforeStmtLines[] = 'auto ' . $tmpVar . ' = EG(error_reporting);';
-        $this->context->beforeStmtLines[] = 'php::call(' . $this->getFuncPtr('error_reporting') . ', {E_FATAL_ERRORS});';
+        $this->addBeforeStmtLine('auto ' . $tmpVar . ' = EG(error_reporting);');
+        $this->addBeforeStmtLine('php::call(' . $this->getFuncPtr('error_reporting') . ', {E_FATAL_ERRORS});');
         $code = $this->parseExpr($expr->expr);
-        $this->context->afterStmtLines[] = 'php::call(' . $this->getFuncPtr('error_reporting') . ', {' . $tmpVar . '});';
+        $this->addAfterStmtLine('php::call(' . $this->getFuncPtr('error_reporting') . ', {' . $tmpVar . '});');
         return $code;
     }
 

@@ -825,14 +825,14 @@ trait BinaryOpTrait
             // until insertion, after the value expression has run. Ordinary
             // assignment dereferences it. Clear a reused temporary first so
             // copyFrom() cannot write through a reference from an earlier loop.
-            $this->context->beforeStmtLines[] = $tmpVar . '.unset();';
-            $this->context->beforeStmtLines[] = $tmpVar . '.copyFrom(php::Var(' . $value . ').const_ptr());';
+            $this->addBeforeStmtLine($tmpVar . '.unset();');
+            $this->addBeforeStmtLine($tmpVar . '.copyFrom(php::Var(' . $value . ').const_ptr());');
         } else {
-            $this->context->beforeStmtLines[] = $tmpVar . ' = ' . $value . ';';
+            $this->addBeforeStmtLine($tmpVar . ' = ' . $value . ';');
         }
         $this->appendCapturedStmtLinesToContext($afterStmts);
         if ($this->isNativeObjectClass($nativeClass)) {
-            $this->context->afterStmtLines[] = $tmpVar . ' = nullptr;';
+            $this->addAfterStmtLine($tmpVar . ' = nullptr;');
         } elseif (in_array($type, [Type::VAR, Type::STR, Type::ARRAY, Type::OBJECT], true)) {
             // The declaration is function-scoped, but PHP releases an owned
             // expression temporary after the statement that consumes it.
@@ -840,7 +840,7 @@ trait BinaryOpTrait
             // directly observable through __destruct(), while an Array may own
             // objects whose destruction would otherwise also be delayed until
             // the native function returns.
-            $this->context->afterStmtLines[] = $tmpVar . '.unset();';
+            $this->addAfterStmtLine($tmpVar . '.unset();');
         }
         return $tmpVar;
     }
@@ -935,7 +935,7 @@ trait BinaryOpTrait
     protected function appendCapturedStmtLinesToContext(array $stmts): void
     {
         foreach ($stmts as $stmt) {
-            $this->context->beforeStmtLines[] = $stmt;
+            $this->addBeforeStmtLine($stmt);
         }
     }
 
@@ -992,9 +992,9 @@ trait BinaryOpTrait
                 // Assignment into an already-declared Variant materializes an
                 // independent value. Do not use copy-initialization here:
                 // mandatory C++ copy elision could retain an Indirect alias.
-                $this->context->beforeStmtLines[] = $accumulator . ' = ' . $value . ';';
+                $this->addBeforeStmtLine($accumulator . ' = ' . $value . ';');
             } else {
-                $this->context->beforeStmtLines[] = $accumulator . ' += ' . $value . ';';
+                $this->addBeforeStmtLine($accumulator . ' += ' . $value . ';');
             }
         }
 

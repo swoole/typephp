@@ -170,7 +170,7 @@ trait SelectionExpressionTrait
             } else {
                 $tmpVar = $this->addTmpVar(Type::VAR);
             }
-            $this->context->beforeStmtLines[] = $tmpVar . ' = ' . $var . ';';
+            $this->addBeforeStmtLine($tmpVar . ' = ' . $var . ';');
             $var = $tmpVar;
         }
 
@@ -392,13 +392,13 @@ trait SelectionExpressionTrait
                 $code .= $this->getIndent() . $tmpVar . ' = ' . $rightExpr . ';' . PHP_EOL;
             }
             $code .= '}';
-            $this->context->beforeStmtLines[] = $code;
+            $this->addBeforeStmtLine($code);
         } else {
             // This path materializes a Variant result. Both operands must
             // have that C++ type: Variant and const String (empty_string)
             // otherwise admit conversions in both directions for ?:.
-            $this->context->beforeStmtLines[] = $comment .
-                $tmpVar . ' = ' . $condExpr . ' ? php::Var(' . $leftExpr . ') : php::Var(' . $rightExpr . ');';
+            $this->addBeforeStmtLine($comment .
+                $tmpVar . ' = ' . $condExpr . ' ? php::Var(' . $leftExpr . ') : php::Var(' . $rightExpr . ');');
         }
         $expr->setAttribute(self::ATTR_LOWERED_TYPE, Type::VAR);
         $this->context->materializedExpressions->offsetSet($expr, $tmpVar);

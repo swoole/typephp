@@ -618,8 +618,8 @@ trait PropertyAccessTrait
 
         $classVar = $this->addTmpVar(Type::VAR);
         $propertyVar = $this->addTmpVar(Type::VAR);
-        $this->context->beforeStmtLines[] = $classVar . ' = ' . $classValue . ';';
-        $this->context->beforeStmtLines[] = $propertyVar . ' = ' . $propertyValue . ';';
+        $this->addBeforeStmtLine($classVar . ' = ' . $classValue . ';');
+        $this->addBeforeStmtLine($propertyVar . ' = ' . $propertyValue . ';');
 
         $className = '(' . $classVar . '.isObject() ? php::fn::get_class(' . $classVar . ') : php::toString(' . $classVar . '))';
         $helper = $reference ? Symbol::getStaticPropertyRef() : Symbol::getStaticProperty();

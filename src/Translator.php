@@ -2110,9 +2110,9 @@ CODE;
         }
 
         foreach (array_keys($this->compilationStatistics->get(CompilationStatistics::FUNCTIONS)) as $function) {
-            $reflection = Reflection::getFunction(ltrim($function, '\\'));
-            $extension = $reflection !== null && $reflection->isInternal()
-                ? $reflection->getExtensionName()
+            $functionReflection = Reflection::getFunction(ltrim($function, '\\'));
+            $extension = $functionReflection !== null && $functionReflection->isInternal()
+                ? $functionReflection->getExtensionName()
                 : $sourceIndex?->functionExtension($function);
             $this->appendExtensionDependency(
                 $dependencies,
@@ -2127,9 +2127,9 @@ CODE;
         }
         ksort($classes, SORT_STRING);
         foreach (array_keys($classes) as $class) {
-            $reflection = Reflection::getClass(ltrim($class, '\\'));
-            $extension = $reflection !== null && $reflection->isInternal()
-                ? $reflection->getExtensionName()
+            $classReflection = Reflection::getClass(ltrim($class, '\\'));
+            $extension = $classReflection !== null && $classReflection->isInternal()
+                ? $classReflection->getExtensionName()
                 : $sourceIndex?->classExtension($class);
             $this->appendExtensionDependency(
                 $dependencies,

@@ -529,21 +529,21 @@ trait CallArgumentGenerator
             if ($className === self::DYNAMIC_CALLED_CLASS) {
                 return false;
             }
-            $ref = Reflection::getClass($className);
-            if (!$ref) {
+            $classRef = Reflection::getClass($className);
+            if (!$classRef) {
                 return false;
             }
             try {
-                $params = $ref->getMethod($funcName)->getParameters();
+                $params = $classRef->getMethod($funcName)->getParameters();
             } catch (\ReflectionException) {
                 return false;
             }
         } else {
-            $ref = Reflection::getFunction($funcName);
-            if (!$ref) {
+            $functionRef = Reflection::getFunction($funcName);
+            if (!$functionRef) {
                 return false;
             }
-            $params = $ref->getParameters();
+            $params = $functionRef->getParameters();
         }
 
         $variadicParam = null;

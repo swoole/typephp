@@ -833,7 +833,7 @@ trait SsaPropOptimizer
 
     /**
      * Generate the property reference declaration for a stable object.
-     * Emits via beforeStmtLines so the reference is declared before the
+     * Emits via the statement prelude so the reference is declared before the
      * current statement at function scope.
      *
      * Skips hoisting when inside a loop or nested block scope, since the

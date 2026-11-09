@@ -781,8 +781,8 @@ trait ClosureGenerator
             );
         }
         $code = $this->parseExpr($expr->expr);
-        if ($this->context->beforeStmtLines) {
-            $beforeCode = implode(PHP_EOL, $this->context->beforeStmtLines);
+        if ($this->context->statements->hasBefore()) {
+            $beforeCode = implode(PHP_EOL, $this->context->statements->peekBefore());
         } else {
             $beforeCode = '';
         }

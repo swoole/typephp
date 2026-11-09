@@ -957,8 +957,8 @@ abstract class Preprocessor extends CompilerBase
         // reflects only this constant's lowering — a structural record of
         // whether the value depends on prelude temporaries.
         $constant->hasMaterializedTemporaries = $this->context->tmpVarIndex > 0
-            || $this->context->beforeStmtLines !== [];
-        if ($this->context->beforeStmtLines) {
+            || $this->context->statements->hasBefore();
+        if ($this->context->statements->hasBefore()) {
             if ($this->context->localVars) {
                 $constant->arrayExpr .= $this->genScopeVarDecl();
             }
@@ -2237,15 +2237,13 @@ abstract class Preprocessor extends CompilerBase
     protected function buildExpressionInitPlan(Node\Expr $defaultNode): ArrayInitPlan
     {
         $localVarCount = count($this->context->localVars);
-        $beforeStmtCount = count($this->context->beforeStmtLines);
-        $afterStmtCount = count($this->context->afterStmtLines);
-        $expr = $this->parseIdentifier($defaultNode);
+        [$expr, $newBeforeStmtLines, $newAfterStmtLines] = $this->captureStmtLines(
+            fn() => $this->parseIdentifier($defaultNode),
+        );
 
         $init = '';
         $clean = '';
         $newLocalVars = array_slice($this->context->localVars, $localVarCount, null, true);
-        $newBeforeStmtLines = array_slice($this->context->beforeStmtLines, $beforeStmtCount);
-        $newAfterStmtLines = array_slice($this->context->afterStmtLines, $afterStmtCount);
 
         if ($newLocalVars) {
             $init .= $this->genLocalVarDecl($newLocalVars);
@@ -2253,11 +2251,9 @@ abstract class Preprocessor extends CompilerBase
         }
         if ($newBeforeStmtLines) {
             $init .= implode(PHP_EOL, $newBeforeStmtLines) . PHP_EOL;
-            $this->context->beforeStmtLines = array_slice($this->context->beforeStmtLines, 0, $beforeStmtCount);
         }
         if ($newAfterStmtLines) {
             $clean .= implode(PHP_EOL, $newAfterStmtLines) . PHP_EOL;
-            $this->context->afterStmtLines = array_slice($this->context->afterStmtLines, 0, $afterStmtCount);
         }
 
         return new ArrayInitPlan($expr, $init, $clean);
@@ -2382,10 +2378,10 @@ abstract class Preprocessor extends CompilerBase
             // Structural dependency record: computed from the lowering context
             // (temporary counter / captured prelude), not from the value text.
             $constInfo->hasMaterializedTemporaries = $this->context->tmpVarIndex > 0
-                || $this->context->beforeStmtLines !== [];
+                || $this->context->statements->hasBefore();
         }
 
-        if ($constInfo->codegenFinalized && $this->context->beforeStmtLines) {
+        if ($constInfo->codegenFinalized && $this->context->statements->hasBefore()) {
             $arrayExpr = '';
             if ($this->context->localVars) {
                 $arrayExpr .= $this->genScopeVarDecl();

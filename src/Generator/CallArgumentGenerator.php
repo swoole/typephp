@@ -128,10 +128,10 @@ trait CallArgumentGenerator
         $this->context->typedRefBridgeScopes[] = [];
         // Pending after-lines that predate this call (short-circuit captures,
         // assignment heads) mark the boundary of the region this call's
-        // cleanup must stay inside: helpers slice afterStmtLines by count,
+        // cleanup must stay inside: capture keeps cleanup suffixes by count,
         // so a line before this baseline can be flushed in another scope
         // than the guard declaration queued below.
-        $afterStmtStart = count($this->context->afterStmtLines);
+        $afterStmtStart = $this->context->statements->afterCount();
         try {
             $functionDef = $this->getFunction($nativeFunc);
             $providedArgs = [];
@@ -328,7 +328,7 @@ trait CallArgumentGenerator
                         // before the variadic. Committing while the second
                         // reference is alive trips the typed-reference escape
                         // check. Splice at this call's entry baseline, not at
-                        // index 0: capture helpers split afterStmtLines by
+                        // index 0: capture helpers split cleanup statements by
                         // count, and the cleanup must stay in the same region
                         // as the guard declaration. Everything there still
                         // runs after the call, and the guard destructor still
@@ -337,10 +337,8 @@ trait CallArgumentGenerator
                         $cleanupGuard = $this->genTmpVarName();
                         $this->addBeforeStmtLine('php::ArrayCleanupGuard ' . $cleanupGuard
                             . '{' . $variadicVar . '};');
-                        array_splice(
-                            $this->context->afterStmtLines,
+                        $this->context->statements->insertAfter(
                             $afterStmtStart,
-                            0,
                             [$cleanupGuard . '.cleanup();'],
                         );
                     }
@@ -571,7 +569,7 @@ trait CallArgumentGenerator
         // Within one call, typed aliases that share a canonical native root
         // must reuse one RefWrap so Zend observes one reference identity.
         $this->context->typedRefBridgeScopes[] = [];
-        $afterStmtStart = count($this->context->afterStmtLines);
+        $afterStmtStart = $this->context->statements->afterCount();
         try {
             $list_args = [];
             $arrayArgsVar = null;
@@ -858,7 +856,7 @@ trait CallArgumentGenerator
             $cleanup[] = $namedArgsVar . '.unset();';
         }
         if ($cleanup !== []) {
-            array_splice($this->context->afterStmtLines, $afterStmtStart, 0, $cleanup);
+            $this->context->statements->insertAfter($afterStmtStart, $cleanup);
         }
     }
 
@@ -893,7 +891,7 @@ trait CallArgumentGenerator
             );
         }
         // C++17 evaluates fixed argument array elements from left to right, but a
-        // later argument may emit captured beforeStmtLines while being lowered.
+        // later argument may emit captured prelude statements while being lowered.
         // Those statements are placed before the whole outer call and would
         // overtake an earlier Call left inside the initializer list. Complete
         // each direct Call in a temporary before lowering the next argument.

@@ -148,8 +148,7 @@ class FunctionContext
     /** True if any continue N (N > 1) appears in this function. */
     public bool $hasMultiLevelContinue = false;
 
-    public array $beforeStmtLines = [];
-    public array $afterStmtLines = [];
+    public readonly StatementBuffer $statements;
     /**
      * Materialized expression results belong to the context that emitted their
      * assignments. Repeated parses in this context reuse the same temporary;
@@ -169,6 +168,7 @@ class FunctionContext
 
     public function __construct()
     {
+        $this->statements = new StatementBuffer();
         $this->materializedExpressions = new SplObjectStorage();
         $this->localVars = [];
         $this->varTypeDegradations = [];
@@ -248,8 +248,7 @@ class FunctionContext
         $this->nativeObjects = $nativeObjects;
         $this->nonNullNativeObjects = $nonNullNativeObjects;
         $this->nativeStackPromotions = [];
-        $this->beforeStmtLines = [];
-        $this->afterStmtLines = [];
+        $this->statements->clear();
         $this->materializedExpressions = new SplObjectStorage();
         $this->objectProps = [];
         $this->hoistedProps = [];

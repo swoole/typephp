@@ -650,7 +650,7 @@ trait MethodCallTrait
         $typedPropertyReceiver = false;
         $typedPropertyFinalClass = '';
         // C++17 sequences a member-call receiver before its arguments, but
-        // lowering an argument may hoist captured beforeStmtLines ahead of the
+        // lowering an argument may hoist captured prelude statements ahead of the
         // whole call. Materialize an effectful receiver before parsing args.
         $receiverClass = !$this->isVarExpr($expr->var) ? $this->detectClassOfExpr($expr->var) : '';
         if ($this->isNativeObjectClass($receiverClass)) {

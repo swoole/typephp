@@ -138,13 +138,9 @@ trait SwitchTrait
                 $code .= $this->getIndent() . 'bool ' . $groupMatched . ' = false;' . PHP_EOL;
                 foreach ($conds as $caseCond) {
                     $this->assertExprCanBeUsedAsValue($caseCond, 'switch case condition');
-                    $caseBeforeStmtCount = count($this->context->beforeStmtLines);
-                    $caseAfterStmtCount = count($this->context->afterStmtLines);
-                    $caseCondExpr = $this->parseIdentifier($caseCond);
-                    $caseBeforeStmts = array_slice($this->context->beforeStmtLines, $caseBeforeStmtCount);
-                    $caseAfterStmts = array_slice($this->context->afterStmtLines, $caseAfterStmtCount);
-                    $this->context->beforeStmtLines = array_slice($this->context->beforeStmtLines, 0, $caseBeforeStmtCount);
-                    $this->context->afterStmtLines = array_slice($this->context->afterStmtLines, 0, $caseAfterStmtCount);
+                    [$caseCondExpr, $caseBeforeStmts, $caseAfterStmts] = $this->captureStmtLines(
+                        fn() => $this->parseIdentifier($caseCond),
+                    );
 
                     $code .= $this->getIndent() . 'if (!' . $switchMatched . ' && !' . $groupMatched . ') {' . PHP_EOL;
                     $code .= $this->formatCapturedStmtLines($caseBeforeStmts);

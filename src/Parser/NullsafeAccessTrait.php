@@ -107,13 +107,9 @@ trait NullsafeAccessTrait
                     : '';
                 $receiverClass = $this->detectClassOfExpr($item[4]->var);
                 $requiresDynamicScope = $this->runtimeMethodRequiresDynamicScope($receiverClass, $methodName);
-                $beforeStmtCount = count($this->context->beforeStmtLines);
-                $afterStmtCount = count($this->context->afterStmtLines);
-                $args = $this->parseCallArgs($item[2]);
-                $argBeforeStmts = array_slice($this->context->beforeStmtLines, $beforeStmtCount);
-                $argAfterStmts = array_slice($this->context->afterStmtLines, $afterStmtCount);
-                $this->context->beforeStmtLines = array_slice($this->context->beforeStmtLines, 0, $beforeStmtCount);
-                $this->context->afterStmtLines = array_slice($this->context->afterStmtLines, 0, $afterStmtCount);
+                [$args, $argBeforeStmts, $argAfterStmts] = $this->captureStmtLines(
+                    fn() => $this->parseCallArgs($item[2]),
+                );
                 if ($argBeforeStmts) {
                     $code .= $this->formatCapturedStmtLines($argBeforeStmts);
                 }

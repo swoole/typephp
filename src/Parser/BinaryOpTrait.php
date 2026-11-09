@@ -1100,7 +1100,7 @@ trait BinaryOpTrait
                 $type = $this->detectTypeOfExpr($item);
                 // C++17 evaluates the braced-list elements in order. The
                 // temporary is still required because lowering a later operand
-                // may append captured beforeStmtLines ahead of the entire
+                // may append captured prelude statements ahead of the entire
                 // concat expression; without it, those statements could
                 // overtake an earlier Call.
                 $snapshotEarlierRead = $index >= 1
@@ -1419,13 +1419,9 @@ trait BinaryOpTrait
         $leftExpr = $this->parseOrderedBinaryOperand($left);
         $this->checkVarMustExist($left, $leftExpr);
 
-        $rightBeforeStmtCount = count($this->context->beforeStmtLines);
-        $rightAfterStmtCount = count($this->context->afterStmtLines);
-        $rightExpr = $this->parseNumericIdentifier($right);
-        $rightBeforeStmts = array_slice($this->context->beforeStmtLines, $rightBeforeStmtCount);
-        $rightAfterStmts = array_slice($this->context->afterStmtLines, $rightAfterStmtCount);
-        $this->context->beforeStmtLines = array_slice($this->context->beforeStmtLines, 0, $rightBeforeStmtCount);
-        $this->context->afterStmtLines = array_slice($this->context->afterStmtLines, 0, $rightAfterStmtCount);
+        [$rightExpr, $rightBeforeStmts, $rightAfterStmts] = $this->captureStmtLines(
+            fn() => $this->parseNumericIdentifier($right),
+        );
         $this->checkVarMustExist($right, $rightExpr);
 
         $leftBool = $this->convertPythonObjectToBool($left, (string) $leftExpr)

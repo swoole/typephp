@@ -20,8 +20,7 @@ class FunctionContextTest extends TestCase
         $this->assertEmpty($ctx->globalVars);
         $this->assertEmpty($ctx->ceWrappers);
         $this->assertEmpty($ctx->arguments);
-        $this->assertEmpty($ctx->beforeStmtLines);
-        $this->assertEmpty($ctx->afterStmtLines);
+        $this->assertFalse($ctx->statements->hasPending());
         $this->assertEmpty($ctx->objectProps);
         $this->assertEmpty($ctx->scopeLayouts);
 
@@ -104,10 +103,10 @@ class FunctionContextTest extends TestCase
     public function testBeforeAfterStmtLines(): void
     {
         $ctx = new FunctionContext();
-        $ctx->beforeStmtLines[] = 'int x = 1;';
-        $ctx->afterStmtLines[] = 'x = 0;';
+        $ctx->statements->addBefore('int x = 1;');
+        $ctx->statements->addAfter('x = 0;');
 
-        $this->assertCount(1, $ctx->beforeStmtLines);
-        $this->assertCount(1, $ctx->afterStmtLines);
+        $this->assertSame(['int x = 1;'], $ctx->statements->takeBefore());
+        $this->assertSame(['x = 0;'], $ctx->statements->takeAfter());
     }
 }

@@ -28,21 +28,8 @@ trait SelectionExpressionTrait
         $nativeSelection = $this->isNativeObjectClass($nativeClass);
         $typeChanged = !$nativeSelection && $ifType !== $elseType;
         [$cond, $condBeforeStmts, $condAfterStmts] = $this->parseExprWithCapturedStmts($expr->cond);
-        $ifBeforeStmtCount = count($this->context->beforeStmtLines);
-        $ifAfterStmtCount = count($this->context->afterStmtLines);
-        $if = $this->parseExprAsValue($expr->if);
-        $ifBeforeStmts = array_slice($this->context->beforeStmtLines, $ifBeforeStmtCount);
-        $ifAfterStmts = array_slice($this->context->afterStmtLines, $ifAfterStmtCount);
-        $this->context->beforeStmtLines = array_slice($this->context->beforeStmtLines, 0, $ifBeforeStmtCount);
-        $this->context->afterStmtLines = array_slice($this->context->afterStmtLines, 0, $ifAfterStmtCount);
-
-        $elseBeforeStmtCount = count($this->context->beforeStmtLines);
-        $elseAfterStmtCount = count($this->context->afterStmtLines);
-        $else = $this->parseExprAsValue($expr->else);
-        $elseBeforeStmts = array_slice($this->context->beforeStmtLines, $elseBeforeStmtCount);
-        $elseAfterStmts = array_slice($this->context->afterStmtLines, $elseAfterStmtCount);
-        $this->context->beforeStmtLines = array_slice($this->context->beforeStmtLines, 0, $elseBeforeStmtCount);
-        $this->context->afterStmtLines = array_slice($this->context->afterStmtLines, 0, $elseAfterStmtCount);
+        [$if, $ifBeforeStmts, $ifAfterStmts] = $this->parseExprWithCapturedStmts($expr->if);
+        [$else, $elseBeforeStmts, $elseAfterStmts] = $this->parseExprWithCapturedStmts($expr->else);
 
         if ($nativeSelection) {
             $pointerType = $this->getNativeObjectPointerType($nativeClass);
@@ -349,13 +336,9 @@ trait SelectionExpressionTrait
             }
         }
 
-        $rightBeforeStmtCount = count($this->context->beforeStmtLines);
-        $rightAfterStmtCount = count($this->context->afterStmtLines);
-        $rightExpr = $this->parseIdentifier($right);
-        $rightBeforeStmts = array_slice($this->context->beforeStmtLines, $rightBeforeStmtCount);
-        $rightAfterStmts = array_slice($this->context->afterStmtLines, $rightAfterStmtCount);
-        $this->context->beforeStmtLines = array_slice($this->context->beforeStmtLines, 0, $rightBeforeStmtCount);
-        $this->context->afterStmtLines = array_slice($this->context->afterStmtLines, 0, $rightAfterStmtCount);
+        [$rightExpr, $rightBeforeStmts, $rightAfterStmts] = $this->captureStmtLines(
+            fn() => $this->parseIdentifier($right),
+        );
         $this->checkVarMustExist($right, $rightExpr);
 
         if ($simpleShorthand && !$rightBeforeStmts && !$rightAfterStmts) {

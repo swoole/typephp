@@ -2192,7 +2192,7 @@ abstract class CompilerBase implements PropertyAccessContext
                     $default instanceof Expr\ClassConstFetch => $this->parseClassConstFetch($default),
                     default => $this->parseIdentifier($default),
                 };
-                if (!$this->context->beforeStmtLines && !$this->context->afterStmtLines) {
+                if (!$this->context->statements->hasPending()) {
                     return $value;
                 }
                 $locals = $this->genScopeVarDecl();
@@ -2228,12 +2228,12 @@ abstract class CompilerBase implements PropertyAccessContext
 
     protected function addBeforeStmtLine(string $line): void
     {
-        $this->context->beforeStmtLines[] = $line;
+        $this->context->statements->addBefore($line);
     }
 
     protected function addAfterStmtLine(string $line): void
     {
-        $this->context->afterStmtLines[] = $line;
+        $this->context->statements->addAfter($line);
     }
 
     /**
@@ -2243,36 +2243,27 @@ abstract class CompilerBase implements PropertyAccessContext
      */
     protected function parseBeforeStmtLines(): string
     {
-        if ($this->context->beforeStmtLines) {
-            $code = implode(PHP_EOL, $this->context->beforeStmtLines);
-            $this->context->beforeStmtLines = [];
-            return $code . PHP_EOL;
-        }
-        return '';
+        $lines = $this->context->statements->takeBefore();
+        return $lines ? implode(PHP_EOL, $lines) . PHP_EOL : '';
     }
 
     protected function parseAfterStmtLines(): string
     {
-        if ($this->context->afterStmtLines) {
-            $code = implode(PHP_EOL, $this->context->afterStmtLines);
-            $this->context->afterStmtLines = [];
-            return $code . PHP_EOL;
-        }
-        return '';
+        $lines = $this->context->statements->takeAfter();
+        return $lines ? implode(PHP_EOL, $lines) . PHP_EOL : '';
+    }
+
+    /** @return array{mixed, list<string>, list<string>} */
+    protected function captureStmtLines(callable $lower): array
+    {
+        return $this->context->statements->capture($lower);
     }
 
     protected function parseExprWithCapturedStmts(NodeAbstract $expr, bool $asString = false, bool $writable = false): array
     {
-        $beforeStmtCount = count($this->context->beforeStmtLines);
-        $afterStmtCount = count($this->context->afterStmtLines);
-        $value = $writable
+        return $this->captureStmtLines(fn() => $writable
             ? $this->parseWritableIdentifier($expr)
-            : ($asString ? $this->parseExprToString($expr) : $this->parseExprAsValue($expr));
-        $beforeStmts = array_slice($this->context->beforeStmtLines, $beforeStmtCount);
-        $afterStmts = array_slice($this->context->afterStmtLines, $afterStmtCount);
-        $this->context->beforeStmtLines = array_slice($this->context->beforeStmtLines, 0, $beforeStmtCount);
-        $this->context->afterStmtLines = array_slice($this->context->afterStmtLines, 0, $afterStmtCount);
-        return [$value, $beforeStmts, $afterStmts];
+            : ($asString ? $this->parseExprToString($expr) : $this->parseExprAsValue($expr)));
     }
 
     protected function stringifyParsedExpr(mixed $expr): string
@@ -2353,8 +2344,7 @@ abstract class CompilerBase implements PropertyAccessContext
         $last = array_key_last($stmts);
         foreach ($stmts as $i => $v) {
             $class                 = $v->getType();
-            $this->context->beforeStmtLines = [];
-            $this->context->afterStmtLines  = [];
+            $this->context->statements->clear();
             $result                = '';
             $this->writeLog('Line ' . $this->getLine($v) . ': ' . $class);
             if ($this->debug) {
@@ -2461,15 +2451,11 @@ abstract class CompilerBase implements PropertyAccessContext
                     $this->unsupportedSyntax($v);
                     break;
             }
-            $lines                 = array_merge($lines, $this->context->beforeStmtLines);
-            $this->context->beforeStmtLines = [];
+            $lines = array_merge($lines, $this->context->statements->takeBefore());
             if ($result) {
                 $lines[] = $result;
             }
-            if ($this->context->afterStmtLines) {
-                $lines                = array_merge($lines, $this->context->afterStmtLines);
-                $this->context->afterStmtLines = [];
-            }
+            $lines = array_merge($lines, $this->context->statements->takeAfter());
         }
 
         $code = '';
@@ -3181,14 +3167,14 @@ abstract class CompilerBase implements PropertyAccessContext
                     "The return type is native object `{$nativeReturnClass}`, `{$objectClass}` given"
                 );
             }
-            $afterStmtCount = count($this->context->afterStmtLines);
+            $afterStmtCount = $this->context->statements->afterCount();
             $returnExpr = $this->parseExprAsValue($v->expr);
             $returnCode = $this->functionDef->returnNullable
                 ? $returnExpr
                 : 'php::nativeRequireObject(' . $returnExpr . ', "'
                     . addslashes($nativeReturnClass) . '")';
 
-            if (count($this->context->afterStmtLines) === $afterStmtCount) {
+            if ($this->context->statements->afterCount() === $afterStmtCount) {
                 return 'return ' . $returnCode . ';';
             }
 

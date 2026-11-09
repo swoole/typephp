@@ -36,12 +36,12 @@ final class ExpressionMaterializationContextTest extends \BaseTest
         $expr = $this->expression();
         $result = $compiler->parseExpr($expr);
         $context = $this->context($compiler);
-        $statements = $context->beforeStmtLines;
+        $statements = $context->statements->peekBefore();
         self::assertNotEmpty($statements);
 
         self::assertSame($result, $compiler->parseExpr($expr));
         self::assertSame($result, $compiler->parseExpr($expr));
-        self::assertSame($statements, $context->beforeStmtLines);
+        self::assertSame($statements, $context->statements->peekBefore());
         self::assertFalse($expr->hasAttribute('replace'));
 
         // Equal source text does not make two AST objects interchangeable.
@@ -54,7 +54,7 @@ final class ExpressionMaterializationContextTest extends \BaseTest
         $expr = $this->expression();
         $outerValue = $compiler->parseExpr($expr);
         $outer = $this->context($compiler);
-        $outerStatements = $outer->beforeStmtLines;
+        $outerStatements = $outer->statements->peekBefore();
 
         $inner = new FunctionContext();
         $inner->tmpVarIndex = 10;
@@ -62,13 +62,13 @@ final class ExpressionMaterializationContextTest extends \BaseTest
         $contextProperty->setValue($compiler, $inner);
         try {
             self::assertNotSame($outerValue, $compiler->parseExpr($expr));
-            self::assertNotEmpty($inner->beforeStmtLines);
+            self::assertNotEmpty($inner->statements->peekBefore());
         } finally {
             $contextProperty->setValue($compiler, $outer);
         }
 
         self::assertSame($outerValue, $compiler->parseExpr($expr));
-        self::assertSame($outerStatements, $outer->beforeStmtLines);
+        self::assertSame($outerStatements, $outer->statements->peekBefore());
     }
 
     public function testAnalysisResetDiscardsMaterializedResultsWithTheirStatements(): void
@@ -77,12 +77,12 @@ final class ExpressionMaterializationContextTest extends \BaseTest
         $expr = $this->expression();
         $compiler->parseExpr($expr);
         $context = $this->context($compiler);
-        self::assertNotEmpty($context->beforeStmtLines);
+        self::assertNotEmpty($context->statements->peekBefore());
 
         $context->resetAnalysisTemporaries([], 0, []);
-        self::assertEmpty($context->beforeStmtLines);
+        self::assertEmpty($context->statements->peekBefore());
         $compiler->parseExpr($expr);
-        self::assertNotEmpty($context->beforeStmtLines);
+        self::assertNotEmpty($context->statements->peekBefore());
     }
 
     public function testRepeatedDefaultLoweringProducesIndependentCompleteHelpers(): void

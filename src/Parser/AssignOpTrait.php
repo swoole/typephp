@@ -2196,20 +2196,8 @@ trait AssignOpTrait
             $this->assertCanAssignPropertyWrite($propertyWriteTarget, $expr->expr);
         }
 
-        $rightBeforeCount = count($this->context->beforeStmtLines);
-        $rightAfterCount = count($this->context->afterStmtLines);
-        $right = $this->parseExpr($expr->expr);
-        $rightBefore = array_slice($this->context->beforeStmtLines, $rightBeforeCount);
-        $rightAfter = array_slice($this->context->afterStmtLines, $rightAfterCount);
-        $this->context->beforeStmtLines = array_slice(
-            $this->context->beforeStmtLines,
-            0,
-            $rightBeforeCount,
-        );
-        $this->context->afterStmtLines = array_slice(
-            $this->context->afterStmtLines,
-            0,
-            $rightAfterCount,
+        [$right, $rightBefore, $rightAfter] = $this->captureStmtLines(
+            fn() => $this->parseExpr($expr->expr),
         );
         if ($propertyWriteTarget !== null) {
             $right = $this->wrapPropertyWriteTypeCheck($propertyWriteTarget, $expr->expr, $right);

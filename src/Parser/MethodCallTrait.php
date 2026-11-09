@@ -167,13 +167,14 @@ trait MethodCallTrait
     }
 
     /**
-     * A typed property declaration can describe call arguments without proving
-     * the receiver's concrete runtime class. Private methods are the one
-     * exception: a child may declare an unrelated public method with the same
-     * name and a different signature, so an inaccessible private declaration
-     * cannot be used as the runtime call's signature contract.
+     * A declared type (a property type or a method's return type) can describe
+     * call arguments without proving the receiver's concrete runtime class.
+     * Private methods are the one exception: a child may declare an unrelated
+     * public method with the same name and a different signature, so an
+     * inaccessible private declaration cannot be used as the runtime call's
+     * signature contract.
      */
-    protected function getTypedPropertyMethodSignatureClass(string $class, string $method): string
+    protected function getDeclaredMethodSignatureClass(string $class, string $method): string
     {
         if ($class === '' || $method === '') {
             return '';
@@ -209,11 +210,12 @@ trait MethodCallTrait
     }
 
     /**
-     * A final property class is exact enough for a native call only when its
+     * A declared receiver class is exact enough for a native call only when its
      * resolved method is accessible from the current lexical scope. An
-     * inaccessible method may instead dispatch to __call() at runtime.
+     * inaccessible method may instead dispatch to a subclass override or to
+     * __call() at runtime.
      */
-    protected function hasInaccessibleTypedPropertyMethod(string $class, string $method): bool
+    protected function hasInaccessibleDeclaredMethod(string $class, string $method): bool
     {
         if ($class === '' || $method === '' || !$this->hasClass($class)) {
             return false;
@@ -352,6 +354,13 @@ trait MethodCallTrait
                 $class = $this->context->stableObjects[$object];
             }
         } else {
+            return false;
+        }
+
+        if ($this->hasInaccessibleDeclaredMethod($class, $method)) {
+            // The receiver's declared class may resolve to a subclass override
+            // or to __call() at runtime. A direct call cannot represent that,
+            // and the inaccessible declaration must not raise a compile error.
             return false;
         }
 
@@ -810,13 +819,18 @@ trait MethodCallTrait
                 $typedPropertyLexicalPrivateClass = $scopeClass;
             }
         }
+        // The declared class of a receiver only bounds the runtime class, so an
+        // inaccessible method declaration must not decide the argument
+        // contract: the runtime object may be a subclass with a public override
+        // or may dispatch to __call().
+        $declaredSignatureClass = $this->getDeclaredMethodSignatureClass($class, $methodName);
         $typedPropertyHasInaccessibleMethod = $typedPropertyReceiver
             && $typedPropertyLexicalPrivateClass === ''
-            && $this->hasInaccessibleTypedPropertyMethod($class, $methodName);
+            && $this->hasInaccessibleDeclaredMethod($class, $methodName);
         $typedPropertySignatureClass = $typedPropertyReceiver
             ? ($typedPropertyLexicalPrivateClass !== ''
                 ? $typedPropertyLexicalPrivateClass
-                : $this->getTypedPropertyMethodSignatureClass($class, $methodName))
+                : $declaredSignatureClass)
             : $class;
         if ($typedPropertyFinalClass !== ''
             && $typedPropertyLexicalPrivateClass === ''
@@ -1115,7 +1129,9 @@ trait MethodCallTrait
                     ? ($typedPropertySignatureClass === ''
                         ? self::DYNAMIC_CALLED_CLASS
                         : $typedPropertySignatureClass)
-                    : $class;
+                    : ($declaredSignatureClass === ''
+                        ? self::DYNAMIC_CALLED_CLASS
+                        : $declaredSignatureClass);
                 $callArgs = $this->parseCallArgs(
                     $expr->args,
                     $funcName,

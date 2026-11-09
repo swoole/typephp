@@ -716,6 +716,8 @@ trait BinaryOpTrait
 
     protected function shouldMaterializeOrderedOperand(NodeAbstract $expr): bool
     {
+        // eval/include still execute code, produce output and throw. Preserve
+        // their evaluation order without promising access to AOT caller state.
         // A closure or arrow function body does not run when the closure is
         // created, so nothing inside it can execute at this operand position.
         if ($expr instanceof Expr\Closure || $expr instanceof Expr\ArrowFunction) {

@@ -96,6 +96,27 @@
 
 ## 运行时动态能力
 
+- `eval()`、`include`、`include_once`、`require` 和 `require_once` 仅支持执行独立 PHP 代码，不提供标准 PHP 的调用者上下文捕获语义。动态代码不能依赖 TypePHP 调用者的 `$this`、类或命名空间作用域、可见性权限、局部变量、参数、引用绑定、调用栈或其他 AOT 执行状态；不保证从动态代码反向访问或修改这些状态。
+- 编译器不向动态代码导出或同步局部变量及参数，不为其建立、保留或模拟 Zend 调用帧，也不会仅因方法含有上述构造就放弃 native call、去虚化或属性提升优化。偶然可见的 Zend 上下文不属于兼容性承诺。
+- 在 TypePHP 侧构造代码字符串或文件路径，以及接收动态代码的返回值，仍按普通表达式求值。独立代码可以使用自身定义的变量、函数和类以及可用的 PHP 内置能力；请通过显式返回值传递计算结果，不依赖共享 `$GLOBALS`、隐式变量导入或作用域传播。代码或路径表达式的副作用、动态代码的输出和异常仍保留正常求值顺序。
+- 此限制针对运行时源码执行，不取消普通动态调用、显式 callback 或 Zend 对象互操作所需的类型、引用、可见性和生命周期保护。
+- 静态代码与动态代码之间唯一推荐的互操作方式是：动态脚本返回 `static closure`，由 TypePHP 代码显式传参调用。脚本不能从 TypePHP 执行环境捕获变量，闭包也不能依赖调用者的 `$this`、词法作用域或调用栈；闭包可以使用自己的参数和动态脚本自身定义的数据。不要通过 `$GLOBALS`、调用者变量名、`self`、`parent`、`static` 或可见性上下文建立隐式通道。例如：
+
+  ```php
+  $operation = eval('return static function (int $value): int { return $value + 1; };');
+  echo $operation(41); // 42：显式传参
+
+  $operation = require __DIR__ . '/operation.php';
+  echo $operation(41);
+  ```
+
+  `operation.php` 的内容：
+
+  ```php
+  <?php
+  return static function (int $value): int { return $value + 1; };
+  ```
+
 - 普通 Zend 对象和动态类表达式支持运行时 `::class` 与 class constant lookup；Native Class 仍要求相关类目标能够在编译期确定。
 - `static::class` 在需要编译期常量类名的位置不支持。
 - `__CLASS__` 只允许在 `class` 定义的代码段中使用（`PHP`允许，返回空字符串）。

@@ -1,3 +1,3 @@
 <?php
 
-$this->value = 100;
+return 100;

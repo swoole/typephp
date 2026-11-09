@@ -8,12 +8,13 @@ class EvalTarget
 
     public function mutate(): void
     {
-        eval('$this->value = 100;');
+        $this->value = eval('return 100;');
     }
 
-    public function includeMutate(): void
+    public function includeMutate(int $parameter = 1): void
     {
-        include __DIR__ . '/eval-object-context/included.php';
+        $local = $parameter;
+        $this->value = include __DIR__ . '/eval-object-context/included.php';
     }
 
     public function runNew(): void
@@ -34,6 +35,40 @@ class EvalTarget
     public function runInclude(): void
     {
         (new self())->includeMutate();
+    }
+
+    public function requireFile(int $parameter): void
+    {
+        $local = $parameter;
+        require __DIR__ . '/eval-object-context/included.php';
+    }
+
+    public function includeOnce(int $parameter): void
+    {
+        $local = $parameter;
+        include_once __DIR__ . '/eval-object-context/included.php';
+    }
+
+    public function requireOnce(int $parameter): void
+    {
+        $local = $parameter;
+        require_once __DIR__ . '/eval-object-context/included.php';
+    }
+
+    public function stableEval(): int
+    {
+        $this->value = 1;
+        eval('return 42;');
+        $this->value += 1;
+        return $this->value;
+    }
+
+    public function stableInclude(): int
+    {
+        $this->value = 1;
+        include __DIR__ . '/eval-object-context/included.php';
+        $this->value += 1;
+        return $this->value;
     }
 
     public function runPlain(): int

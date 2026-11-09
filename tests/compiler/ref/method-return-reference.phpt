@@ -40,12 +40,8 @@ function main()
     $staticAlias = 77;
     var_dump(RefBox::staticRef());
 
-    $GLOBALS['eval_box'] = $box;
-    eval('$evalMethodAlias =& $GLOBALS["eval_box"]->valueRef(); $evalMethodAlias = "method eval"; $evalStaticAlias =& RefBox::staticRef(); $evalStaticAlias = "static eval";');
-    var_dump($box->valueRef());
-    var_dump(RefBox::staticRef());
-
-    require __DIR__ . '/method-return-reference-require.inc';
+    $update = require __DIR__ . '/method-return-reference-require.inc';
+    $update($box);
     var_dump($box->valueRef());
     var_dump(RefBox::staticRef());
 
@@ -77,8 +73,6 @@ function main()
 --EXPECT--
 int(42)
 int(77)
-string(11) "method eval"
-string(11) "static eval"
 string(14) "method require"
 string(14) "static require"
 string(14) "method dynamic"

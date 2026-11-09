@@ -21,7 +21,7 @@ class Test3 extends Test2 {
 
 function main() {
     $o2 = new Test3();
-    eval("var_dump(Test3::CONST_ARRAY);");
+    var_dump(Test3::CONST_ARRAY);
     var_dump(Test3::CONST_ARRAY);
     $o2->foo();
 }

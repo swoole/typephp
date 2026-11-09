@@ -5094,6 +5094,8 @@ abstract class CompilerBase implements PropertyAccessContext
     protected function parseEval(Expr\Eval_ $expr): string
     {
         $this->assertExprCanBeUsedAsValue($expr->expr, 'eval operand');
+        // Only self-contained PHP code is supported. Do not export AOT
+        // locals or retain a Zend caller frame for dynamic code to inspect.
         // Disable literal-string optimization for the PHP code passed to eval().
         $expr->expr->setAttribute('noLiteralString', true);
         $source = $this->isNativeObjectClass($this->detectClassOfExpr($expr->expr))
@@ -5127,26 +5129,8 @@ abstract class CompilerBase implements PropertyAccessContext
             ? $this->parseExprToString($expr->expr)
             : $this->parseIdentifier($expr->expr);
 
-        $scope = [];
-        foreach ($this->context->localVars as $name => $_type) {
-            if ($name === 'this_' || str_starts_with($name, 'tmp_var_')) {
-                continue;
-            }
-            // Native pointers have no zval representation. Boxing one into
-            // the include symbol table would silently select a bool overload
-            // and expose `true` instead of the object. Dynamic PHP is not
-            // allowed to observe Native locals, so leave these names absent.
-            if ($this->isNativeObjectVar($name)) {
-                continue;
-            }
-            $phpName = $this->unescapeVarName($name);
-            $scope[] = '{ ' . $this->getLiteralString($phpName) . '.str(), php::Var(' . $name . ') }';
-        }
-
-        if ($scope) {
-            return "php::include(php::Var({$fileName}), {$type}, php::Array{" . implode(', ', $scope) . '})';
-        }
-
+        // Like eval(), includes do not capture the compiled caller's locals,
+        // parameters, object or lexical scope.
         return "php::include(php::Var({$fileName}), {$type})";
     }
 

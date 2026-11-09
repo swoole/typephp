@@ -485,12 +485,6 @@ trait SsaPropOptimizer
             }
         }
 
-        if ($node instanceof Expr\Eval_ || $node instanceof Expr\Include_) {
-            $this->collectPropEvents($node->expr, $objName, $events);
-            $events[] = ['kind' => 'danger', 'prop' => '*'];
-            return;
-        }
-
         if ($node instanceof Expr\FuncCall || $node instanceof Expr\MethodCall
             || $node instanceof Expr\StaticCall || $node instanceof Expr\NullsafeMethodCall) {
             if ($node instanceof Expr\StaticCall && $node->class instanceof Expr) {

@@ -912,9 +912,9 @@ class SsaAnalysisTest extends TestCase
         $this->assertSame([], $result);
     }
 
-    public function testCollectDangerousPropOpsEvalInvalidatesLaterPropertyAccess(): void
+    public function testCollectDangerousPropOpsEvalDoesNotCaptureObject(): void
     {
-        $eval = new Expr\Eval_(new Scalar\String_('$obj->a = 99;'));
+        $eval = new Expr\Eval_(new Scalar\String_('return 42;'));
         $stmt = new Stmt\Expression($eval);
         $read = new Stmt\Expression(new Expr\Assign(
             new Expr\Variable('value'),
@@ -922,10 +922,10 @@ class SsaAnalysisTest extends TestCase
         ));
 
         $result = $this->invoke('collectDangerousPropOps', 'obj', [$stmt, $read]);
-        $this->assertSame(['a' => true], $result);
+        $this->assertSame([], $result);
     }
 
-    public function testCollectDangerousPropOpsIncludeInvalidatesLaterPropertyAccess(): void
+    public function testCollectDangerousPropOpsIncludeDoesNotCaptureObject(): void
     {
         $include = new Expr\Include_(new Scalar\String_('unknown.php'), Expr\Include_::TYPE_INCLUDE);
         $stmt = new Stmt\Expression($include);
@@ -935,7 +935,22 @@ class SsaAnalysisTest extends TestCase
         ));
 
         $result = $this->invoke('collectDangerousPropOps', 'obj', [$stmt, $read]);
-        $this->assertSame(['a' => true], $result);
+        $this->assertSame([], $result);
+    }
+
+    public function testDynamicSourceOperandsStillExposeExplicitObjectArguments(): void
+    {
+        foreach (['eval', 'include'] as $kind) {
+            $operand = new Expr\FuncCall(new Node\Name('buildSourceOrPath'), [new Arg(new Expr\Variable('obj'))]);
+            $dynamicCode = $kind === 'eval' ? new Expr\Eval_($operand)
+                : new Expr\Include_($operand, Expr\Include_::TYPE_INCLUDE);
+            $read = new Stmt\Expression(new Expr\Assign(
+                new Expr\Variable('value'),
+                new Expr\PropertyFetch(new Expr\Variable('obj'), 'a'),
+            ));
+            $result = $this->invoke('collectDangerousPropOps', 'obj', [new Stmt\Expression($dynamicCode), $read]);
+            $this->assertSame(['a' => true], $result, $kind);
+        }
     }
 
     public function testCollectDangerousPropOpsObjectAliasWildcard(): void

@@ -1,5 +1,5 @@
 --TEST--
-Chained receiver keeps the Zend object frame for eval() inside the called method
+Chained receiver calls independent eval without retaining a Zend object frame
 --FILE--
 <?php
 
@@ -14,7 +14,7 @@ class ChainEvalFrame
 
     public function run(): self
     {
-        eval('$this->value = 100;');
+        $this->value = eval('return 100;');
         return $this;
     }
 }

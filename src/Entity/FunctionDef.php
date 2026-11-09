@@ -40,12 +40,6 @@ class FunctionDef
     public bool $returnTypeUndeclared = false;
     public bool $returnsByRef = false;
     public bool $generator = false;
-    /**
-     * eval() and include/require run in the caller's variable scope, so they
-     * need the live `$this` from the Zend object frame. Such methods must keep
-     * dynamic dispatch; a direct C++ call has no object frame.
-     */
-    public bool $usesObjectContext = false;
     /** The call result must not be discarded as a statement expression. */
     public bool $mustUse = false;
     /** This instance method may not mutate its receiver. */

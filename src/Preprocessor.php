@@ -1694,7 +1694,6 @@ abstract class Preprocessor extends CompilerBase
         $functionDef->importLibrary = $this->stubImportLibrary;
         $functionDef->returnTypeUndeclared = $v->returnType === null;
         $functionDef->returnsByRef = $v->byRef;
-        $functionDef->usesObjectContext = $classScope && $this->containsObjectContextUse($v);
         if ($this->containsYield($v)) {
             $this->prepareGeneratorFunction($v, $functionDef);
         }

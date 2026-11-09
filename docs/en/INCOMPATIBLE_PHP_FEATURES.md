@@ -198,6 +198,27 @@ incompatible with or more restrictive than standard PHP.
 
 ## Runtime dynamic capabilities
 
+- `eval()`, `include`, `include_once`, `require`, and `require_once` only support self-contained PHP code. They do not provide standard PHP caller-context capture. Dynamic code must not depend on the TypePHP caller's `$this`, class or namespace scope, visibility privileges, locals, parameters, reference bindings, call stack, or other AOT execution state; reading or mutating that state from dynamic code is not guaranteed.
+- The compiler does not export or synchronize locals or parameters, create, retain, or emulate Zend caller frames for dynamic code, or disable native calls, devirtualization, or property hoisting merely because a method contains these constructs. Incidentally visible Zend context is outside the compatibility contract.
+- Constructing the source string or file path in TypePHP and receiving the result still use ordinary expression evaluation. Independent code can use its own variables, functions, classes, and available PHP built-ins. Return results explicitly instead of relying on shared `$GLOBALS`, implicit variable imports, or scope propagation. Source/path expression side effects, dynamic-code output, and exceptions retain their normal evaluation order.
+- This restriction concerns runtime source execution. It does not remove the type, reference, visibility, or lifetime protections required by ordinary dynamic calls, explicit callbacks, or Zend object interoperability.
+- The only recommended static/dynamic interoperability pattern is to return a `static closure` from the dynamic script, then call it from TypePHP with explicit arguments. Neither the script nor the closure may capture TypePHP caller variables, `$this`, lexical scope, or the call stack. The closure can use its own parameters and data defined by the dynamic script itself. Do not establish implicit channels through `$GLOBALS`, caller variable names, `self`, `parent`, `static`, or inherited visibility. For example:
+
+  ```php
+  $operation = eval('return static function (int $value): int { return $value + 1; };');
+  echo $operation(41); // 42: explicit argument passing
+
+  $operation = require __DIR__ . '/operation.php';
+  echo $operation(41);
+  ```
+
+  Contents of `operation.php`:
+
+  ```php
+  <?php
+  return static function (int $value): int { return $value + 1; };
+  ```
+
 - Ordinary Zend objects and dynamic class expressions support runtime `::class`
   and class-constant lookup. Native Classes still require the relevant class
   target to be known at compile time.

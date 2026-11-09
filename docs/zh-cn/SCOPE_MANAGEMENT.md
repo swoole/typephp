@@ -4,6 +4,8 @@
 
 ## 1. 设计目标
 
+本设计用于普通动态调用、显式 callback 和 Zend 对象互操作，不为 `eval()`、`include` 或 `require` 动态执行的源码捕获 TypePHP 调用者的对象、作用域、局部变量、参数或调用栈。动态源码只承诺独立执行，不应为其保留 Zend 调用帧或禁用静态优化，完整边界见[不兼容项](INCOMPATIBLE_PHP_FEATURES.md#运行时动态能力)。
+
 TypePHP 生成的 C++ 方法并不是普通 Zend user function。动态调用回到 ZendVM 时，Zend 仍然需要以下信息才能复现 PHP 的可见性规则：
 
 - 声明方法的词法作用域，用于判断 private/protected 成员是否可访问；

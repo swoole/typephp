@@ -354,18 +354,30 @@ trait NativeTypeCompatibilityTrait
         }
 
         if ($argInfo->type === Type::OBJECT) {
+            if ($argInfo->nullable) {
+                $class = $this->detectDeclaredClassOfExpr($arg->value);
+                if ($type === Type::OBJECT && $class !== '' && $declaredClass !== ''
+                    && $this->isObjectClassStaticallyAssignableTo($class, $declaredClass)) {
+                    return $expr;
+                }
+                return $this->convertNullableObjectExpr(
+                    $expr,
+                    $declaredClass !== '' ? $this->getClassEntryPtr($declaredClass) : '',
+                );
+            }
             if ($declaredClass !== '') {
                 $class = $this->detectDeclaredClassOfExpr($arg->value);
                 if ($class !== '') {
-                    // Native calls are a performance hot path. If the static phase
-                    // has already proven the argument is-a the declared type, do not
-                    // emit php::toObject($expr, target_ce) to repeat the runtime
-                    // check. If it cannot be proven but the right-hand side is a
-                    // known concrete object, it is necessarily incompatible, so fail
-                    // at compile time; other dynamic/external-library/any scenarios
-                    // keep php::toObject() as a runtime fallback.
+                    // A known class supplies the is-a relation, while the Object
+                    // handle can still contain null. Preserve the non-null
+                    // parameter boundary. Incompatible concrete allocations
+                    // fail statically; other dynamic/external-library/any values
+                    // retain the runtime class check.
                     if ($this->isObjectClassStaticallyAssignableTo($class, $declaredClass)) {
-                        return $type === Type::OBJECT ? $expr : $this->convertObjectExpr($expr);
+                        // An Object slot can also contain null after a nullable
+                        // call or a local assignment; non-null parameters must
+                        // still validate that boundary.
+                        return $this->convertObjectExpr($expr, $this->getClassEntryPtr($declaredClass));
                     }
                     if ($this->isKnownConcreteObjectExpr($arg->value, $class)) {
                         $argName = $argInfo->phpName ?: $this->unescapeVarName($argInfo->name);

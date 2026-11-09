@@ -530,7 +530,9 @@ trait AssignOpTrait
                 $rightExpr = $this->parseExprAsValue($right);
                 $rightExpr = $this->wrapPropertyWriteTypeCheck($propertyWriteTarget, $right, $rightExpr);
                 if ($def->type !== Type::VAR) {
-                    $rightExpr = $this->convertExprFromType($def->type, $rightExpr);
+                    $rightExpr = $def->type === Type::OBJECT && $def->nullable
+                        ? 'php::Object{' . $rightExpr . '}'
+                        : $this->convertExprFromType($def->type, $rightExpr);
                 }
                 return $this->promoteNativeObjectPropertyValue(
                     $def,
@@ -772,6 +774,11 @@ trait AssignOpTrait
         }
         $rightExprType = $this->detectTypeOfExpr($right);
         if ($propertyWriteTarget !== null && ($propertyDef = $this->getNativePropertyDef($left)) !== null) {
+            if ($propertyDef->type === Type::OBJECT && $propertyDef->nullable) {
+                // The write check already validated T|null. An object cast
+                // would turn null into stdClass instead of preserving it.
+                return $var . ' = php::Object{' . $rightExpr . '}';
+            }
             $effectiveRightType = $rightExprType === Type::VAR && $this->getFixedPropertyTypeCheckHelper($propertyDef) !== null
                 ? $propertyDef->type
                 : $rightExprType;

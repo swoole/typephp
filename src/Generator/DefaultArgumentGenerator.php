@@ -115,7 +115,9 @@ trait DefaultArgumentGenerator
             Type::BOOL => $this->convertBoolExpr($value, $fromType),
             Type::STR => 'php::toString(' . $value . ')',
             Type::ARRAY => 'php::toArray(' . $value . ')',
-            Type::OBJECT => 'php::toObject(' . $value . ')',
+            Type::OBJECT => $argInfo->nullable
+                ? $this->convertNullableObjectExpr($value)
+                : 'php::toObject(' . $value . ')',
             default => $value,
         };
     }

@@ -732,6 +732,15 @@ trait MethodCallTrait
             }
         }
 
+        // A typed Object slot may hold null, and its declared class is not
+        // proof of the runtime subclass. Reuse the property receiver's safe
+        // signature/visibility fallback for these handles as well.
+        $typedObjectReceiver = $this->isVarExpr($expr->var)
+            && $object !== 'this_'
+            && $this->isTypedObject($object)
+            && !$this->isNativeObjectClass($class);
+        $typedPropertyReceiver = $typedPropertyReceiver || $typedObjectReceiver;
+
         $magicMethod = false;
         $method = $this->methodNameToStr($expr->name, literal: true);
         // Keep the statically named method available to every later branch.
@@ -844,7 +853,9 @@ trait MethodCallTrait
 
         // Method calls that can be lowered to a native call
         if (($this->isVarExpr($expr->var) || $materializedNativeReceiver || $materializedTypedPropertyReceiver)
-            and $this->isNamedMethod($expr->name)) {
+            && !$typedPropertyHasInaccessibleMethod
+            && $typedPropertyLexicalPrivateClass === ''
+            && $this->isNamedMethod($expr->name)) {
             $type = $this->getVarType($object);
             if ($class !== '' && $this->isNativeObjectClass($class)) {
                 // Native objects have their own C++ virtual thunk for an

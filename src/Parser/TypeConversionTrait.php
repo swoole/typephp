@@ -165,6 +165,15 @@ trait TypeConversionTrait
         return $expr;
     }
 
+    protected function convertNullableObjectExpr(string $expr, string $class = ''): string
+    {
+        $value = 'typephp_nullable_object_value';
+        return '([&](php::Var ' . $value . ') -> php::Object {'
+            . ' if (' . $value . '.isNull()) { return php::Object{' . $value . '}; }'
+            . ' return ' . $this->convertObjectExpr($value, $class) . ';'
+            . ' })(' . $expr . ')';
+    }
+
     protected function convertArrayExpr(string $expr): string
     {
         if (!$this->isClosedExpr($expr, 'php::toArray')) {

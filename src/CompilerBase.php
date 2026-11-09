@@ -3124,9 +3124,19 @@ abstract class CompilerBase implements PropertyAccessContext
             }
         }
 
-        $exprCode = $this->convertExprType($expr, $returnType, $type);
+        $nullableObjectReturn = !$this->context->inClosure
+            && $returnType === Type::OBJECT
+            && $this->functionDef->returnNullable;
+        // Preserve the raw null/object until the declared composite return
+        // check runs; the Object constructor accepts either validated value.
+        $exprCode = $nullableObjectReturn ? $expr : $this->convertExprType($expr, $returnType, $type);
+        if (!$nullableObjectReturn && $returnType === Type::OBJECT && $returnClass !== '') {
+            $returnObjectCheckClass = $returnClass;
+        }
         if ($returnObjectCheckClass !== '') {
-            $exprCode = $this->convertObjectExpr($exprCode, $this->getClassEntryPtr($returnObjectCheckClass));
+            $exprCode = $nullableObjectReturn
+                ? $this->convertNullableObjectExpr($exprCode, $this->getClassEntryPtr($returnObjectCheckClass))
+                : $this->convertObjectExpr($exprCode, $this->getClassEntryPtr($returnObjectCheckClass));
         }
         // Union/nullable return type: always use tmpVar for runtime check
         if ($this->shouldCheckClosureReturnType()) {

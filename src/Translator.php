@@ -6781,7 +6781,9 @@ CODE;
                     );
                     $expr = $this->convertExprFromType($argInfo->type, $rawVar);
                 } elseif ($argInfo->type === Type::OBJECT && $declaredClass !== '') {
-                    $expr = $this->convertObjectExpr($argExpr, $this->getClassEntryPtr($declaredClass));
+                    $expr = $argInfo->nullable
+                        ? $this->convertNullableObjectExpr($argExpr, $this->getClassEntryPtr($declaredClass))
+                        : $this->convertObjectExpr($argExpr, $this->getClassEntryPtr($declaredClass));
                 } else {
                     $expr = $this->convertExprFromType($argInfo->type, $argExpr);
                 }
@@ -6978,7 +6980,11 @@ CODE;
                 $this->context->typedArrays[$argInfo->name] = $argInfo->typedArray;
             }
             if (!$argInfo->variadic and $argInfo->declaredClass) {
-                $this->addObject($argInfo->name, $argInfo->declaredClass);
+                if ($argInfo->byRef && $argInfo->type === Type::REF) {
+                    $this->context->declaredObjects[$argInfo->name] = $argInfo->declaredClass;
+                } else {
+                    $this->addObject($argInfo->name, $argInfo->declaredClass);
+                }
             }
             $argumentClass = $argInfo->declaredClass ?: $argInfo->class;
             if (!$argInfo->nullable && $this->isNativeObjectClass($argumentClass)) {

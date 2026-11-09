@@ -67,7 +67,7 @@ class FunctionDef
      * @var string Must be a fully qualified class name including the namespace
      */
     public string $returnClass = '';
-    /** Whether a Native object return may be represented by nullptr. */
+    /** Whether an object return accepts null (nullptr for Native objects). */
     public bool $returnNullable = false;
 
     /**

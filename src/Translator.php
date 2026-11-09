@@ -6980,7 +6980,7 @@ CODE;
             }
             if (!$argInfo->variadic and $argInfo->declaredClass) {
                 if ($argInfo->byRef && $argInfo->type === Type::REF) {
-                    $this->context->declaredObjects[$argInfo->name] = $argInfo->declaredClass;
+                    $this->context->declareObjectClass($argInfo->name, $argInfo->declaredClass);
                 } else {
                     $this->addObject($argInfo->name, $argInfo->declaredClass);
                 }
@@ -7035,7 +7035,7 @@ CODE;
                 $oriNonNullNativeObjects,
             );
             foreach ($optimizedLoopVars as $varName => $type) {
-                $this->context->localVars[$varName] = $type;
+                $this->context->setInferredLocalType($varName, $type);
             }
 
             $promotions = (new NativeObjectStackPromotionAnalyzer(

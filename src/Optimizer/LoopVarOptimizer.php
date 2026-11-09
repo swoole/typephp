@@ -68,7 +68,7 @@ trait LoopVarOptimizer
             if ($depFailed) {
                 continue;
             }
-            $this->context->localVars[$escapedName] = Type::INT;
+            $this->context->setInferredLocalType($escapedName, Type::INT);
             $optimized[$escapedName] = Type::INT;
         }
 

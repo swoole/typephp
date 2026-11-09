@@ -392,13 +392,13 @@ trait StdContainerTrait
         }
         if ($info['type'] === Type::OBJECT && $this->isNativeObjectClass($info['class'] ?? '')) {
             $this->addNativeObject($valueVar, $info['class']);
-            unset($this->context->objects[$valueVar]);
+            $this->context->forgetObjectDispatchClass($valueVar);
             return $this->getNativeObjectPointerType($info['class']);
         }
         if ($info['type'] === Type::OBJECT and $info['class']) {
             $this->addObject($valueVar, $info['class']);
         } else {
-            unset($this->context->objects[$valueVar]);
+            $this->context->forgetObjectDispatchClass($valueVar);
         }
         return $info['type'];
     }
@@ -787,7 +787,7 @@ trait StdContainerTrait
             $this->indentLevel--;
             $code .= PHP_EOL . $this->getIndent() . '}';
         }
-        unset($this->context->objects[$valueVar]);
+        $this->context->forgetObjectDispatchClass($valueVar);
         return $code;
     }
 

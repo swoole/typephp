@@ -600,10 +600,7 @@ trait ClosureGenerator
                 if ($useItem->byRef) {
                     // For a closure use clause, a by-reference capture may create
                     // the variable in place if it does not exist yet
-                    if (!isset($oriContext->localVars[$var])
-                        && !isset($oriContext->staticVars[$var])) {
-                        $oriContext->localVars[$var] = Type::REF;
-                    }
+                    $oriContext->registerReferenceCaptureLocal($var);
                     $useVars[] = $this->convertToRef($useItem->var);
                 } else {
                     $this->checkVarMustExist($useItem->var, $var);

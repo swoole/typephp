@@ -2247,7 +2247,7 @@ abstract class Preprocessor extends CompilerBase
 
         if ($newLocalVars) {
             $init .= $this->genLocalVarDecl($newLocalVars);
-            $this->context->localVars = array_slice($this->context->localVars, 0, $localVarCount, true);
+            $this->context->discardInitializerLocals($localVarCount);
         }
         if ($newBeforeStmtLines) {
             $init .= implode(PHP_EOL, $newBeforeStmtLines) . PHP_EOL;

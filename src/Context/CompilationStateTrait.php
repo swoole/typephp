@@ -21,7 +21,7 @@ trait CompilationStateTrait
 {
     protected function addLocalVar(string $name, string $type): void
     {
-        $this->context->localVars[$name] = $this->context->varTypeDegradations[$name] ?? $type;
+        $this->context->addLocalVar($name, $type);
     }
 
     /**
@@ -59,23 +59,15 @@ trait CompilationStateTrait
                 // Keep the public/native ABI fixed, but make the PHP-visible
                 // parameter a local Var copy. Its declaration is emitted in the
                 // function preamble under the original source name.
-                $this->context->varTypeDegradations[$name] = Type::VAR;
-                $this->context->localVars[$name] = Type::VAR;
-                unset(
-                    $this->context->objects[$name],
-                    $this->context->declaredObjects[$name],
-                    $this->context->stableObjects[$name],
-                    $this->context->exactObjects[$name],
-                    $this->context->nonNullNativeObjects[$name],
-                );
+                $this->context->degradeArgumentStorageToVariant($name);
                 continue;
             }
 
-            $this->context->varTypeDegradations[$name] = Type::VAR;
+            $this->context->planVariantStorage($name);
             if (!isset($analysis['nonLocals'][$sourceName]) && !$this->hasVar($name)) {
                 // Reserve the slot now so object/std/native assignment paths do
                 // not commit metadata for a fixed local before seeing the use.
-                $this->context->localVars[$name] = Type::VAR;
+                $this->addLocalVar($name, Type::VAR);
             }
         }
     }
@@ -257,9 +249,9 @@ trait CompilationStateTrait
         }
         // Interfaces have no concrete method body for native calls. Abstract classes may have concrete methods.
         if ($this->isInterface($class)) {
-            $this->context->declaredObjects[$name] = $class;
+            $this->context->declareObjectClass($name, $class);
         } elseif ($this->isNativeClass($class) || $this->isInternalClass($class) || $this->isPythonFacadeClass($class)) {
-            $this->context->objects[$name] = $class;
+            $this->context->bindObjectDispatchClass($name, $class);
         }
     }
 

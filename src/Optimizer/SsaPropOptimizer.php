@@ -60,10 +60,7 @@ trait SsaPropOptimizer
                 continue;
             }
 
-            $this->context->stableObjects[$objName] = $className;
-            if ($this->isExactNewObjectDefinition($ssa, $objName)) {
-                $this->context->exactObjects[$objName] = $className;
-            }
+            $this->context->recordStableObjectClass($objName, $className, $this->isExactNewObjectDefinition($ssa, $objName));
         }
     }
 

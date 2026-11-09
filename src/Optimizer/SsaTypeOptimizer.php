@@ -109,7 +109,7 @@ trait SsaTypeOptimizer
             }
             $varName = $this->escapeVarName($variable->name);
             if (!isset($this->context->arguments[$varName]) && !$this->hasVar($varName)) {
-                $this->context->localVars[$varName] = Type::VAR;
+                $this->context->setInferredLocalType($varName, Type::VAR);
             }
         }
 
@@ -137,7 +137,7 @@ trait SsaTypeOptimizer
         foreach (array_keys($groups) as $name) {
             $varName = $this->escapeVarName($name);
             if (!isset($this->context->arguments[$varName]) && !$this->hasVar($varName)) {
-                $this->context->localVars[$varName] = Type::VAR;
+                $this->context->setInferredLocalType($varName, Type::VAR);
             }
         }
 
@@ -208,7 +208,7 @@ trait SsaTypeOptimizer
                     $nonNarrowableType !== null
                     && in_array($nonNarrowableType, [Type::BIGINT, Type::DECIMAL, Type::BIGFLOAT, Type::STREAM], true)
                 ) {
-                    $this->context->localVars[$varName] = $nonNarrowableType;
+                    $this->context->setInferredLocalType($varName, $nonNarrowableType);
                 }
                 continue;
             }
@@ -230,7 +230,7 @@ trait SsaTypeOptimizer
             }
 
             // Apply narrowing — bypass getNativeType(): SSA has PROVEN the type.
-            $this->context->localVars[$varName] = $narrowedType;
+            $this->context->setInferredLocalType($varName, $narrowedType);
         }
     }
 

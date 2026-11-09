@@ -81,8 +81,8 @@ class FunctionContextTest extends TestCase
     public function testLocalVarsManipulation(): void
     {
         $ctx = new FunctionContext();
-        $ctx->localVars['x'] = 'php::Int';
-        $ctx->localVars['name'] = 'php::Str';
+        $ctx->addLocalVar('x', 'php::Int');
+        $ctx->addLocalVar('name', 'php::Str');
 
         $this->assertArrayHasKey('x', $ctx->localVars);
         $this->assertArrayHasKey('name', $ctx->localVars);
@@ -93,8 +93,8 @@ class FunctionContextTest extends TestCase
     public function testObjectsMap(): void
     {
         $ctx = new FunctionContext();
-        $ctx->objects['obj1'] = 'stdClass';
-        $ctx->objects['obj2'] = 'DateTime';
+        $ctx->bindObjectDispatchClass('obj1', 'stdClass');
+        $ctx->bindObjectDispatchClass('obj2', 'DateTime');
 
         $this->assertCount(2, $ctx->objects);
         $this->assertEquals('stdClass', $ctx->objects['obj1']);

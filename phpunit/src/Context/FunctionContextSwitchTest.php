@@ -45,7 +45,7 @@ final class FunctionContextSwitchTest extends TestCase
     public function testTemporaryContextKeepsItsResultsWithoutChangingTheEnclosingContext(): void
     {
         $outer = $this->get('context');
-        $outer->localVars['outer'] = Type::INT;
+        $outer->addLocalVar('outer', Type::INT);
         $outer->statements->addBefore('outer_prepare();');
         $outer->statements->addAfter('outer_cleanup();');
         $this->set('indentLevel', 3);
@@ -57,7 +57,7 @@ final class FunctionContextSwitchTest extends TestCase
             self::assertSame([], $propertyContext->localVars);
             self::assertSame(3, $this->get('indentLevel'));
             self::assertTrue($this->get('inGeneratorBody'));
-            $propertyContext->localVars['initializer'] = Type::ARRAY;
+            $propertyContext->addLocalVar('initializer', Type::ARRAY);
             $propertyContext->statements->addBefore('property_init();');
             $this->set('indentLevel', 8);
             $this->set('inGeneratorBody', false);
@@ -130,7 +130,7 @@ final class FunctionContextSwitchTest extends TestCase
     public function testStaticInitializerFailureRestoresTheCallerContext(): void
     {
         $outer = $this->get('context');
-        $outer->localVars['existing'] = Type::INT;
+        $outer->addLocalVar('existing', Type::INT);
         $outer->tmpVarIndex = 12;
         $outer->statements->addBefore('existing_prepare();');
         $outer->statements->addAfter('existing_cleanup();');
@@ -156,7 +156,7 @@ final class FunctionContextSwitchTest extends TestCase
     public function testStaticInitializerKeepsTheEnclosingTemporaryNamespace(): void
     {
         $outer = $this->get('context');
-        $outer->localVars['tmp_var_0'] = Type::INT;
+        $outer->addLocalVar('tmp_var_0', Type::INT);
         $outer->tmpVarIndex = 10;
         $ast = (new ParserFactory())->createForNewestSupportedVersion()->parse('<?php static $cache = [...[1]];');
         $initializer = $ast[0]->vars[0];

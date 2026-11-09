@@ -278,7 +278,7 @@ trait FiberGenerator
                 $argumentClass = $argInfo->declaredClass ?: $argInfo->class;
                 if ($argumentClass !== '') {
                     if ($argInfo->byRef && $argInfo->type === Type::REF) {
-                        $this->context->declaredObjects[$argInfo->name] = $argumentClass;
+                        $this->context->declareObjectClass($argInfo->name, $argumentClass);
                     } else {
                         $this->addObject($argInfo->name, $argumentClass);
                     }

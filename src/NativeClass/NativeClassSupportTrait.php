@@ -1379,8 +1379,7 @@ trait NativeClassSupportTrait
 
     protected function addNativeObject(string $name, string $class): void
     {
-        $this->context->nativeObjects[$name] = ltrim($class, '\\');
-        $this->context->objects[$name] = ltrim($class, '\\');
+        $this->context->bindNativeObjectClass($name, $class);
     }
 
     protected function isNativeObjectVar(string $name): bool
@@ -1395,12 +1394,12 @@ trait NativeClassSupportTrait
 
     protected function markNativeObjectNonNull(string $name): void
     {
-        $this->context->nonNullNativeObjects[$name] = true;
+        $this->context->markNativeObjectNonNull($name);
     }
 
     protected function forgetNativeObjectNonNull(string $name): void
     {
-        unset($this->context->nonNullNativeObjects[$name]);
+        $this->context->forgetNativeObjectNonNull($name);
     }
 
     protected function isNativeObjectKnownNonNull(string $name): bool

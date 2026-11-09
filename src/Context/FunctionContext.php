@@ -11,6 +11,7 @@ namespace TypePhp\Context;
 use PhpParser\Node;
 use SplObjectStorage;
 use TypePhp\Analysis\SsaBuilder;
+use TypePhp\Type;
 
 class FunctionContext
 {
@@ -213,6 +214,107 @@ class FunctionContext
         $this->closureMagicName = null;
         $this->closureReturnTypeCheck = null;
         $this->closureReturnTypeStr = '';
+    }
+
+    public function addLocalVar(string $name, string $type): void
+    {
+        $this->localVars[$name] = $this->varTypeDegradations[$name] ?? $type;
+    }
+
+    /** Analysis types are provisional; they do not change the storage plan. */
+    public function setInferredLocalType(string $name, string $type): void
+    {
+        $this->localVars[$name] = $type;
+    }
+
+    public function planVariantStorage(string $name): void
+    {
+        $this->varTypeDegradations[$name] = Type::VAR;
+    }
+
+    /**
+     * Only the PHP-visible local copy loses its object contract. The original
+     * parameter ABI in arguments and the FunctionDef signature remain intact.
+     */
+    public function degradeArgumentStorageToVariant(string $name): void
+    {
+        if (!isset($this->arguments[$name])) {
+            throw new \LogicException('Argument storage degradation requires a registered parameter');
+        }
+        $storageType = $this->localVars[$name] ?? Type::VAR;
+        if (isset($this->nativeObjects[$name])
+            || $storageType === Type::REF
+            || Type::isTypedRefType($storageType)
+        ) {
+            throw new \LogicException('Native pointers and reference bindings cannot degrade to Variant storage');
+        }
+        $this->planVariantStorage($name);
+        $this->addLocalVar($name, Type::VAR);
+        $this->forgetObjectDispatchClass($name);
+        unset($this->declaredObjects[$name]);
+        $this->invalidateObjectTypeProofs($name);
+    }
+
+    public function declareObjectClass(string $name, string $class): void
+    {
+        $this->declaredObjects[$name] = $class;
+    }
+
+    public function bindObjectDispatchClass(string $name, string $class): void
+    {
+        $this->objects[$name] = $class;
+    }
+
+    public function bindNativeObjectClass(string $name, string $class): void
+    {
+        $class = ltrim($class, '\\');
+        $this->nativeObjects[$name] = $class;
+        $this->bindObjectDispatchClass($name, $class);
+    }
+
+    /** Suppress native method dispatch without erasing a declared constraint or pointer ABI. */
+    public function forgetObjectDispatchClass(string $name): void
+    {
+        unset($this->objects[$name]);
+    }
+
+    public function recordStableObjectClass(string $name, string $class, bool $exact): void
+    {
+        $this->stableObjects[$name] = $class;
+        if ($exact) {
+            $this->exactObjects[$name] = $class;
+        } else {
+            unset($this->exactObjects[$name]);
+        }
+    }
+
+    /** Runtime proofs can expire while declared classes and native storage stay fixed. */
+    public function invalidateObjectTypeProofs(string $name): void
+    {
+        unset($this->stableObjects[$name], $this->exactObjects[$name], $this->nonNullNativeObjects[$name]);
+    }
+
+    public function markNativeObjectNonNull(string $name): void
+    {
+        $this->nonNullNativeObjects[$name] = true;
+    }
+
+    public function forgetNativeObjectNonNull(string $name): void
+    {
+        unset($this->nonNullNativeObjects[$name]);
+    }
+
+    public function registerReferenceCaptureLocal(string $name): void
+    {
+        if (!isset($this->localVars[$name]) && !isset($this->staticVars[$name])) {
+            $this->localVars[$name] = Type::REF;
+        }
+    }
+
+    /** Discard only the locals appended while lowering a standalone initializer. */
+    public function discardInitializerLocals(int $originalCount): void
+    {
+        $this->localVars = array_slice($this->localVars, 0, $originalCount, true);
     }
 
     public function enterScope(): void

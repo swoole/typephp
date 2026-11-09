@@ -78,7 +78,7 @@ final class ArrayWriteRootTest extends \BaseTest
     {
         $compiler = $this->compiler();
         $context = $this->context($compiler);
-        $context->localVars['a'] = $type;
+        $context->addLocalVar('a', $type);
         $this->parse($compiler, $code);
         self::assertSame($type, $context->localVars['a']);
     }

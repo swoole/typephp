@@ -249,6 +249,27 @@ trait MethodCallTrait
         }
     }
 
+    /**
+     * eval() and include/require read `$this` from the caller's Zend object
+     * frame, which a direct call does not create.
+     */
+    protected function methodUsesObjectContext(string $class, string $method): bool
+    {
+        if (!$this->hasClass($class)) {
+            return false;
+        }
+        $classDef = $this->getClass($class);
+        while (true) {
+            if ($classDef->hasMethod($method)) {
+                return (bool) $classDef->getMethod($method)->functionDef?->usesObjectContext;
+            }
+            if (!$classDef->extends || !$this->hasClass($classDef->extends)) {
+                return false;
+            }
+            $classDef = $this->getClass($classDef->extends);
+        }
+    }
+
     protected function guardAbstractMethod(string $class, string $method, Node $expr): void
     {
         $flags = $this->getMethodFlags($class, $method);
@@ -343,6 +364,10 @@ trait MethodCallTrait
         }
 
         $fullMethodName = $this->getOverrideMethodName($class, $method);
+
+        if ($this->methodUsesObjectContext($class, $method)) {
+            return false;
+        }
 
         // Libraries may be extended by consumers outside this compilation.
         // final/private methods and proven exact classes remain direct calls.

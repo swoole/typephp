@@ -11,6 +11,8 @@ namespace TypePhp\Generator;
 use TypePhp\Type;
 
 use PhpParser\Node;
+use PhpParser\Node\Expr\Eval_;
+use PhpParser\Node\Expr\Include_;
 use PhpParser\Node\Expr\Yield_;
 use PhpParser\Node\Expr\YieldFrom;
 use PhpParser\Node\Stmt\ClassMethod;
@@ -53,6 +55,47 @@ trait FiberGenerator
                     return true;
                 }
             } elseif (is_array($subNode) && $this->containsYieldInNodes($subNode)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * eval() and include/require execute in the current method scope, so they
+     * read `$this` from the caller's Zend object frame. Nested functions and
+     * classes have their own frames and are not scanned.
+     */
+    protected function containsObjectContextUse(Function_|ClassMethod $v): bool
+    {
+        return $this->containsObjectContextUseInNodes($v->stmts ?? []);
+    }
+
+    protected function containsObjectContextUseInNodes(array $nodes): bool
+    {
+        foreach ($nodes as $node) {
+            if ($node instanceof Node && $this->containsObjectContextUseInNode($node)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    protected function containsObjectContextUseInNode(Node $node): bool
+    {
+        if ($node instanceof Eval_ || $node instanceof Include_) {
+            return true;
+        }
+        if ($node instanceof Node\FunctionLike || $node instanceof Node\Stmt\ClassLike) {
+            return false;
+        }
+        foreach ($node->getSubNodeNames() as $name) {
+            $subNode = $node->{$name};
+            if ($subNode instanceof Node) {
+                if ($this->containsObjectContextUseInNode($subNode)) {
+                    return true;
+                }
+            } elseif (is_array($subNode) && $this->containsObjectContextUseInNodes($subNode)) {
                 return true;
             }
         }

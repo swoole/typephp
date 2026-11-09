@@ -104,6 +104,10 @@ trait DefaultArgumentGenerator
     private function convertDefaultArgumentValue(string $type, ArgInfo $argInfo): string
     {
         $value = $argInfo->default;
+        if ($type === Type::OBJECT && $argInfo->nullable
+            && $argInfo->defaultExpr !== null && $this->isNullExpr($argInfo->defaultExpr)) {
+            return 'php::Object{}';
+        }
         if ($argInfo->defaultType === $type) {
             return $value;
         }

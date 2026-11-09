@@ -9,6 +9,7 @@ class NullableTypedHolder
 {
     public ?NullableTypedTarget $target = null;
     public NullableTypedTarget|null $union = null;
+    public NullableTypedTarget $required;
 
     public function __construct(public ?NullableTypedTarget $promoted = null) {}
 }
@@ -52,3 +53,16 @@ function nullableTypedOtherUnion(NullableTypedTarget|string $target): NullableTy
 {
     return $target;
 }
+
+function typedIdentity(NullableTypedTarget $target): NullableTypedTarget { return $target; }
+function typedCall(NullableTypedTarget $target): int { return $target->value(); }
+function typedForward(NullableTypedTarget $target): NullableTypedTarget { return typedIdentity($target); }
+function nullableTypedForward(?NullableTypedTarget $target): ?NullableTypedTarget { return nullableTypedIdentity($target); }
+function nullableTypedPassToNonNull(?NullableTypedTarget $target): NullableTypedTarget { return typedIdentity($target); }
+function typedRebound(NullableTypedTarget $target): NullableTypedTarget
+{
+    $target = null;
+    return typedIdentity($target);
+}
+function typedPropertyAssign(NullableTypedHolder $holder, NullableTypedTarget $target): void { $holder->required = $target; }
+function nullableTypedPropertyAssign(NullableTypedHolder $holder, ?NullableTypedTarget $target): void { $holder->target = $target; }

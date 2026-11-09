@@ -55,6 +55,8 @@ Concrete class object properties use static object type rules: a non-null assign
 
 For a named class `T`, `?T` and `T|null` retain the ordinary typed-object representation (`php::Object`) and class information in parameters, return values, inferred locals and properties. The handle itself can hold null. Native method calls use the ordinary typed-object path without an extra nullable-receiver check; PHPX protects property access and dynamic method calls. `?->` still short-circuits on null, including argument evaluation. Declaration boundaries continue to validate the permitted class and nullability. Nullable scalar types and other unions retain dynamic storage; by-reference nullable object parameters retain the Zend reference ABI.
 
+Known typed-object arguments and returns do not repeat class/nullability checks already established by static analysis or their input boundary. `T` and `?T` use the same generated native-call path. A conversion from `?T` to non-nullable `T` retains a runtime check when the compiler cannot prove the value is non-null; dynamic inputs retain their required boundary validation.
+
 Correct practices:
 
 - Do not use `unset()` or assign `null` to fixed-value-type object properties of type `int`, `float`, `bool`, `string`, or `array`.

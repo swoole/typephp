@@ -39,6 +39,45 @@ final class NullableTypedObjectTest extends BaseTest
         }
     }
 
+    public function testKnownTypedPathsHaveTheSameGeneratedBodiesWithOrWithoutNullability(): void
+    {
+        $code = $this->compileFixture();
+        self::assertSame($this->body($code, 'typedidentity'), $this->body($code, 'nullabletypedidentity'));
+        self::assertSame($this->body($code, 'typedidentity'), $this->body($code, 'nullabletypedunion'));
+        self::assertSame($this->body($code, 'typedcall'), $this->body($code, 'nullabletypedcall'));
+        self::assertSame(
+            str_replace('php_typedidentity(', 'callee(', $this->body($code, 'typedforward')),
+            str_replace('php_nullabletypedidentity(', 'callee(', $this->body($code, 'nullabletypedforward')),
+        );
+    }
+
+    public function testOnlyUnprovenNonNullConversionsRetainRuntimeChecks(): void
+    {
+        $code = $this->compileFixture();
+        self::assertStringNotContainsString('php::toObject(', $this->body($code, 'typedforward'));
+        foreach (['nullabletypedpasstononnull', 'nullabletypedreturnnonnull', 'typedrebound'] as $function) {
+            self::assertSame(1, substr_count($this->body($code, $function), 'php::toObject('));
+        }
+    }
+
+    public function testKnownPropertyWritesDoNotAddObjectTemporariesOrChecks(): void
+    {
+        $code = $this->compileFixture();
+        $normalize = static fn (string $body): string => preg_replace(
+            '/PersistentPropertyId\{\d+\}|get_str\(\d+\)/', 'id', $body,
+        );
+        self::assertSame(
+            $normalize($this->body($code, 'typedpropertyassign')),
+            $normalize($this->body($code, 'nullabletypedpropertyassign')),
+        );
+    }
+
+    private function body(string $code, string $function): string
+    {
+        self::assertSame(1, preg_match('/(?:php::\w+|void) php_' . $function . '\([^\n]*\) \{\n(.*?)\n\}/s', $code, $matches));
+        return $matches[1];
+    }
+
     private function compileFixture(): string
     {
         global $translator;

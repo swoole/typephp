@@ -3127,22 +3127,26 @@ abstract class CompilerBase implements PropertyAccessContext
         $nullableObjectReturn = !$this->context->inClosure
             && $returnType === Type::OBJECT
             && $this->functionDef->returnNullable;
+        $provenObjectReturn = $nullableObjectReturn && $this->functionDef->returnTypeCheck
+            && $this->compositeTypeRelation($v->expr, $this->functionDef->returnTypeCheck) === self::COMPOSITE_TYPE_MATCH;
         // Preserve the raw null/object until the declared composite return
         // check runs; the Object constructor accepts either validated value.
         $exprCode = $nullableObjectReturn ? $expr : $this->convertExprType($expr, $returnType, $type);
-        if (!$nullableObjectReturn && $returnType === Type::OBJECT && $returnClass !== '') {
+        if ($provenObjectReturn && $this->isNullExpr($v->expr)) {
+            $exprCode = 'php::Object{}';
+        }
+        if (!$nullableObjectReturn && $returnType === Type::OBJECT && $returnClass !== ''
+            && !$this->isObjectExpressionKnownNonNull($v->expr)) {
             $returnObjectCheckClass = $returnClass;
         }
-        if ($returnObjectCheckClass !== '') {
-            $exprCode = $nullableObjectReturn
-                ? $this->convertNullableObjectExpr($exprCode, $this->getClassEntryPtr($returnObjectCheckClass))
-                : $this->convertObjectExpr($exprCode, $this->getClassEntryPtr($returnObjectCheckClass));
+        if ($returnObjectCheckClass !== '' && !$nullableObjectReturn) {
+            $exprCode = $this->convertObjectExpr($exprCode, $this->getClassEntryPtr($returnObjectCheckClass));
         }
         // Union/nullable return type: always use tmpVar for runtime check
         if ($this->shouldCheckClosureReturnType()) {
             [$code, $tmpVar] = $this->genClosureCheckedReturnAssignment($exprCode);
             $this->context->afterStmtLines[] = $this->getIndent() . 'return ' . $tmpVar . ';';
-        } elseif ($this->functionDef->returnTypeCheck && !$this->context->inClosure) {
+        } elseif ($this->functionDef->returnTypeCheck && !$this->context->inClosure && !$provenObjectReturn) {
             [$code, $tmpVar] = $this->genUnionCheckedReturnAssignment($exprCode);
             $this->context->afterStmtLines[] = $this->getIndent() . 'return ' . $tmpVar . ';';
         } elseif (!$this->isVarExpr($v->expr) and !$this->isScalar($v->expr)) {

@@ -56,6 +56,8 @@ $user->optionalProfile = null; // ✅ 可空对象属性允许赋值 null
 
 对于具名类 `T`，`?T` 和 `T|null` 在参数、返回值、推导出的局部变量和属性中保留普通 typed object 表示（`php::Object`）及类信息，对象句柄本身可以保存 null。Native method call 沿用普通 typed object 路径，不增加 nullable 接收者检查；属性访问和动态方法调用由 PHPX 提供保护。`?->` 仍在 null 时短路，且不计算调用参数。声明边界继续校验允许的类与空值。可空标量和其他联合类型保留动态存储；引用形式的可空对象参数保留 Zend reference ABI。
 
+已知 typed object 的传参和返回不重复执行静态分析或输入边界已经确立的类与空值校验，`T` 与 `?T` 沿用相同的 native 调用路径。`?T` 转为非 nullable 的 `T` 时，只有编译器无法证明非空才保留运行时检查；动态输入仍保留必要的边界校验。
+
 正确做法：
 
 - 不要对 `int`、`float`、`bool`、`string`、`array` 固定值类型对象属性使用 `unset()` 或赋值 `null`。

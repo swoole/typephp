@@ -355,6 +355,9 @@ trait NativeTypeCompatibilityTrait
 
         if ($argInfo->type === Type::OBJECT) {
             if ($argInfo->nullable) {
+                if ($this->isNullExpr($arg->value)) {
+                    return 'php::Object{}';
+                }
                 $class = $this->detectDeclaredClassOfExpr($arg->value);
                 if ($type === Type::OBJECT && $class !== '' && $declaredClass !== ''
                     && $this->isObjectClassStaticallyAssignableTo($class, $declaredClass)) {
@@ -368,15 +371,12 @@ trait NativeTypeCompatibilityTrait
             if ($declaredClass !== '') {
                 $class = $this->detectDeclaredClassOfExpr($arg->value);
                 if ($class !== '') {
-                    // A known class supplies the is-a relation, while the Object
-                    // handle can still contain null. Preserve the non-null
-                    // parameter boundary. Incompatible concrete allocations
-                    // fail statically; other dynamic/external-library/any values
-                    // retain the runtime class check.
+                    // Class and non-null proofs are compile-time facts. Keep
+                    // ordinary T -> T calls free of repeated boundary checks.
                     if ($this->isObjectClassStaticallyAssignableTo($class, $declaredClass)) {
-                        // An Object slot can also contain null after a nullable
-                        // call or a local assignment; non-null parameters must
-                        // still validate that boundary.
+                        if ($type === Type::OBJECT && $this->isObjectExpressionKnownNonNull($arg->value)) {
+                            return $expr;
+                        }
                         return $this->convertObjectExpr($expr, $this->getClassEntryPtr($declaredClass));
                     }
                     if ($this->isKnownConcreteObjectExpr($arg->value, $class)) {

@@ -2851,41 +2851,39 @@ abstract class Preprocessor extends CompilerBase
                 $this->fatalError($v, 'Native class readonly properties are not supported');
             }
         }
-        $oriCtx = $this->context;
-        $this->context = $this->classDef->propertyContext;
-        $nullable = $v->type instanceof NullableType;
+        $this->withFunctionContext($this->classDef->propertyContext, function () use ($v, $typedArray, $stdContainer): void {
+            $nullable = $v->type instanceof NullableType;
 
-        foreach ($v->props as $prop) {
-            $propName = $this->parseIdentifier($prop->name);
-            $propertyType = $v->type ?? ($typedArray !== null ? new Node\Identifier('array') : null);
-            if ($propertyType === null && $stdContainer !== null) {
-                $propertyType = new Node\Name('box');
-            }
-            $propDef = $this->addClassProperty($propName, $v->flags, $propertyType, $prop->default, $nullable, $v);
-            $propDef->typedArray = $typedArray;
-            $propDef->stdContainer = $stdContainer;
-            if ($this->classDef->nativeObject && $this->isNativeObjectForbiddenPropertyType($propDef)) {
-                $message = $propDef->type === Type::BOX
-                    ? 'Native class properties cannot use Box types'
-                    : 'Native class properties cannot use Std Container types';
-                $this->fatalError($v, $message);
-            }
-            $hookMetadata = $v->getAttribute(PropertyHookLowering::PROPERTY_ATTRIBUTE, []);
-            $propDef->virtual = (bool) ($hookMetadata['virtual'] ?? false);
-            foreach ($v->hooks as $hook) {
-                $kind = strtolower($hook->name->toString());
-                if ($kind === 'get') {
-                    if ($hook->byRef) {
-                        $this->fatalError($hook, 'Property get hooks returning by reference are not supported');
+            foreach ($v->props as $prop) {
+                $propName = $this->parseIdentifier($prop->name);
+                $propertyType = $v->type ?? ($typedArray !== null ? new Node\Identifier('array') : null);
+                if ($propertyType === null && $stdContainer !== null) {
+                    $propertyType = new Node\Name('box');
+                }
+                $propDef = $this->addClassProperty($propName, $v->flags, $propertyType, $prop->default, $nullable, $v);
+                $propDef->typedArray = $typedArray;
+                $propDef->stdContainer = $stdContainer;
+                if ($this->classDef->nativeObject && $this->isNativeObjectForbiddenPropertyType($propDef)) {
+                    $message = $propDef->type === Type::BOX
+                        ? 'Native class properties cannot use Box types'
+                        : 'Native class properties cannot use Std Container types';
+                    $this->fatalError($v, $message);
+                }
+                $hookMetadata = $v->getAttribute(PropertyHookLowering::PROPERTY_ATTRIBUTE, []);
+                $propDef->virtual = (bool) ($hookMetadata['virtual'] ?? false);
+                foreach ($v->hooks as $hook) {
+                    $kind = strtolower($hook->name->toString());
+                    if ($kind === 'get') {
+                        if ($hook->byRef) {
+                            $this->fatalError($hook, 'Property get hooks returning by reference are not supported');
+                        }
+                        $propDef->getter = PropertyHookLowering::getterName($propName);
+                    } elseif ($kind === 'set') {
+                        $propDef->setter = PropertyHookLowering::setterName($propName);
                     }
-                    $propDef->getter = PropertyHookLowering::getterName($propName);
-                } elseif ($kind === 'set') {
-                    $propDef->setter = PropertyHookLowering::setterName($propName);
                 }
             }
-        }
-
-        $this->context = $oriCtx;
+        });
     }
 
     /**

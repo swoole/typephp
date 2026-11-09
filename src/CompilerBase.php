@@ -1445,6 +1445,26 @@ abstract class CompilerBase implements PropertyAccessContext
         return '';
     }
 
+    /**
+     * Run lowering in an explicitly supplied context and restore the enclosing
+     * emission state on every exit. Mutations to the supplied context remain
+     * available to its owner (for example a class property context).
+     */
+    protected function withFunctionContext(FunctionContext $context, callable $callback): mixed
+    {
+        $previousContext = $this->context;
+        $previousIndent = $this->indentLevel;
+        $previousInGeneratorBody = $this->inGeneratorBody;
+        $this->context = $context;
+        try {
+            return $callback();
+        } finally {
+            $this->context = $previousContext;
+            $this->indentLevel = $previousIndent;
+            $this->inGeneratorBody = $previousInGeneratorBody;
+        }
+    }
+
     protected function resetFunction(): void
     {
         $this->context = new FunctionContext();
@@ -2184,9 +2204,7 @@ abstract class CompilerBase implements PropertyAccessContext
             // Defaults execute in standalone helpers. Keep captured operand
             // statements and their locals inside the default expression,
             // rather than leaking them into the containing PHP function.
-            $context = $this->context;
-            $this->context = new FunctionContext();
-            try {
+            return $this->withFunctionContext(new FunctionContext(), function () use ($default): string {
                 $value = match (true) {
                     $default instanceof Expr\ConstFetch => $this->parseConstFetch($default, true),
                     $default instanceof Expr\ClassConstFetch => $this->parseClassConstFetch($default),
@@ -2201,9 +2219,7 @@ abstract class CompilerBase implements PropertyAccessContext
                 return '([]() {' . PHP_EOL . $locals . $before
                     . 'auto default_value = ' . $value . ';' . PHP_EOL
                     . $after . 'return default_value;' . PHP_EOL . '})()';
-            } finally {
-                $this->context = $context;
-            }
+            });
         });
     }
 
@@ -5068,26 +5084,23 @@ abstract class CompilerBase implements PropertyAccessContext
 
     protected function genStaticVarInitLambda(Node\Stmt\StaticVar $var, string $varName): string
     {
-        $oriCtx = $this->context;
-
-        $this->context = new FunctionContext();
-        $this->context->arguments = $oriCtx->localVars;
-        $this->context->closureMagicName = $oriCtx->closureMagicName;
+        $context = new FunctionContext();
+        $context->arguments = $this->context->localVars;
+        $context->closureMagicName = $this->context->closureMagicName;
         // Outer locals are captured arguments. New initializer temporaries
         // must not reuse their names and inherit an incompatible scalar type.
-        $this->context->tmpVarIndex = $oriCtx->tmpVarIndex;
+        $context->tmpVarIndex = $this->context->tmpVarIndex;
 
-        $code = '([&](){' . PHP_EOL;
-        $body = $this->getIndent() . $varName . ' = ' . $this->parseExpr($var->default) . ';';
-        $code .= $this->genScopeVarDecl();
-        $code .= $this->parseBeforeStmtLines();
-        $code .= $body;
-        $code .= $this->parseAfterStmtLines();
-        $code .= '})();' . PHP_EOL;
-
-        $this->context = $oriCtx;
-
-        return $code;
+        return $this->withFunctionContext($context, function () use ($var, $varName): string {
+            $code = '([&](){' . PHP_EOL;
+            $body = $this->getIndent() . $varName . ' = ' . $this->parseExpr($var->default) . ';';
+            $code .= $this->genScopeVarDecl();
+            $code .= $this->parseBeforeStmtLines();
+            $code .= $body;
+            $code .= $this->parseAfterStmtLines();
+            $code .= '})();' . PHP_EOL;
+            return $code;
+        });
     }
 
     protected function parseEnum(Node\Stmt\Enum_ $v): string

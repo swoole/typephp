@@ -6502,11 +6502,10 @@ CODE;
             $code .= $this->genNativeObjectRuntimeDefinition($this->classDef);
         }
 
-        $oriCtx = $this->context;
-        $this->context = $this->classDef->propertyContext;
-        $this->classDef->ctorInit .= $this->genScopeVarDecl() . $this->parseBeforeStmtLines();
-        $this->classDef->ctorClean .= $this->parseAfterStmtLines();
-        $this->context = $oriCtx;
+        $this->withFunctionContext($this->classDef->propertyContext, function (): void {
+            $this->classDef->ctorInit .= $this->genScopeVarDecl() . $this->parseBeforeStmtLines();
+            $this->classDef->ctorClean .= $this->parseAfterStmtLines();
+        });
 
         $this->resetClass();
 

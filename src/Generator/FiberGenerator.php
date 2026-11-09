@@ -222,17 +222,10 @@ trait FiberGenerator
 
     protected function genFiberGeneratorFunction(Function_|ClassMethod $v, FunctionDef $functionDef, string $nativeName): string
     {
-        $entryContext = $this->context;
-        $entryIndent = $this->indentLevel;
-        $entryInGeneratorBody = $this->inGeneratorBody;
-
-        try {
-            return $this->doGenFiberGeneratorFunction($v, $functionDef, $nativeName);
-        } finally {
-            $this->context = $entryContext;
-            $this->indentLevel = $entryIndent;
-            $this->inGeneratorBody = $entryInGeneratorBody;
-        }
+        return $this->withFunctionContext(
+            $this->context,
+            fn() => $this->doGenFiberGeneratorFunction($v, $functionDef, $nativeName),
+        );
     }
 
     private function doGenFiberGeneratorFunction(Function_|ClassMethod $v, FunctionDef $functionDef, string $nativeName): string
@@ -271,64 +264,60 @@ trait FiberGenerator
             . Type::OBJECT . ' &this_, '
             . Type::ARGS . ' &vars_) -> ' . Type::VAR . ' {' . PHP_EOL;
 
-        $outerContext = $this->context;
-        $outerIndent = $this->indentLevel;
-        $outerInGeneratorBody = $this->inGeneratorBody;
-        $this->context = new FunctionContext();
-        $this->context->inClosure = true;
-        $this->inGeneratorBody = true;
-        $this->indentLevel++;
+        $code .= $this->withFunctionContext(new FunctionContext(), function () use ($v, $functionDef): string {
+            $code = '';
+            $this->context->inClosure = true;
+            $this->inGeneratorBody = true;
+            $this->indentLevel++;
 
-        $this->prepareReferenceCaptureDegradations($v->stmts);
+            $this->prepareReferenceCaptureDegradations($v->stmts);
 
-        foreach ($functionDef->argInfoList as $i => $argInfo) {
-            $code .= $this->getIndent() . Type::VAR . ' ' . $argInfo->name . ' = vars_.get(' . $i . ');' . PHP_EOL;
-            $this->addArgument($argInfo->name, Type::VAR);
-            $argumentClass = $argInfo->declaredClass ?: $argInfo->class;
-            if ($argumentClass !== '') {
-                if ($argInfo->byRef && $argInfo->type === Type::REF) {
-                    $this->context->declaredObjects[$argInfo->name] = $argumentClass;
-                } else {
-                    $this->addObject($argInfo->name, $argumentClass);
+            foreach ($functionDef->argInfoList as $i => $argInfo) {
+                $code .= $this->getIndent() . Type::VAR . ' ' . $argInfo->name . ' = vars_.get(' . $i . ');' . PHP_EOL;
+                $this->addArgument($argInfo->name, Type::VAR);
+                $argumentClass = $argInfo->declaredClass ?: $argInfo->class;
+                if ($argumentClass !== '') {
+                    if ($argInfo->byRef && $argInfo->type === Type::REF) {
+                        $this->context->declaredObjects[$argInfo->name] = $argumentClass;
+                    } else {
+                        $this->addObject($argInfo->name, $argumentClass);
+                    }
                 }
             }
-        }
-        if ($this->class) {
-            $this->addArgument('this_', Type::OBJECT);
-        }
-        // The Fiber body has its own FunctionContext. Reapply compile-time
-        // effect metadata so suspension does not erase Immutable guarantees.
-        $this->initializeImmutableFunctionContext();
+            if ($this->class) {
+                $this->addArgument('this_', Type::OBJECT);
+            }
+            // The Fiber body has its own FunctionContext. Reapply compile-time
+            // effect metadata so suspension does not erase Immutable guarantees.
+            $this->initializeImmutableFunctionContext();
 
-        $body = '';
-        $this->indentLevel++;
-        if ($v->stmts) {
-            $body .= $this->parseStmts($v->stmts);
-        }
-        if ($this->context->nativeObjects !== []) {
-            // TypePHP Generators are represented by Zend Closure/Fiber state.
-            // Keep Native values out of that generated state even though the
-            // runtime root registry itself now tolerates Fiber suspension.
-            $this->fatalError(
-                $v,
-                'Generator functions cannot retain Native objects across suspension',
-            );
-        }
-        $body .= $this->getIndent() . 'return ' . self::VALUE_NULL . ';' . PHP_EOL;
-        if ($this->context->needsUserCodeCallableScope) {
-            $body = $this->genUserCodeCallableScopeGuard() . $body;
-        }
-        $this->indentLevel--;
-        $code .= $this->genScopeVarDecl();
-        $code .= $this->getIndent() . 'try {' . PHP_EOL;
-        $code .= $body;
-        $code .= $this->getIndent() . '} catch (zend_object *) {' . PHP_EOL;
-        $code .= $this->getIndent() . '    return ' . self::VALUE_NULL . ';' . PHP_EOL;
-        $code .= $this->getIndent() . '}' . PHP_EOL;
-
-        $this->indentLevel = $outerIndent;
-        $this->inGeneratorBody = $outerInGeneratorBody;
-        $this->context = $outerContext;
+            $body = '';
+            $this->indentLevel++;
+            if ($v->stmts) {
+                $body .= $this->parseStmts($v->stmts);
+            }
+            if ($this->context->nativeObjects !== []) {
+                // TypePHP Generators are represented by Zend Closure/Fiber state.
+                // Keep Native values out of that generated state even though the
+                // runtime root registry itself now tolerates Fiber suspension.
+                $this->fatalError(
+                    $v,
+                    'Generator functions cannot retain Native objects across suspension',
+                );
+            }
+            $body .= $this->getIndent() . 'return ' . self::VALUE_NULL . ';' . PHP_EOL;
+            if ($this->context->needsUserCodeCallableScope) {
+                $body = $this->genUserCodeCallableScopeGuard() . $body;
+            }
+            $this->indentLevel--;
+            $code .= $this->genScopeVarDecl();
+            $code .= $this->getIndent() . 'try {' . PHP_EOL;
+            $code .= $body;
+            $code .= $this->getIndent() . '} catch (zend_object *) {' . PHP_EOL;
+            $code .= $this->getIndent() . '    return ' . self::VALUE_NULL . ';' . PHP_EOL;
+            $code .= $this->getIndent() . '}' . PHP_EOL;
+            return $code;
+        });
 
         $code .= $this->getIndent() . '};' . PHP_EOL;
         $args = $uses ? '{ ' . implode(', ', $uses) . ' }' : '{}';

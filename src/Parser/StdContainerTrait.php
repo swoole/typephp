@@ -67,9 +67,7 @@ trait StdContainerTrait
             // Reuse factory parsing, including class-name resolution and the
             // canonical template/type-ID key, without leaking locals into the
             // declaration context. Cache only the contract, not a build's ID.
-            $context = $this->context;
-            $this->context = new FunctionContext();
-            try {
+            return $this->withFunctionContext(new FunctionContext(), function () use ($method, $attribute): array {
                 $call = new StaticCall(new Name('std'), new Identifier($method), $attribute->args);
                 if ($method === 'vector') {
                     $this->parseStdVector('__std_parameter', $call);
@@ -84,9 +82,7 @@ trait StdContainerTrait
                 }
                 unset($info['typeId']);
                 return $info;
-            } finally {
-                $this->context = $context;
-            }
+            });
         }
         return null;
     }

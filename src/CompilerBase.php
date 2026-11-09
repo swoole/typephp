@@ -2725,6 +2725,11 @@ abstract class CompilerBase implements PropertyAccessContext
                 ? $this->getClass($callReceiverClass)
                 : null;
             if ($classDef !== null && $classDef->hasMethod($method)) {
+                if ($this->hasInaccessibleDeclaredMethod($classDef->getNamespacedName(false), $method)) {
+                    // Runtime dispatch may use a child method or __call with
+                    // an unrelated return contract.
+                    return '';
+                }
                 $methodDef = $classDef->getMethod($method);
                 if (($methodDef->functionDef->returnTypeKeyword ?? '') === 'static') {
                     // Late-bound: the receiver class is the tightest sound bound.
@@ -3879,6 +3884,9 @@ abstract class CompilerBase implements PropertyAccessContext
                     if ($classDef !== null && $classDef->hasMethod($method)) {
                         if (count($expr->args) === 1 and $this->isPlaceholderExpr($expr->args[0])) {
                             return Type::OBJECT;
+                        }
+                        if ($this->hasInaccessibleDeclaredMethod($classDef->getNamespacedName(false), $method)) {
+                            return Type::VAR;
                         }
                         return $classDef->getMethod($method)->getReturnType();
                     }

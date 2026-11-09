@@ -1074,7 +1074,7 @@ trait MethodCallTrait
         ) || $typedPropertyLexicalPrivateClass !== '';
         $resolvedMethodPtr = false;
         if ($class && $funcName && !$magicMethod) {
-            if ($this->isInternalClass($class)) {
+            if ($this->isInternalClass($class) && Reflection::hasMethod($class, $funcName)) {
                 $methodPtr = $this->getMethodPtr($class, $funcName);
                 $resolvedMethodPtr = true;
             } else {

@@ -5,6 +5,14 @@ use TypePhp\Type;
 
 final class NullableTypedObjectTest extends BaseTest
 {
+    public function testNullableObjectLocalRejectsAnUnrelatedClass(): void
+    {
+        $this->exec(
+            'Cannot re-assign typed object `$object` from `NullableReassignTarget` to `NullableReassignOther`',
+            'nullable-typed-object-reassign-unrelated.php',
+        );
+    }
+
     public function testNullableClassDeclarationsKeepTheirObjectAbiAndClass(): void
     {
         $code = $this->compileFixture();

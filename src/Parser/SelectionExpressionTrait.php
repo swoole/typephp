@@ -118,7 +118,9 @@ trait SelectionExpressionTrait
         // A captured condition can force a typed lambda even when its branches
         // emit no statements. Typed Zend properties may still lower to Variant;
         // only a proven C++ storage type can cross this return boundary directly.
-        if ($nativeClass === '' && $returnType !== Type::VAR
+        // Object's converting constructor preserves null at the return
+        // boundary; a PHP object cast would replace it with stdClass.
+        if ($nativeClass === '' && $returnType !== Type::VAR && $returnType !== Type::OBJECT
             && ($beforeStmts || $afterStmts || $this->getLoweredExpressionType($valueExpr) !== $returnType)) {
             $value = $this->convertExprFromType($returnType, $value);
         }
@@ -281,7 +283,7 @@ trait SelectionExpressionTrait
         [$value, $beforeStmts, $afterStmts] = $this->parseExprWithCapturedStmts($body);
         if ($nativeClass !== '' && $this->isNull($body)) {
             $value = 'nullptr';
-        } elseif ($nativeClass === '' && $returnType !== Type::VAR) {
+        } elseif ($nativeClass === '' && $returnType !== Type::VAR && $returnType !== Type::OBJECT) {
             $provenType = $this->getLoweredExpressionType($body);
             if ($provenType === null && $this->isVarExpr($body) && is_string($body->name) && $this->hasVar($body->name)) {
                 $provenType = $this->getVarType($body->name);

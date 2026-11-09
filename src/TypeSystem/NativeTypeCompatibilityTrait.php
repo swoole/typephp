@@ -139,7 +139,7 @@ trait NativeTypeCompatibilityTrait
                 // however, $expected must also be a built-in class/interface,
                 // otherwise runtime reflection cannot cross into the external user
                 // class namespace.
-                return $internal && is_subclass_of($class, $expected);
+                return $internal && (strcasecmp($class, $expected) === 0 || is_subclass_of($class, $expected));
             }
             $classDef = $this->getClass($class);
         }

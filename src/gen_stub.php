@@ -7127,9 +7127,9 @@ function generateStubFile(string $stubFile, string $objectFile, bool $forceRegen
     foreach (array_unique($locations) as $location) {
         if (is_file($location)) {
             // Generate single file.
-            $fileInfo = processStubFile($location, $context);
-            if ($fileInfo) {
-                $fileInfos[] = $fileInfo;
+            $parsedFileInfo = processStubFile($location, $context);
+            if ($parsedFileInfo) {
+                $fileInfos[] = $parsedFileInfo;
             }
         } else if (is_dir($location)) {
             array_push($fileInfos, ...processDirectory($location, $context));

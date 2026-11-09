@@ -227,8 +227,9 @@ trait NameResolutionTrait
                     }
                     $class = $this->classDef->extends;
                 } elseif ($typeName === 'static') {
-                    // The static class cannot be determined at compile time
-                    $class = '';
+                    // Late-bound: the declaring class is a sound lower bound.
+                    // Direct dispatch stays gated by the devirtualization checks.
+                    $class = $this->getFullClassLikeName();
                 } else {
                     $class = $this->getNamespacedClassName($typeName);
                 }

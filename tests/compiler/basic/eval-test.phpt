@@ -12,12 +12,9 @@ function main() {
     $msg = eval('return "hello world";');
     var_dump($msg);
 
-    // eval with static expressions
-    $sum = 0;
-    for ($i = 1; $i <= 3; $i++) {
-        eval('$GLOBALS["__total"] = ($GLOBALS["__total"] ?? 0) + ' . $i . ';');
-    }
-    var_dump($GLOBALS["__total"]);
+    // The dynamic program owns its variables and returns its result.
+    $sum = eval('$total = 0; for ($i = 1; $i <= 3; $i++) { $total += $i; } return $total;');
+    var_dump($sum);
 
     echo "done\n";
 }

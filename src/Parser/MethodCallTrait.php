@@ -167,13 +167,14 @@ trait MethodCallTrait
     }
 
     /**
-     * A typed property declaration can describe call arguments without proving
-     * the receiver's concrete runtime class. Private methods are the one
-     * exception: a child may declare an unrelated public method with the same
-     * name and a different signature, so an inaccessible private declaration
-     * cannot be used as the runtime call's signature contract.
+     * A declared type (a property type or a method's return type) can describe
+     * call arguments without proving the receiver's concrete runtime class.
+     * Private methods are the one exception: a child may declare an unrelated
+     * public method with the same name and a different signature, so an
+     * inaccessible private declaration cannot be used as the runtime call's
+     * signature contract.
      */
-    protected function getTypedPropertyMethodSignatureClass(string $class, string $method): string
+    protected function getDeclaredMethodSignatureClass(string $class, string $method): string
     {
         if ($class === '' || $method === '') {
             return '';
@@ -209,11 +210,12 @@ trait MethodCallTrait
     }
 
     /**
-     * A final property class is exact enough for a native call only when its
+     * A declared receiver class is exact enough for a native call only when its
      * resolved method is accessible from the current lexical scope. An
-     * inaccessible method may instead dispatch to __call() at runtime.
+     * inaccessible method may instead dispatch to a subclass override or to
+     * __call() at runtime.
      */
-    protected function hasInaccessibleTypedPropertyMethod(string $class, string $method): bool
+    protected function hasInaccessibleDeclaredMethod(string $class, string $method): bool
     {
         if ($class === '' || $method === '' || !$this->hasClass($class)) {
             return false;
@@ -300,6 +302,24 @@ trait MethodCallTrait
         return false;
     }
 
+    /**
+     * Materialize a non-variable receiver as an object temporary carrying its
+     * statically detected class, keeping PHP's evaluation order (receiver before
+     * arguments). Dispatching directly is still up to findNativeMethod().
+     */
+    protected function materializeUserObjectReceiver(Node\Expr $expr, string $class): string
+    {
+        [$receiver, $beforeStmts, $afterStmts] = $this->parseExprWithCapturedStmts($expr);
+        $this->appendCapturedStmtLinesToContext($beforeStmts);
+        $object = $this->genTmpVarName();
+        $this->addLocalVar($object, Type::OBJECT);
+        $this->addObject($object, $class);
+        $this->context->beforeStmtLines[] = $object . ' = ' . $receiver . ';';
+        $this->appendCapturedStmtLinesToContext($afterStmts);
+        $this->context->afterStmtLines[] = $object . '.unset();';
+        return $object;
+    }
+
     protected function findNativeMethod(CallLike $expr, string $object, string $method): string|false
     {
         $classDef = null;
@@ -313,6 +333,13 @@ trait MethodCallTrait
                 $class = $this->context->stableObjects[$object];
             }
         } else {
+            return false;
+        }
+
+        if ($this->hasInaccessibleDeclaredMethod($class, $method)) {
+            // The receiver's declared class may resolve to a subclass override
+            // or to __call() at runtime. A direct call cannot represent that,
+            // and the inaccessible declaration must not raise a compile error.
             return false;
         }
 
@@ -619,6 +646,7 @@ trait MethodCallTrait
         $class = '';
         $materializedNativeReceiver = false;
         $materializedTypedPropertyReceiver = false;
+        $materializedUserReceiver = false;
         $typedPropertyReceiver = false;
         $typedPropertyFinalClass = '';
         // C++17 sequences a member-call receiver before its arguments, but
@@ -665,6 +693,17 @@ trait MethodCallTrait
                     $object = '(' . $object . ')';
                 }
             }
+        } elseif ($receiverClass !== ''
+            && $this->isNamedMethod($expr->name)
+            && ($this->hasClass($receiverClass) || $this->hasInterface($receiverClass))
+        ) {
+            // parseOrderedOperand() types call results as php::Var, dropping the
+            // receiver class this expression still proves. Keep it in an object
+            // temporary; devirtualization below decides if a direct call is safe.
+            // Interfaces stay typed but are never devirtualized.
+            $object = $this->materializeUserObjectReceiver($expr->var, $receiverClass);
+            $class = $receiverClass;
+            $materializedUserReceiver = true;
         } else {
             $object = empty($expr->args)
                 ? $this->parseIdentifier($expr->var)
@@ -764,13 +803,18 @@ trait MethodCallTrait
                 $typedPropertyLexicalPrivateClass = $scopeClass;
             }
         }
+        // The declared class of a receiver only bounds the runtime class, so an
+        // inaccessible method declaration must not decide the argument
+        // contract: the runtime object may be a subclass with a public override
+        // or may dispatch to __call().
+        $declaredSignatureClass = $this->getDeclaredMethodSignatureClass($class, $methodName);
         $typedPropertyHasInaccessibleMethod = $typedPropertyReceiver
             && $typedPropertyLexicalPrivateClass === ''
-            && $this->hasInaccessibleTypedPropertyMethod($class, $methodName);
+            && $this->hasInaccessibleDeclaredMethod($class, $methodName);
         $typedPropertySignatureClass = $typedPropertyReceiver
             ? ($typedPropertyLexicalPrivateClass !== ''
                 ? $typedPropertyLexicalPrivateClass
-                : $this->getTypedPropertyMethodSignatureClass($class, $methodName))
+                : $declaredSignatureClass)
             : $class;
         if ($typedPropertyFinalClass !== ''
             && $typedPropertyLexicalPrivateClass === ''
@@ -852,7 +896,7 @@ trait MethodCallTrait
         }
 
         // Method calls that can be lowered to a native call
-        if (($this->isVarExpr($expr->var) || $materializedNativeReceiver || $materializedTypedPropertyReceiver)
+        if (($this->isVarExpr($expr->var) || $materializedNativeReceiver || $materializedTypedPropertyReceiver || $materializedUserReceiver)
             && !$typedPropertyHasInaccessibleMethod
             && $typedPropertyLexicalPrivateClass === ''
             && $this->isNamedMethod($expr->name)) {
@@ -1070,7 +1114,9 @@ trait MethodCallTrait
                     ? ($typedPropertySignatureClass === ''
                         ? self::DYNAMIC_CALLED_CLASS
                         : $typedPropertySignatureClass)
-                    : $class;
+                    : ($declaredSignatureClass === ''
+                        ? self::DYNAMIC_CALLED_CLASS
+                        : $declaredSignatureClass);
                 $callArgs = $this->parseCallArgs(
                     $expr->args,
                     $funcName,

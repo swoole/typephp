@@ -828,6 +828,11 @@ trait PropertyAccessTrait
             return;
         }
         if (!$this->isObjectClassStaticallyAssignableTo($rightClass, $def->class)) {
+            // `static` is late-bound and may yield a subclass satisfying the
+            // property type, so defer this to the runtime check.
+            if ($this->getCallReturnKeyword($right) === 'static') {
+                return;
+            }
             $this->fatalError(
                 $left,
                 "Cannot assign object of class `{$rightClass}` to {$label} `{$propName}` of class `{$def->class}`"

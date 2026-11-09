@@ -24,10 +24,8 @@ function main()
     $localAlias = 'kept alive';
     var_dump($localAlias);
 
-    eval('$evalAlias =& value_ref(); $evalAlias = "from eval";');
-    var_dump(value_ref());
-
-    require __DIR__ . '/function-return-reference-require.inc';
+    $update = require __DIR__ . '/function-return-reference-require.inc';
+    $update('value_ref');
     var_dump(value_ref());
 
     $callback = 'value_ref';
@@ -52,7 +50,6 @@ function &local_ref()
 --EXPECT--
 int(42)
 string(10) "kept alive"
-string(9) "from eval"
 string(12) "from require"
 string(21) "from dynamic callback"
 dynamic callback TypeError

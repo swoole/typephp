@@ -391,7 +391,7 @@ Fuse only when all of the following conditions are met:
 - The variable's static type is BigInt, BigFloat, or Decimal.
 - The operator is in the corresponding type's supported list.
 - The RHS does not contain an assignment to, a reference acquisition of, or a known by-reference argument passing of the target variable.
-- The RHS does not contain `eval`, dynamic calls, or other escape paths that cannot be safely analyzed; or the existing side-effect analysis clearly proves safety.
+- The RHS does not contain dynamic calls or other escape paths that cannot be safely analyzed, or existing side-effect analysis proves safety. `eval/include/require` do not capture AOT state and must not independently block fusion; analyze their source/path expression side effects and preserve execution order.
 - The current expression context can correctly receive the in-place interface's return value.
 
 The following scenarios are not fused in the first phase:

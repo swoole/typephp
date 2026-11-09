@@ -109,7 +109,7 @@ Code alone, documentation alone, or "no failure currently observed" does not cou
 | Native locals of ordinary functions across Fiber suspend have precise roots | root frame lifecycle | Fiber PHPT | Verified |
 | Local Std Containers can hold concrete Native pointers | Std Container Native value mapping/root frame | `std-containers.phpt` | Verified |
 | Native Std Containers cannot escape as Zend values, static/global, or closure capture | container escape validation | Std Container series negative PHPUnit | Verified |
-| `include`/`eval` do not expose Native locals to the Zend symbol table | include scope filtering | `include-native-scope.phpt` | Verified |
+| `include`/`eval` do not capture AOT locals or expose Native pointers to the Zend symbol table | No caller-variable export table; dynamic source only supports independent execution | `include-native-scope.phpt` | Verified |
 
 ## 8. Project-level analysis
 

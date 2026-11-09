@@ -1357,7 +1357,8 @@ abstract class CompilerBase implements PropertyAccessContext
     }
 
     /**
-     * Resolve the ClassDef for an object expression (variable or $this).
+     * Resolve the ClassDef of an object expression: `$this`, a typed variable,
+     * or the result of a chained call such as `Foo::make()->step()`.
      */
     private function resolveObjectClassDef(Expr $expr): ?ClassDef
     {
@@ -1373,7 +1374,75 @@ abstract class CompilerBase implements PropertyAccessContext
                 }
             }
         }
+        // Terminates: detectClassOfExpr() only recurses into $expr->var, which
+        // is always strictly smaller.
+        if ($expr instanceof Expr\MethodCall
+            || $expr instanceof Expr\StaticCall
+            || $expr instanceof Expr\New_
+            || $expr instanceof Expr\FuncCall
+        ) {
+            $className = $this->detectClassOfExpr($expr);
+            if ($className !== '' && $this->hasClass($className)) {
+                return $this->getClass($className);
+            }
+        }
         return null;
+    }
+
+    /**
+     * Resolve a method declared by a project interface.
+     *
+     * Interfaces are never dispatch targets, but their signatures carry the
+     * contract's return type used for chain inference.
+     */
+    private function resolveInterfaceMethod(string $interface, string $method): ?MethodDef
+    {
+        if ($interface === '' || !$this->hasInterface($interface)) {
+            return null;
+        }
+        $interfaceDef = $this->getInterface($interface);
+        return $interfaceDef->hasMethod($method)
+            ? $interfaceDef->methods[strtolower($method)]
+            : null;
+    }
+
+    /**
+     * The late-bound keyword (`static`, `self`, `parent`) of the method a call
+     * resolves to, or `''` when unknown. A `static` result class is a lower
+     * bound, never an exact class.
+     */
+    protected function getCallReturnKeyword(NodeAbstract $expr): string
+    {
+        if ($this->isMethodCall($expr) and $this->isNamedMethod($expr->name)) {
+            $method = $this->parseIdentifier($expr->name);
+            $receiverClass = $this->detectClassOfExpr($expr->var);
+            if ($receiverClass !== '' && $this->hasClass($receiverClass)) {
+                $receiverDef = $this->getClass($receiverClass);
+                if ($receiverDef->hasMethod($method)) {
+                    return $receiverDef->getMethod($method)->functionDef->returnTypeKeyword ?? '';
+                }
+            }
+            $interfaceMethod = $this->resolveInterfaceMethod($receiverClass, $method);
+            return $interfaceMethod->functionDef->returnTypeKeyword ?? '';
+        }
+        if ($this->isStaticCall($expr) and $this->isNameExpr($expr->class) and $this->isNamedMethod($expr->name)) {
+            $class = $this->parseIdentifier($expr->class);
+            if ($class === 'self') {
+                $class = $this->class;
+            } elseif ($class === 'static' or $class === 'parent') {
+                return '';
+            } else {
+                $class = $this->getNamespacedClassName($class);
+            }
+            $method = $this->parseIdentifier($expr->name);
+            if ($this->hasClass($class)) {
+                $classDef = $this->getClass($class);
+                if ($classDef->hasMethod($method)) {
+                    return $classDef->getMethod($method)->functionDef->returnTypeKeyword ?? '';
+                }
+            }
+        }
+        return '';
     }
 
     protected function resetFunction(): void
@@ -2569,11 +2638,17 @@ abstract class CompilerBase implements PropertyAccessContext
                 return '';
             }
         }
+        $callReceiverClass = null;
+        if ($this->isMethodCall($expr) && $this->isNamedMethod($expr->name)) {
+            // Shared by the Python probes and the call branch. Detecting it
+            // once keeps chain compilation linear (per-site detection was 2^depth).
+            $callReceiverClass = $this->detectClassOfExpr($expr->var);
+        }
         $pythonOperatorClass = $this->detectPythonOperatorReturnClass($expr);
         if ($pythonOperatorClass !== null) {
             return $pythonOperatorClass;
         }
-        $pythonClass = $this->detectPythonExpressionReturnClass($expr);
+        $pythonClass = $this->detectPythonExpressionReturnClass($expr, $callReceiverClass);
         if ($pythonClass !== null) {
             return $pythonClass;
         }
@@ -2646,16 +2721,46 @@ abstract class CompilerBase implements PropertyAccessContext
             if ($method === 'toObject' and !empty($expr->args)) {
                 return $this->resolveClassNameArg($expr->args[0]->value);
             }
-            $classDef = $this->resolveObjectClassDef($expr->var);
+            $classDef = ($callReceiverClass !== null && $callReceiverClass !== '' && $this->hasClass($callReceiverClass))
+                ? $this->getClass($callReceiverClass)
+                : null;
             if ($classDef !== null && $classDef->hasMethod($method)) {
-                return $classDef->getMethod($method)->functionDef->returnClass;
+                if ($this->hasInaccessibleDeclaredMethod($classDef->getNamespacedName(false), $method)) {
+                    // Runtime dispatch may use a child method or __call with
+                    // an unrelated return contract.
+                    return '';
+                }
+                $methodDef = $classDef->getMethod($method);
+                if (($methodDef->functionDef->returnTypeKeyword ?? '') === 'static') {
+                    // Late-bound: the receiver class is the tightest sound bound.
+                    return $callReceiverClass ?? '';
+                }
+                return $methodDef->functionDef->returnClass;
+            }
+            if ($classDef === null) {
+                $interfaceMethod = $this->resolveInterfaceMethod(
+                    $callReceiverClass ?? '',
+                    $method,
+                );
+                if ($interfaceMethod !== null) {
+                    return ($interfaceMethod->functionDef->returnTypeKeyword ?? '') === 'static'
+                        ? ($callReceiverClass ?? '')
+                        : $interfaceMethod->functionDef->returnClass;
+                }
             }
             if ($this->isVarExpr($expr->var)) {
                 $object = $this->parseVariable($expr->var);
                 try {
                     $nativeFunc = $this->findNativeMethod($expr, $object, $method);
                     if ($nativeFunc) {
-                        return $this->getFunction($nativeFunc)->returnClass;
+                        $functionDef = $this->getFunction($nativeFunc);
+                        if (($functionDef->returnTypeKeyword ?? '') === 'static') {
+                            // Inherited `: static` returns the receiver's class.
+                            return $this->isTypedObject($object)
+                                ? $this->getObjectType($object)
+                                : $this->getDeclaredObjectType($object);
+                        }
+                        return $functionDef->returnClass;
                     }
                 } catch (DynamicCall) {
                 }
@@ -2681,12 +2786,20 @@ abstract class CompilerBase implements PropertyAccessContext
             if ($this->hasClass($class)) {
                 $classDef = $this->getClass($class);
                 if ($classDef->hasMethod($method)) {
-                    return $classDef->getMethod($method)->functionDef->returnClass;
+                    $methodDef = $classDef->getMethod($method);
+                    // `: static` called on Sub returns Sub, not the ancestor.
+                    return ($methodDef->functionDef->returnTypeKeyword ?? '') === 'static'
+                        ? $class
+                        : $methodDef->functionDef->returnClass;
                 }
             }
             $nativeFunc = $this->getNativeMethod($expr, $class, $method);
             if ($nativeFunc) {
-                return $this->getFunction($nativeFunc)->returnClass;
+                $functionDef = $this->getFunction($nativeFunc);
+                // Same late binding as above, via the native call path.
+                return ($functionDef->returnTypeKeyword ?? '') === 'static'
+                    ? $class
+                    : $functionDef->returnClass;
             }
         }
         return '';
@@ -3772,7 +3885,22 @@ abstract class CompilerBase implements PropertyAccessContext
                         if (count($expr->args) === 1 and $this->isPlaceholderExpr($expr->args[0])) {
                             return Type::OBJECT;
                         }
+                        if ($this->hasInaccessibleDeclaredMethod($classDef->getNamespacedName(false), $method)) {
+                            return Type::VAR;
+                        }
                         return $classDef->getMethod($method)->getReturnType();
+                    }
+                    if ($classDef === null) {
+                        $interfaceMethod = $this->resolveInterfaceMethod(
+                            $this->detectClassOfExpr($expr->var),
+                            $method,
+                        );
+                        if ($interfaceMethod !== null) {
+                            if (count($expr->args) === 1 and $this->isPlaceholderExpr($expr->args[0])) {
+                                return Type::OBJECT;
+                            }
+                            return $interfaceMethod->getReturnType();
+                        }
                     }
                     if ($this->isVarExpr($expr->var)) {
                         $object = $this->parseIdentifier($expr->var);
@@ -4974,6 +5102,8 @@ abstract class CompilerBase implements PropertyAccessContext
     protected function parseEval(Expr\Eval_ $expr): string
     {
         $this->assertExprCanBeUsedAsValue($expr->expr, 'eval operand');
+        // Only self-contained PHP code is supported. Do not export AOT
+        // locals or retain a Zend caller frame for dynamic code to inspect.
         // Disable literal-string optimization for the PHP code passed to eval().
         $expr->expr->setAttribute('noLiteralString', true);
         $source = $this->isNativeObjectClass($this->detectClassOfExpr($expr->expr))
@@ -5007,26 +5137,8 @@ abstract class CompilerBase implements PropertyAccessContext
             ? $this->parseExprToString($expr->expr)
             : $this->parseIdentifier($expr->expr);
 
-        $scope = [];
-        foreach ($this->context->localVars as $name => $_type) {
-            if ($name === 'this_' || str_starts_with($name, 'tmp_var_')) {
-                continue;
-            }
-            // Native pointers have no zval representation. Boxing one into
-            // the include symbol table would silently select a bool overload
-            // and expose `true` instead of the object. Dynamic PHP is not
-            // allowed to observe Native locals, so leave these names absent.
-            if ($this->isNativeObjectVar($name)) {
-                continue;
-            }
-            $phpName = $this->unescapeVarName($name);
-            $scope[] = '{ ' . $this->getLiteralString($phpName) . '.str(), php::Var(' . $name . ') }';
-        }
-
-        if ($scope) {
-            return "php::include(php::Var({$fileName}), {$type}, php::Array{" . implode(', ', $scope) . '})';
-        }
-
+        // Like eval(), includes do not capture the compiled caller's locals,
+        // parameters, object or lexical scope.
         return "php::include(php::Var({$fileName}), {$type})";
     }
 

@@ -51,7 +51,7 @@ These items should be documented with the exact boundary.
 
 | Feature | Classification | Reason |
 |---|---|---|
-| `eval()` accessing AOT-compiled local variables | Hard Limit | AOT locals are C++ stack variables. PHP code executed by Zend VM through `eval()` cannot naturally access that compiled stack frame. Exact compatibility would require a locals mirror and synchronization layer. |
+| Caller-context capture by `eval()` / `include` / `require` | Intentional Rule / Hard Limit | Only self-contained PHP code is supported. No capture or synchronization of TypePHP `$this`, scope, visibility privileges, locals, parameters, references, call stack, or other AOT execution state is promised. Native dispatch and property hoisting must not be disabled to emulate that context. |
 | Standard PHP variable deletion semantics for `unset($nativeTypedVar)` | Hard Limit / Intentional Rule | Native typed locals are C++ variables, not entries in a PHP symbol table. They cannot be deleted like PHP zval variables. |
 | Fully standard uninitialized / `unset()` semantics for fixed native typed object properties | Hard Limit / Intentional Rule | Fixed native property storage conflicts with PHP's dynamic property state, uninitialized state and unset behavior. |
 | `Closure::bind()` with static closures accessing private members across AOT/native boundaries | Hard Limit / Partial | This depends on Zend closure scope, private visibility checks and AOT native method/property access. Partial support may be possible, but complete equivalence is difficult. |
@@ -106,7 +106,7 @@ These items should be documented with the exact boundary.
 
 | Feature | Classification | Boundary |
 |---|---|---|
-| `eval()` | Partial / Hard Limit | `eval()` can execute PHP code through Zend VM, but it cannot access compiled local variables. Use return values or `$GLOBALS` for data exchange. |
+| `eval()` / `include` / `require`, including once variants | Partial / Intentional Rule | Execute independent PHP code through Zend VM. The only recommended interoperability pattern is returning a static closure and explicitly calling it from TypePHP with arguments. Caller-context capture, implicit local/parameter imports, scope propagation, shared `$GLOBALS` exchange, and reverse interaction with AOT execution state are outside the compatibility contract. |
 | Dynamic calls and callbacks | Partial | Zend runtime fallback handles dynamic calls and callbacks. By-reference arguments still need explicit `std::ref()` / `toRef()`, and native-call optimization is not guaranteed. |
 | Dynamic properties and dynamic property chains | Partial | Dynamic property reads and writes use the runtime property API; native property optimization is not guaranteed. |
 | Native typed properties | Partial / Intentional Rule | Fast native paths may not preserve every PHP dynamic state transition. Unknown or incompatible values can fall back to `setProperty()`. |

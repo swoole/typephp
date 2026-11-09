@@ -1,5 +1,5 @@
 --TEST--
-class const 001
+Reference arguments use explicit calls instead of eval caller-context capture
 --FILE--
 <?php
 function foo2(int &$v) : int {
@@ -8,7 +8,9 @@ function foo2(int &$v) : int {
 }
 function main()
 {
-    eval('$i = 100; $r = foo2($i); var_dump($r);');
+    $i = 100;
+    $r = foo2($i);
+    var_dump($r);
 }
 ?>
 --EXPECT--

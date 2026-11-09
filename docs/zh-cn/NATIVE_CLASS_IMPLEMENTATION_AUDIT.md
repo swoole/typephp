@@ -110,7 +110,7 @@
 | 普通函数跨 Fiber suspend 的 Native local 有精确 root | root frame lifecycle | Fiber PHPT | 已验证 |
 | 局部 Std Container 可保存具体 Native pointer | Std Container Native value mapping/root frame | `std-containers.phpt` | 已验证 |
 | Native Std Container 不能逃逸为 Zend 值、static/global 或 closure capture | container escape validation | Std Container 系列负向 PHPUnit | 已验证 |
-| `include`/`eval` 不暴露 Native local 到 Zend symbol table | include scope filtering | `include-native-scope.phpt` | 已验证 |
+| `include`/`eval` 不捕获 AOT local，也不暴露 Native pointer 到 Zend symbol table | 不生成调用者变量导出表；动态源码仅支持独立执行 | `include-native-scope.phpt` | 已验证 |
 
 ## 8. 项目级分析
 

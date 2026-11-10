@@ -951,6 +951,8 @@ abstract class Preprocessor extends CompilerBase
         $this->resetFunction();
         $constant->arrayExpr = '';
         $constant->value = $this->parseIdentifier($expression);
+        $constant->loweredType = $this->getLoweredExpressionType($expression)
+            ?? $this->detectLiteralConstantType($expression);
         // resetFunction() installed a fresh context, so the temporary counter
         // reflects only this constant's lowering — a structural record of
         // whether the value depends on prelude temporaries.
@@ -2275,7 +2277,7 @@ abstract class Preprocessor extends CompilerBase
                 $type = match ($const->value->getType()) {
                     'Expr_Array' => Type::ARRAY,
                     'Scalar_String' => Type::STR,
-                    default => Type::VAR,
+                    default => $this->detectLiteralConstantType($const->value),
                 };
                 // `::class` is a compile-time magic constant that always yields a string,
                 // so a constant declared as `X = self::class` (or `Foo::class`) must be
@@ -2364,6 +2366,8 @@ abstract class Preprocessor extends CompilerBase
         $constInfo->declaredType = $declaredType;
         $constInfo->codegenFinalized = $this->compilerPhase === self::PHASE_CONVERT;
         if ($constInfo->codegenFinalized) {
+            $constInfo->loweredType = $this->getLoweredExpressionType($const->value)
+                ?? $this->detectLiteralConstantType($const->value);
             // Structural dependency record: computed from the lowering context
             // (temporary counter / captured prelude), not from the value text.
             $constInfo->hasMaterializedTemporaries = $this->context->tmpVarIndex > 0
@@ -3315,7 +3319,7 @@ abstract class Preprocessor extends CompilerBase
                         $type = match ($const->value->getType()) {
                             'Expr_Array' => Type::ARRAY,
                             'Scalar_String' => Type::STR,
-                            default => Type::VAR,
+                            default => $this->detectLiteralConstantType($const->value),
                         };
                     }
                     if ($this->interfaceDef->hasConstant($constName)) {

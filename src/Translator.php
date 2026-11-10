@@ -1849,7 +1849,7 @@ CODE;
         }
         $code .= $this->genRequestArrayDefaultCleanup();
         foreach ($this->constants as $name => $const) {
-            if ($const->type !== Type::VAR) {
+            if ($const->type !== Type::VAR && $const->type !== Type::STR) {
                 continue;
             }
             $code .= $name . '.unset();' . PHP_EOL;

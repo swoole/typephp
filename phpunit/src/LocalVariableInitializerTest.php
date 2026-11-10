@@ -74,11 +74,11 @@ final class LocalVariableInitializerTest extends \BaseTest
 
         self::assertIsString($code);
         self::assertStringContainsString(
-            'php::Var imported = _const_var_LocalConstantInitializer__Provider__LIMIT;',
+            'php::Int imported = php::toInt(_const_var_LocalConstantInitializer__Provider__LIMIT);',
             $code,
         );
         self::assertStringContainsString(
-            'php::Var qualified = _const_var_LocalConstantInitializer__Provider__LABEL;',
+            'php::Str qualified = _const_var_LocalConstantInitializer__Provider__LABEL;',
             $code,
         );
         self::assertStringContainsString(
@@ -106,9 +106,9 @@ final class LocalVariableInitializerTest extends \BaseTest
         $code = file_get_contents($generated);
 
         self::assertIsString($code);
-        self::assertStringContainsString('php::Var selfValue = get_str(', $code);
-        self::assertStringContainsString('php::Var parentValue = 128L;', $code);
-        self::assertStringContainsString('php::Var concreteValue = get_str(', $code);
+        self::assertStringContainsString('php::Str selfValue = get_str(', $code);
+        self::assertStringContainsString('php::Int parentValue = php::toInt(128L);', $code);
+        self::assertStringContainsString('php::Str concreteValue = get_str(', $code);
         self::assertStringContainsString('php::Str selfClass = get_str(', $code);
         self::assertStringContainsString('php::Str parentClass = get_str(', $code);
         self::assertStringContainsString('php::Str unknownClass = get_str(', $code);

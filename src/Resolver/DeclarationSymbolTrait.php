@@ -44,7 +44,7 @@ trait DeclarationSymbolTrait
         $constant->afterInitializationCode = $this->parseAfterStmtLines();
         // Clean files are not re-parsed by convert(): finalize their scalar
         // storage types here too, keeping cold/warm declarations identical.
-        $constant->type = $this->detectStrValueType($constant->value);
+        $constant->type = $this->getConstantScalarStorageType($expression);
         $constant->codegenFinalized = true;
     }
 
@@ -56,9 +56,7 @@ trait DeclarationSymbolTrait
             valueExpr: $valueExpr,
             namespace: $this->namespace,
             sourceFile: $this->file,
-            type: $this->compilerPhase === self::PHASE_CONVERT
-                ? $this->detectStrValueType($value)
-                : Type::VAR,
+            type: $valueExpr !== null ? $this->getConstantScalarStorageType($valueExpr) : Type::VAR,
             codegenFinalized: $this->compilerPhase === self::PHASE_CONVERT,
         );
         $this->constants[$this->escapeConstVar($name)] = $constInfo;
@@ -80,19 +78,36 @@ trait DeclarationSymbolTrait
         return $this->constants[$this->escapeConstVar($name)]->type;
     }
 
-    protected function detectStrValueType(mixed $constant): string
+    /** Infer only literal representations, without lowering declaration ASTs. */
+    protected function detectLiteralConstantType(Node\Expr $expression): string
     {
-        if ($this->isIntStr($constant)) {
-            return Type::INT;
+        if ($expression instanceof Node\Scalar\Int_
+            || $expression instanceof Node\Scalar\Float_
+            || $expression instanceof Node\Scalar\String_) {
+            $type = $this->detectTypeOfExpr($expression);
+            return in_array($type, [Type::INT, Type::FLOAT, Type::BOOL, Type::STR], true) ? $type : Type::VAR;
         }
-        if ($this->isFloatStr($constant)) {
-            return Type::FLOAT;
-        }
-        if ($this->isBoolStr($constant)) {
+        if ($expression instanceof Node\Expr\ConstFetch
+            && in_array(strtolower($expression->name->toString()), ['true', 'false'], true)) {
             return Type::BOOL;
         }
-
+        if ($expression instanceof Node\Expr\UnaryMinus || $expression instanceof Node\Expr\UnaryPlus) {
+            $operand = $expression->expr;
+            if ($operand instanceof Node\Scalar\Int_ || $operand instanceof Node\Scalar\Float_) {
+                $type = $this->detectLiteralConstantType($operand);
+                if ($type === Type::INT || $type === Type::FLOAT) {
+                    return $type;
+                }
+            }
+        }
         return Type::VAR;
+    }
+
+    /** A native slot is safe only when the emitted initializer has that ABI. */
+    protected function getConstantScalarStorageType(Node\Expr $expression): string
+    {
+        $type = $this->getLoweredExpressionType($expression) ?? $this->detectLiteralConstantType($expression);
+        return in_array($type, [Type::INT, Type::FLOAT, Type::BOOL, Type::STR], true) ? $type : Type::VAR;
     }
 
     protected function parseUse(Node\Stmt\Use_ $v2): void

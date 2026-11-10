@@ -9,6 +9,7 @@ namespace TypePhp\Parser;
 
 use TypePhp\Type;
 
+use PhpParser\Node;
 use PhpParser\Node\Expr;
 use PhpParser\NodeAbstract;
 use TypePhp\Entity\ClassDef;
@@ -174,9 +175,7 @@ trait ClassConstantFetchTrait
                 $nativeConst = $this->findNativeClassConst($expr, $class, $const);
                 if ($nativeConst) {
                     $constant = $expr->getAttribute('nativeConst');
-                    $expr->setAttribute(self::ATTR_LOWERED_TYPE, $constant?->valueExpr !== null
-                        ? $this->getLoweredExpressionType($constant->valueExpr)
-                        : null);
+                    $expr->setAttribute(self::ATTR_LOWERED_TYPE, $constant?->loweredType);
                     return $nativeConst;
                 }
             }
@@ -192,6 +191,33 @@ trait ClassConstantFetchTrait
         $name = $class . '::' . $const;
         $name = $this->getLiteralString($name);
         return Symbol::constant() . '(' . $name . ')';
+    }
+
+    /** Query the same inline gate as lowering, without evaluating user code. */
+    protected function detectStaticClassConstantStorageType(Expr\ClassConstFetch $expr): string
+    {
+        if (!$expr->class instanceof Node\Name || !$expr->name instanceof Node\Identifier) {
+            return Type::VAR;
+        }
+        $class = $this->parseIdentifier($expr->class);
+        if ($class === 'static') {
+            return Type::VAR;
+        }
+        if ($class === 'self' || $class === 'this_') {
+            $class = '\\' . $this->getFullClassName();
+        } elseif ($class === 'parent') {
+            if (!$this->classDef || !$this->classDef->extends) {
+                return Type::VAR;
+            }
+            $class = '\\' . $this->classDef->extends;
+        }
+        $class = $this->getNamespacedClassName($class);
+        if (!$this->findNativeClassConst($expr, $class, $expr->name->toString())) {
+            return Type::VAR;
+        }
+        $constant = $expr->getAttribute('nativeConst');
+        $type = $constant?->loweredType;
+        return in_array($type, [Type::INT, Type::FLOAT, Type::BOOL, Type::STR], true) ? $type : Type::VAR;
     }
 
     private function hasDeclaredEnumConstant(ClassDef $class, string $name): bool

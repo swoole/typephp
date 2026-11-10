@@ -4063,7 +4063,7 @@ abstract class CompilerBase implements PropertyAccessContext
                 ) {
                     return Type::STR;
                 }
-                break;
+                return $this->detectStaticClassConstantStorageType($expr);
             case 'Expr_ArrayDimFetch':
                 if (($typedArray = $this->getTypedArrayAccessDefinition($expr)) !== null) {
                     return $typedArray['type'];

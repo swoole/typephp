@@ -83,16 +83,17 @@ trait ExceptionControlFlowTrait
         $this->addLocalVar($exVar, Type::VAR);
 
         $code .= ' catch (zend_object *_ex) {' . PHP_EOL;
-        $this->indentLevel++;
-        $code .= $this->getIndent() . $exVar . ' = php::catchException();' . PHP_EOL;
-        if ($catches) {
-            $catchMatched = $this->genTmpVarName();
-            $code .= $this->getIndent() . 'bool ' . $catchMatched . ' = false;' . PHP_EOL;
-            foreach ($catches as $catch) {
-                $code .= $this->parseCatch($catch, $exVar, $catchMatched, $finally?->stmts ?? []) . PHP_EOL;
+        $code .= $this->withIndentedBlock(function () use ($exVar, $catches, $finally): string {
+            $code = $this->getIndent() . $exVar . ' = php::catchException();' . PHP_EOL;
+            if ($catches) {
+                $catchMatched = $this->genTmpVarName();
+                $code .= $this->getIndent() . 'bool ' . $catchMatched . ' = false;' . PHP_EOL;
+                foreach ($catches as $catch) {
+                    $code .= $this->parseCatch($catch, $exVar, $catchMatched, $finally?->stmts ?? []) . PHP_EOL;
+                }
             }
-        }
-        $this->indentLevel--;
+            return $code;
+        });
         $code .= $this->getIndent() . '}' . PHP_EOL;
 
         if ($finally) {
@@ -103,9 +104,7 @@ trait ExceptionControlFlowTrait
             ? 'typephp_fiber_rethrow(' . $exVar . ');'
             : 'php::throwException(php::Object(' . $exVar . '));';
         $code .= 'if (' . $exVar . ') {' . PHP_EOL;
-        $this->indentLevel++;
-        $code .= $this->getIndent() . $rethrow . PHP_EOL;
-        $this->indentLevel--;
+        $code .= $this->withIndentedBlock(fn() => $this->getIndent() . $rethrow . PHP_EOL);
         $code .= $this->getIndent() . '}';
 
         return $code;
@@ -226,27 +225,24 @@ trait ExceptionControlFlowTrait
         }
 
         $code .= '(' . implode(' || ', $conditions) . ')) {' . PHP_EOL;
-        $this->indentLevel++;
-        $code .= $this->getIndent() . $catchMatched . ' = true;' . PHP_EOL;
-        if ($var !== '') {
-            $code .= $this->getIndent() . $var . ' = ' . $exVar . ';' . PHP_EOL;
-        }
-        $code .= $this->getIndent() . "{$exVar} = php::null;" . PHP_EOL;
-        $stmts = $finallyStmts ? $this->injectFinallyBeforeReturn($catch->stmts, $finallyStmts) : $catch->stmts;
-        if ($finallyStmts) {
-            $code .= $this->getIndent() . 'try {' . PHP_EOL;
-            $this->indentLevel++;
-            $code .= $this->parseStmts($stmts);
-            $this->indentLevel--;
-            $code .= $this->getIndent() . '} catch(zend_object *_catch_throw_ex) {' . PHP_EOL;
-            $this->indentLevel++;
-            $code .= $this->getIndent() . "{$exVar} = php::catchException();" . PHP_EOL;
-            $this->indentLevel--;
-            $code .= $this->getIndent() . '}' . PHP_EOL;
-        } else {
-            $code .= $this->parseStmts($stmts);
-        }
-        $this->indentLevel--;
+        $code .= $this->withIndentedBlock(function () use ($catchMatched, $exVar, $var, $finallyStmts, $catch): string {
+            $code = $this->getIndent() . $catchMatched . ' = true;' . PHP_EOL;
+            if ($var !== '') {
+                $code .= $this->getIndent() . $var . ' = ' . $exVar . ';' . PHP_EOL;
+            }
+            $code .= $this->getIndent() . "{$exVar} = php::null;" . PHP_EOL;
+            $stmts = $finallyStmts ? $this->injectFinallyBeforeReturn($catch->stmts, $finallyStmts) : $catch->stmts;
+            if ($finallyStmts) {
+                $code .= $this->getIndent() . 'try {' . PHP_EOL;
+                $code .= $this->parseBlockStmts($stmts);
+                $code .= $this->getIndent() . '} catch(zend_object *_catch_throw_ex) {' . PHP_EOL;
+                $code .= $this->withIndentedBlock(fn() => $this->getIndent() . "{$exVar} = php::catchException();" . PHP_EOL);
+                $code .= $this->getIndent() . '}' . PHP_EOL;
+            } else {
+                $code .= $this->parseStmts($stmts);
+            }
+            return $code;
+        });
         $code .= $this->getIndent() . '}';
 
         return $code;

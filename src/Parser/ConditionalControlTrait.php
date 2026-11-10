@@ -37,10 +37,8 @@ trait ConditionalControlTrait
         $hasTail = isset($arms[$index + 1]) || ($else && !$this->isEmptyStmtList($else->stmts));
         if ($hasTail) {
             $code .= $this->getIndent() . '} else {' . PHP_EOL;
-            $this->indentLevel++;
-            $tail = $this->parseIfChain($arms, $else, $index + 1);
+            $tail = $this->withIndentedBlock(fn() => $this->parseIfChain($arms, $else, $index + 1));
             $code .= $tail;
-            $this->indentLevel--;
             if (!str_ends_with($tail, PHP_EOL)) {
                 $code .= PHP_EOL;
             }

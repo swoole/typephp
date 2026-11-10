@@ -400,6 +400,41 @@ class FunctionContext
         unset($this->scopeLayouts[$this->scopeLevel]);
     }
 
+    /** Parse a lexical scope without leaking its layout on failure. */
+    public function withScope(callable $callback): mixed
+    {
+        $this->enterScope();
+        try {
+            return $callback();
+        } finally {
+            $this->leaveScope();
+        }
+    }
+
+    /**
+     * Switches count towards break/continue levels, but do not by themselves
+     * permit continue. A switch inside a loop retains that enclosing loop.
+     */
+    public function withBreakableContext(bool $isSwitch, callable $callback): mixed
+    {
+        $inLoop = $this->inLoop;
+        $inContinuableLoop = $this->inContinuableLoop;
+        $breakableIsSwitch = $this->breakableIsSwitch;
+        $breakableDepth = $this->breakableDepth;
+        $this->inLoop = true;
+        $this->inContinuableLoop = $inContinuableLoop || !$isSwitch;
+        $this->breakableIsSwitch = $isSwitch;
+        $this->breakableDepth = $breakableDepth + 1;
+        try {
+            return $callback();
+        } finally {
+            $this->inLoop = $inLoop;
+            $this->inContinuableLoop = $inContinuableLoop;
+            $this->breakableIsSwitch = $breakableIsSwitch;
+            $this->breakableDepth = $breakableDepth;
+        }
+    }
+
     public function resetAnalysisTemporaries(
         array $localVars,
         int $tmpVarIndex,

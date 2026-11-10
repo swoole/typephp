@@ -157,9 +157,6 @@ trait ForeachTrait
             }
         }
 
-        $code = '{' . PHP_EOL;
-        $this->indentLevel++;
-        $code .= $this->getIndent() . "php::ForeachIterator {$iterator}{{$iterableVar}, {$byRef}, {$scope}};" . PHP_EOL;
         if ($directValue !== null) {
             $next = $directKey === null
                 ? "{$iterator}.nextValue({$directValue})"
@@ -167,25 +164,28 @@ trait ForeachTrait
         } else {
             $next = "{$iterator}.next()";
         }
-        $code .= $this->getIndent() . "while ({$next}) {" . PHP_EOL;
-        $this->indentLevel++;
+        $code = '{' . PHP_EOL;
+        $code .= $this->withIndentedBlock(function () use ($node, $iterator, $iterableVar, $byRef, $scope, $next, $directValue): string {
+            $code = $this->getIndent() . "php::ForeachIterator {$iterator}{{$iterableVar}, {$byRef}, {$scope}};" . PHP_EOL;
+            $code .= $this->getIndent() . "while ({$next}) {" . PHP_EOL;
+            [$assignments, $body] = $this->withIndentedBlock(function () use ($node, $iterator, $directValue): array {
+                $assignments = '';
+                if ($directValue === null) {
+                    $assignments .= $this->parseForeachKeyAssignment($node, $iterator . '.key()');
+                    $assignments .= $this->parseForeachValueAssignment(
+                        $node,
+                        $iterator . '.value()',
+                        $iterator . '.assignValueRef',
+                    );
+                }
+                return [$assignments, $this->parseForeachBody($node)];
+            });
 
-        if ($directValue === null) {
-            $code .= $this->parseForeachKeyAssignment($node, $iterator . '.key()');
-            $code .= $this->parseForeachValueAssignment(
-                $node,
-                $iterator . '.value()',
-                $iterator . '.assignValueRef',
-            );
-        }
-
-        $body = $this->parseForeachBody($node);
-        $this->indentLevel--;
-
-        $code .= $this->parseBeforeStmtLines();
-        $code .= $body;
-        $code .= $this->getIndent() . '}';
-        $this->indentLevel--;
+            $code .= $assignments;
+            $code .= $this->parseBeforeStmtLines();
+            $code .= $body;
+            return $code . $this->getIndent() . '}';
+        });
         $code .= PHP_EOL . $this->getIndent() . '}';
 
         return $code;

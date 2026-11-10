@@ -62,21 +62,23 @@ trait SwitchTrait
                 $nativeCaseValues[$caseCond->value] = true;
             }
             $code .= 'do {' . PHP_EOL;
-            $this->indentLevel++;
-            $code .= $this->getIndent() . 'switch (' . $tmp_var . ') {' . PHP_EOL;
-            $this->indentLevel++;
-            foreach ($v->cases as $case) {
-                if (empty($case->cond)) {
-                    $code .= $this->getIndent() . 'default: {' . PHP_EOL;
-                } else {
-                    $code .= $this->getIndent() . 'case ' . $this->parseScalar($case->cond) . ': {' . PHP_EOL;
-                }
-                $code .= $this->parseBlockStmts($case->stmts);
-                $code .= $this->getIndent() . '}' . PHP_EOL;
-            }
-            $this->indentLevel--;
-            $code .= $this->getIndent() . '}' . PHP_EOL;
-            $this->indentLevel--;
+            $code .= $this->withIndentedBlock(function () use ($tmp_var, $v): string {
+                $code = $this->getIndent() . 'switch (' . $tmp_var . ') {' . PHP_EOL;
+                $code .= $this->withIndentedBlock(function () use ($v): string {
+                    $code = '';
+                    foreach ($v->cases as $case) {
+                        if (empty($case->cond)) {
+                            $code .= $this->getIndent() . 'default: {' . PHP_EOL;
+                        } else {
+                            $code .= $this->getIndent() . 'case ' . $this->parseScalar($case->cond) . ': {' . PHP_EOL;
+                        }
+                        $code .= $this->parseBlockStmts($case->stmts);
+                        $code .= $this->getIndent() . '}' . PHP_EOL;
+                    }
+                    return $code;
+                });
+                return $code . $this->getIndent() . '}' . PHP_EOL;
+            });
             $code .= $this->getIndent() . '} while(0);' . PHP_EOL;
 
             return $var_def . $code;
@@ -85,10 +87,17 @@ trait SwitchTrait
         _fail:
 
         $code = 'do {' . PHP_EOL;
-        $this->indentLevel++;
+        $code .= $this->withIndentedBlock(fn() => $this->parseDynamicSwitchCases($v, $tmp_var, $type));
+        $code .= $this->getIndent() . '} while (0);';
+
+        return $var_def . $code;
+    }
+
+    private function parseDynamicSwitchCases(Node\Stmt\Switch_ $v, string $tmp_var, string $type): string
+    {
         $switchTarget = $this->genTmpVarName();
         $switchMatched = $this->genTmpVarName();
-        $code .= $this->getIndent() . 'int ' . $switchTarget . ' = -1;' . PHP_EOL;
+        $code = $this->getIndent() . 'int ' . $switchTarget . ' = -1;' . PHP_EOL;
         $code .= $this->getIndent() . 'bool ' . $switchMatched . ' = false;' . PHP_EOL;
         $caseConds = [];
         $caseGroups = [];
@@ -170,15 +179,10 @@ trait SwitchTrait
 
         foreach ($caseGroups as $groupIndex => [, , $stmts]) {
             $code .= $this->getIndent() . 'if (' . $switchTarget . ' == ' . $groupIndex . ') {' . PHP_EOL;
-            $this->indentLevel++;
-            $code .= $this->parseStmts($stmts);
-            $this->indentLevel--;
+            $code .= $this->parseBlockStmts($stmts);
             $code .= $this->getIndent() . '}' . PHP_EOL;
         }
-        $this->indentLevel--;
-        $code .= $this->getIndent() . '} while (0);';
-
-        return $var_def . $code;
+        return $code;
     }
 
 }

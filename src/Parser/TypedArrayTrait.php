@@ -420,9 +420,7 @@ trait TypedArrayTrait
         $code = '{' . PHP_EOL . $this->getIndent() . 'php::ForeachIterator ' . $iterator
             . '{' . $array . ', false, ' . $scope . '};' . PHP_EOL
             . $this->getIndent() . 'while (' . $iterator . '.next()) {' . PHP_EOL . $assignments;
-        $this->indentLevel++;
-        $body = $this->parseForeachBody($node);
-        $this->indentLevel--;
+        $body = $this->withIndentedBlock(fn() => $this->parseForeachBody($node));
         return $code . $this->parseBeforeStmtLines() . $body . $this->getIndent() . '}' . PHP_EOL
             . $this->getIndent() . '}' . PHP_EOL;
     }

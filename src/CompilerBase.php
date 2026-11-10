@@ -2388,22 +2388,31 @@ abstract class CompilerBase implements PropertyAccessContext
         return $code;
     }
 
+    /** Render a nested block and restore the enclosing indentation on every exit. */
+    protected function withIndentedBlock(callable $callback): mixed
+    {
+        $indentLevel = $this->indentLevel;
+        $this->indentLevel = $indentLevel + 1;
+        try {
+            return $callback();
+        } finally {
+            $this->indentLevel = $indentLevel;
+        }
+    }
+
     protected function parseBlockStmts(array $stmts): string
     {
-        $this->indentLevel++;
-        $code = $this->parseStmts($stmts);
-        $this->indentLevel--;
-        return $code;
+        return $this->withIndentedBlock(fn() => $this->parseStmts($stmts));
     }
 
     protected function parseStmts(array $stmts): string
     {
-        $this->context->enterScope();
+        return $this->context->withScope(fn() => $this->parseScopedStmts($stmts));
+    }
+
+    private function parseScopedStmts(array $stmts): string
+    {
         $lines     = [];
-        $inLoopTop = $this->context->inLoop;
-        $inContinuableLoopTop = $this->context->inContinuableLoop;
-        $breakableIsSwitchTop = $this->context->breakableIsSwitch;
-        $breakableDepthTop = $this->context->breakableDepth;
         $last = array_key_last($stmts);
         foreach ($stmts as $i => $v) {
             $class                 = $v->getType();
@@ -2438,29 +2447,21 @@ abstract class CompilerBase implements PropertyAccessContext
                 case 'Stmt_Switch':
                 case 'Stmt_While':
                 case 'Stmt_Do':
-                    $isSwitch = $class === 'Stmt_Switch';
-                    $this->context->inLoop = true;
-                    if (!$isSwitch) {
-                        $this->context->inContinuableLoop = true;
-                    }
-                    $this->context->breakableIsSwitch = $isSwitch;
-                    $this->context->breakableDepth = $breakableDepthTop + 1;
-                    $result = match ($class) {
-                        'Stmt_For' => $this->parseFor($v),
-                        'Stmt_Foreach' => $this->parseForeach($v),
-                        'Stmt_Switch' => $this->parseSwitch($v),
-                        'Stmt_While' => $this->parseWhile($v),
-                        default => $this->parseDo($v),
-                    };
-                    $this->context->inLoop = $inLoopTop;
-                    $this->context->inContinuableLoop = $inContinuableLoopTop;
-                    $this->context->breakableIsSwitch = $breakableIsSwitchTop;
-                    $this->context->breakableDepth = $breakableDepthTop;
+                    $result = $this->context->withBreakableContext(
+                        $class === 'Stmt_Switch',
+                        fn() => match ($class) {
+                            'Stmt_For' => $this->parseFor($v),
+                            'Stmt_Foreach' => $this->parseForeach($v),
+                            'Stmt_Switch' => $this->parseSwitch($v),
+                            'Stmt_While' => $this->parseWhile($v),
+                            default => $this->parseDo($v),
+                        },
+                    );
                     // A multi-level break/continue exits the nested construct
                     // with its countdown flag still set. The propagation check
                     // must run before any trailing statement of this body.
-                    if ($inLoopTop) {
-                        $flagCheck = $this->genMultiLevelJumpCheck($breakableIsSwitchTop);
+                    if ($this->context->inLoop) {
+                        $flagCheck = $this->genMultiLevelJumpCheck($this->context->breakableIsSwitch);
                         if ($flagCheck !== '') {
                             $result = rtrim($result, "\r\n") . PHP_EOL . $flagCheck;
                         }
@@ -2525,8 +2526,6 @@ abstract class CompilerBase implements PropertyAccessContext
         foreach ($lines as $line) {
             $code .= $this->formatStatementFragment($line) . PHP_EOL;
         }
-        $this->context->leaveScope();
-
         return $code;
     }
 

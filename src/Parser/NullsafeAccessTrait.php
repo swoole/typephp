@@ -86,59 +86,62 @@ trait NullsafeAccessTrait
         $tmpFn = $this->genTmpVarName();
 
         $code = $comment . 'auto ' . $tmpFn . ' = [&]() -> ' . Type::VAR . ' {' . PHP_EOL;
-        $this->indentLevel++;
+        [$body, $ownedTmpVars] = $this->withIndentedBlock(function () use ($list, $last, $object, $ownedTmpVars): array {
+            $code = '';
 
-        foreach ($list as $key => $item) {
-            $tmpVar = $this->addTmpVar($key !== $last ? Type::OBJECT : Type::VAR);
-            $ownedTmpVars[] = $tmpVar;
-            if ($item[3]) {
-                $code .= $this->getIndent() . "if ({$object}.isNull()) {" . PHP_EOL;
-                $this->indentLevel++;
-                $code .= $this->getIndent() . 'return ' . self::VALUE_NULL . ';' . PHP_EOL;
-                $this->indentLevel--;
-                $code .= $this->getIndent() . '}' . PHP_EOL;
-            }
-            if ($item[0] == 'property') {
-                $update = $this->escapeAttrMode($this->isPropertyFetchUpdate($item[2]));
-                $code .= $this->getIndent() . "{$tmpVar} = {$object}.attr({$item[1]}, {$update});" . PHP_EOL;
-            } else {
-                $methodName = $this->isNamedMethod($item[4]->name)
-                    ? $this->parseIdentifier($item[4]->name)
-                    : '';
-                $receiverClass = $this->detectClassOfExpr($item[4]->var);
-                $requiresDynamicScope = $this->runtimeMethodRequiresDynamicScope($receiverClass, $methodName);
-                [$args, $argBeforeStmts, $argAfterStmts] = $this->captureStmtLines(
-                    fn() => $this->parseCallArgs($item[2]),
-                );
-                if ($argBeforeStmts) {
-                    $code .= $this->formatCapturedStmtLines($argBeforeStmts);
+            foreach ($list as $key => $item) {
+                $tmpVar = $this->addTmpVar($key !== $last ? Type::OBJECT : Type::VAR);
+                $ownedTmpVars[] = $tmpVar;
+                if ($item[3]) {
+                    $code .= $this->getIndent() . "if ({$object}.isNull()) {" . PHP_EOL;
+                    $code .= $this->withIndentedBlock(
+                        fn() => $this->getIndent() . 'return ' . self::VALUE_NULL . ';' . PHP_EOL,
+                    );
+                    $code .= $this->getIndent() . '}' . PHP_EOL;
                 }
-                if ($requiresDynamicScope && $this->methodDef) {
-                    if ($this->isNamedMethod($item[4]->name)) {
-                        $code .= $this->getIndent()
-                            . "{$tmpVar} = typephp_call_method_scoped_cached({$object}, {$item[1]}, "
-                            . $this->getCallableScopeExpr() . ', ' . $this->getMethodCallCache()
-                            . ", {$args});" . PHP_EOL;
-                    } else {
-                        $code .= $this->getIndent() . "{$tmpVar} = php::callScoped({$object}, {$item[1]}, "
-                            . $this->getCallableScopeExpr() . ", {$args});" . PHP_EOL;
-                    }
+                if ($item[0] == 'property') {
+                    $update = $this->escapeAttrMode($this->isPropertyFetchUpdate($item[2]));
+                    $code .= $this->getIndent() . "{$tmpVar} = {$object}.attr({$item[1]}, {$update});" . PHP_EOL;
                 } else {
-                    if ($this->isNamedMethod($item[4]->name)) {
-                        $code .= $this->getIndent() . "{$tmpVar} = typephp_call_method_cached({$object}, {$item[1]}, "
-                            . $this->getMethodCallCache() . ", {$args});" . PHP_EOL;
+                    $methodName = $this->isNamedMethod($item[4]->name)
+                        ? $this->parseIdentifier($item[4]->name)
+                        : '';
+                    $receiverClass = $this->detectClassOfExpr($item[4]->var);
+                    $requiresDynamicScope = $this->runtimeMethodRequiresDynamicScope($receiverClass, $methodName);
+                    [$args, $argBeforeStmts, $argAfterStmts] = $this->captureStmtLines(
+                        fn() => $this->parseCallArgs($item[2]),
+                    );
+                    if ($argBeforeStmts) {
+                        $code .= $this->formatCapturedStmtLines($argBeforeStmts);
+                    }
+                    if ($requiresDynamicScope && $this->methodDef) {
+                        if ($this->isNamedMethod($item[4]->name)) {
+                            $code .= $this->getIndent()
+                                . "{$tmpVar} = typephp_call_method_scoped_cached({$object}, {$item[1]}, "
+                                . $this->getCallableScopeExpr() . ', ' . $this->getMethodCallCache()
+                                . ", {$args});" . PHP_EOL;
+                        } else {
+                            $code .= $this->getIndent() . "{$tmpVar} = php::callScoped({$object}, {$item[1]}, "
+                                . $this->getCallableScopeExpr() . ", {$args});" . PHP_EOL;
+                        }
                     } else {
-                        $code .= $this->getIndent() . "{$tmpVar} = {$object}.call({$item[1]}, {$args});" . PHP_EOL;
+                        if ($this->isNamedMethod($item[4]->name)) {
+                            $code .= $this->getIndent() . "{$tmpVar} = typephp_call_method_cached({$object}, {$item[1]}, "
+                                . $this->getMethodCallCache() . ", {$args});" . PHP_EOL;
+                        } else {
+                            $code .= $this->getIndent() . "{$tmpVar} = {$object}.call({$item[1]}, {$args});" . PHP_EOL;
+                        }
+                    }
+                    if ($argAfterStmts) {
+                        $code .= $this->formatCapturedStmtLines($argAfterStmts);
                     }
                 }
-                if ($argAfterStmts) {
-                    $code .= $this->formatCapturedStmtLines($argAfterStmts);
-                }
+                $object = $tmpVar;
             }
-            $object = $tmpVar;
-        }
-        $code .= $this->getIndent() . "return {$object};" . PHP_EOL;
-        $this->indentLevel--;
+            $code .= $this->getIndent() . "return {$object};" . PHP_EOL;
+            return [$code, $ownedTmpVars];
+        });
+        $code .= $body;
         $code .= $this->getIndent() . '};';
         $this->addBeforeStmtLine($code);
 

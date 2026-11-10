@@ -162,88 +162,99 @@ trait SelectionExpressionTrait
         }
 
         $code = '[&]() -> ' . $returnType . ' {' . PHP_EOL;
-        $this->indentLevel++;
-        $default = null;
-        foreach ($expr->arms as $arm) {
-            if ($arm->conds === null) {
-                $default = $arm->body;
-                continue;
-            }
-            $matched = $this->genTmpVarName();
-            $code .= $this->getIndent() . 'bool ' . $matched . ' = false;' . PHP_EOL;
-            foreach ($arm->conds as $cond) {
-                if ($this->isMatchExpr($cond)) {
-                    $this->fatalError($arm, 'Match expression cannot be used as a condition');
+        $code .= $this->withIndentedBlock(function () use (
+            $expr, $var, $nativeCondition, $conditionNativeClass,
+            $nativeClass, $nativeSelection, $returnType,
+        ): string {
+            $code = '';
+            $default = null;
+            foreach ($expr->arms as $arm) {
+                if ($arm->conds === null) {
+                    $default = $arm->body;
+                    continue;
                 }
-                $this->assertExprCanBeUsedAsValue($cond, 'match arm condition');
-                [$condValue, $beforeStmts, $afterStmts] = $this->parseExprWithCapturedStmts($cond);
-                $code .= $this->getIndent() . 'if (!' . $matched . ') {' . PHP_EOL;
-                $this->indentLevel++;
-                $code .= $this->formatCapturedStmtLines($beforeStmts);
-                if ($afterStmts) {
-                    $condClass = $this->detectClassOfExpr($cond);
-                    if ($nativeCondition && $this->isNativeObjectClass($condClass)) {
-                        $condTmpVar = $this->genTmpVarName();
-                        $this->addLocalVar($condTmpVar, $this->getNativeObjectPointerType($condClass));
-                        $this->addNativeObject($condTmpVar, $condClass);
-                    } else {
-                        $condTmpVar = $this->addTmpVar(Type::VAR);
+                $matched = $this->genTmpVarName();
+                $code .= $this->getIndent() . 'bool ' . $matched . ' = false;' . PHP_EOL;
+                foreach ($arm->conds as $cond) {
+                    if ($this->isMatchExpr($cond)) {
+                        $this->fatalError($arm, 'Match expression cannot be used as a condition');
                     }
-                    $code .= $this->getIndent() . "{$condTmpVar} = {$condValue};" . PHP_EOL;
-                    $code .= $this->formatCapturedStmtLines($afterStmts);
-                    $condValue = $condTmpVar;
+                    $this->assertExprCanBeUsedAsValue($cond, 'match arm condition');
+                    [$condValue, $beforeStmts, $afterStmts] = $this->parseExprWithCapturedStmts($cond);
+                    $code .= $this->getIndent() . 'if (!' . $matched . ') {' . PHP_EOL;
+                    $code .= $this->withIndentedBlock(function () use (
+                        $cond, $condValue, $beforeStmts, $afterStmts,
+                        $nativeCondition, $conditionNativeClass, $var, $matched,
+                    ): string {
+                        $code = $this->formatCapturedStmtLines($beforeStmts);
+                        if ($afterStmts) {
+                            $condClass = $this->detectClassOfExpr($cond);
+                            if ($nativeCondition && $this->isNativeObjectClass($condClass)) {
+                                $condTmpVar = $this->genTmpVarName();
+                                $this->addLocalVar($condTmpVar, $this->getNativeObjectPointerType($condClass));
+                                $this->addNativeObject($condTmpVar, $condClass);
+                            } else {
+                                $condTmpVar = $this->addTmpVar(Type::VAR);
+                            }
+                            $code .= $this->getIndent() . "{$condTmpVar} = {$condValue};" . PHP_EOL;
+                            $code .= $this->formatCapturedStmtLines($afterStmts);
+                            $condValue = $condTmpVar;
+                        }
+                        if ($nativeCondition) {
+                            $condClass = $this->detectClassOfExpr($cond);
+                            if ($this->isNull($cond)) {
+                                $comparison = $var . ' == nullptr';
+                            } elseif ($this->isNativeObjectClass($condClass)
+                                && ($this->isObjectClassStaticallyAssignableTo($condClass, $conditionNativeClass)
+                                    || $this->isObjectClassStaticallyAssignableTo($conditionNativeClass, $condClass))
+                            ) {
+                                $comparison = $var . ' == ' . $condValue;
+                            } else {
+                                // PHP match uses strict identity. An unrelated Native
+                                // pointer or a Zend value can never be identical, but
+                                // its expression must still be evaluated for effects.
+                                $comparison = '(static_cast<void>(' . $condValue . '), false)';
+                            }
+                            $code .= $this->getIndent() . $matched . ' = (' . $comparison . ');' . PHP_EOL;
+                        } else {
+                            $code .= $this->getIndent() . $matched . ' = php::same(' . $var . ', ' . $condValue . ');' . PHP_EOL;
+                        }
+                        return $code;
+                    });
+                    $code .= $this->getIndent() . '}' . PHP_EOL;
                 }
-                if ($nativeCondition) {
-                    $condClass = $this->detectClassOfExpr($cond);
-                    if ($this->isNull($cond)) {
-                        $comparison = $var . ' == nullptr';
-                    } elseif ($this->isNativeObjectClass($condClass)
-                        && ($this->isObjectClassStaticallyAssignableTo($condClass, $conditionNativeClass)
-                            || $this->isObjectClassStaticallyAssignableTo($conditionNativeClass, $condClass))
-                    ) {
-                        $comparison = $var . ' == ' . $condValue;
-                    } else {
-                        // PHP match uses strict identity. An unrelated Native
-                        // pointer or a Zend value can never be identical, but
-                        // its expression must still be evaluated for effects.
-                        $comparison = '(static_cast<void>(' . $condValue . '), false)';
-                    }
-                    $code .= $this->getIndent() . $matched . ' = (' . $comparison . ');' . PHP_EOL;
-                } else {
-                    $code .= $this->getIndent() . $matched . ' = php::same(' . $var . ', ' . $condValue . ');' . PHP_EOL;
-                }
-                $this->indentLevel--;
+                $code .= $this->getIndent() . 'if (' . $matched . ') {' . PHP_EOL;
+                $code .= $this->withIndentedBlock(
+                    fn() => $this->formatMatchReturn($arm->body, $nativeClass, $returnType),
+                );
                 $code .= $this->getIndent() . '}' . PHP_EOL;
             }
-            $code .= $this->getIndent() . 'if (' . $matched . ') {' . PHP_EOL;
-            $this->indentLevel++;
-            $code .= $this->formatMatchReturn($arm->body, $nativeClass, $returnType);
-            $this->indentLevel--;
-            $code .= $this->getIndent() . '}' . PHP_EOL;
-        }
 
-        if ($default) {
-            $code .= $this->getIndent() . '{' . PHP_EOL;
-            $this->indentLevel++;
-            $code .= $this->formatMatchReturn($default, $nativeClass, $returnType);
-            $this->indentLevel--;
-            $code .= $this->getIndent() . '}' . PHP_EOL;
-        } else {
-            $code .= $this->getIndent() . '{' . PHP_EOL;
-            $this->indentLevel++;
-            if ($nativeSelection) {
-                $code .= $this->getIndent() . 'php::throwException("UnhandledMatchError", "Unhandled match case");' . PHP_EOL
-                    . $this->getIndent() . 'return nullptr;' . PHP_EOL;
-            } elseif ($returnType === Type::VAR) {
-                $code .= $this->getIndent() . 'return php::throwException("UnhandledMatchError", "Unhandled match case");' . PHP_EOL;
+            if ($default) {
+                $code .= $this->getIndent() . '{' . PHP_EOL;
+                $code .= $this->withIndentedBlock(
+                    fn() => $this->formatMatchReturn($default, $nativeClass, $returnType),
+                );
+                $code .= $this->getIndent() . '}' . PHP_EOL;
             } else {
-                $code .= $this->getIndent() . 'php::throwException("UnhandledMatchError", "Unhandled match case");' . PHP_EOL
-                    . $this->getIndent() . 'return {};' . PHP_EOL;
+                $code .= $this->getIndent() . '{' . PHP_EOL;
+                $code .= $this->withIndentedBlock(function () use ($nativeSelection, $returnType): string {
+                    $code = '';
+                    if ($nativeSelection) {
+                        $code .= $this->getIndent() . 'php::throwException("UnhandledMatchError", "Unhandled match case");' . PHP_EOL
+                            . $this->getIndent() . 'return nullptr;' . PHP_EOL;
+                    } elseif ($returnType === Type::VAR) {
+                        $code .= $this->getIndent() . 'return php::throwException("UnhandledMatchError", "Unhandled match case");' . PHP_EOL;
+                    } else {
+                        $code .= $this->getIndent() . 'php::throwException("UnhandledMatchError", "Unhandled match case");' . PHP_EOL
+                            . $this->getIndent() . 'return {};' . PHP_EOL;
+                    }
+                    return $code;
+                });
+                $code .= $this->getIndent() . '}' . PHP_EOL;
             }
-            $this->indentLevel--;
-            $code .= $this->getIndent() . '}' . PHP_EOL;
-        }
-        $this->indentLevel--;
+            return $code;
+        });
         $code .= $this->getIndent() . '}()';
 
         return $code;

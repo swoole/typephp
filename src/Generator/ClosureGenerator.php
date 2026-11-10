@@ -161,10 +161,7 @@ trait ClosureGenerator
                 $paramName = $this->parseIdentifier($param->var);
                 $this->addArgument($paramName, Type::VAR);
                 if (CompileTimeAttribute::consume($param, 'Immutable')) {
-                    $this->context->immutableVars[$paramName] = true;
-                    if ($this->immutableTypeNodeMayBeObject($param->type)) {
-                        $this->context->immutableObjectVars[$paramName] = true;
-                    }
+                    $this->context->markImmutableBinding($paramName, $this->immutableTypeNodeMayBeObject($param->type));
                     if ($param->type !== null) {
                         [, $parameterClass] = $this->resolveTypeDecl(
                             $param->type,
@@ -187,10 +184,7 @@ trait ClosureGenerator
                     $this->addObject($binding['name'], $binding['class']);
                 }
                 if ($binding['immutable']) {
-                    $this->context->immutableVars[$binding['name']] = true;
-                    if ($binding['immutableObject']) {
-                        $this->context->immutableObjectVars[$binding['name']] = true;
-                    }
+                    $this->context->markImmutableBinding($binding['name'], $binding['immutableObject']);
                 }
             }
 
@@ -509,7 +503,7 @@ trait ClosureGenerator
                     $code .= $this->genExtraNamedVariadicArgs($var);
                     $this->addArgument($var, Type::ARRAY);
                     if (CompileTimeAttribute::consume($param, 'Immutable')) {
-                        $this->context->immutableVars[$var] = true;
+                        $this->context->markImmutableBinding($var);
                     }
                     $code .= $this->genClosureParamTypeCheck($param, $var, $phpName, $i, true);
                     continue;
@@ -529,10 +523,7 @@ trait ClosureGenerator
                     $this->addArgument($var, Type::VAR);
                 }
                 if (CompileTimeAttribute::consume($param, 'Immutable')) {
-                    $this->context->immutableVars[$var] = true;
-                    if ($this->immutableTypeNodeMayBeObject($param->type)) {
-                        $this->context->immutableObjectVars[$var] = true;
-                    }
+                    $this->context->markImmutableBinding($var, $this->immutableTypeNodeMayBeObject($param->type));
                     if ($param->type !== null) {
                         [, $parameterClass] = $this->resolveTypeDecl($param->type, self::DECL_TYPE_OF_PARAM);
                         if ($parameterClass !== '') {
@@ -556,20 +547,12 @@ trait ClosureGenerator
                     $code .= 'auto ' . $var . ' = vars_.get(' . $i . ');' . PHP_EOL;
                     $this->addArgument($var, Type::VAR);
                 }
-                if (isset($oriContext->immutableVars[$var])) {
-                    $this->context->immutableVars[$var] = true;
-                    if (isset($oriContext->immutableObjectVars[$var])) {
-                        $this->context->immutableObjectVars[$var] = true;
-                    }
-                }
+                $this->context->importImmutableBinding($oriContext, $var);
             }
 
             if ($this->methodDef && !$expr->static) {
                 $this->addArgument('this_', Type::OBJECT);
-                if (isset($oriContext->immutableVars['this_'])) {
-                    $this->context->immutableVars['this_'] = true;
-                    $this->context->immutableObjectVars['this_'] = true;
-                }
+                $this->context->importImmutableBinding($oriContext, 'this_', true);
             }
 
             $body = $isGenerator
@@ -692,9 +675,11 @@ trait ClosureGenerator
             foreach ($capturedNames as $i => $capturedName) {
                 $code .= $this->getIndent() . Type::VAR . ' ' . $capturedName . ' = vars_.get(' . $i . ');' . PHP_EOL;
                 $this->addArgument($capturedName, Type::VAR);
+                $this->context->importImmutableBinding($outerContext, $capturedName);
             }
             if ($this->methodDef) {
                 $this->addArgument('this_', Type::OBJECT);
+                $this->context->importImmutableBinding($outerContext, 'this_', true);
             }
 
             $this->indentLevel++;

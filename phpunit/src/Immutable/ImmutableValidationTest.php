@@ -153,6 +153,22 @@ final class ImmutableValidationTest extends \BaseTest
         $this->compile('immutable-closure-this.php');
     }
 
+    /** @dataProvider generatorClosureImmutableBindings */
+    public function testGeneratorClosureKeepsImmutableBindings(string $fixture, string $binding): void
+    {
+        $this->expectException(TestError::class);
+        $this->expectExceptionMessage('Cannot modify immutable value `' . $binding . '`');
+        $this->compile($fixture);
+    }
+
+    public static function generatorClosureImmutableBindings(): iterable
+    {
+        yield 'capture' => ['immutable-generator-closure-capture.php', '$value'];
+        yield 'parameter' => ['immutable-generator-closure-parameter.php', '$value'];
+        yield 'receiver' => ['immutable-generator-closure-this.php', '$this'];
+        yield 'nested capture' => ['immutable-generator-nested-closure.php', '$values'];
+    }
+
     public function testPropertyHookMustDeclareImmutableContract(): void
     {
         $this->expectException(TestError::class);

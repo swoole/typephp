@@ -45,17 +45,16 @@ trait ImmutableSupportTrait
     protected function initializeImmutableFunctionContext(): void
     {
         if ($this->functionDef?->immutable && $this->methodDef !== null) {
-            $this->context->immutableVars['this_'] = true;
-            $this->context->immutableObjectVars['this_'] = true;
+            $this->context->markImmutableBinding('this_', true);
         }
         foreach ($this->functionDef?->argInfoList ?? [] as $argument) {
             if (!$argument->immutable) {
                 continue;
             }
-            $this->context->immutableVars[$argument->name] = true;
-            if ($argument->type === Type::OBJECT || $argument->type === Type::VAR) {
-                $this->context->immutableObjectVars[$argument->name] = true;
-            }
+            $this->context->markImmutableBinding(
+                $argument->name,
+                $argument->type === Type::OBJECT || $argument->type === Type::VAR,
+            );
         }
     }
 
@@ -154,8 +153,7 @@ trait ImmutableSupportTrait
                 . '` cannot be stored in mutable state',
             );
         }
-        $this->context->immutableVars[$name] = true;
-        $this->context->immutableObjectVars[$name] = true;
+        $this->context->markImmutableBinding($name, true);
         $class = $this->detectClassOfExpr($right);
         if ($class !== '') {
             $this->addObject($name, $class);

@@ -317,6 +317,23 @@ class FunctionContext
         $this->localVars = array_slice($this->localVars, 0, $originalCount, true);
     }
 
+    /** Object identity implies an immutable binding; weaker facts never erase it. */
+    public function markImmutableBinding(string $name, bool $mayBeObject = false): void
+    {
+        $this->immutableVars[$name] = true;
+        if ($mayBeObject) {
+            $this->immutableObjectVars[$name] = true;
+        }
+    }
+
+    /** Import only the selected binding; a mutable source cannot create a contract. */
+    public function importImmutableBinding(FunctionContext $source, string $name, bool $mayBeObject = false): void
+    {
+        if (isset($source->immutableVars[$name])) {
+            $this->markImmutableBinding($name, $mayBeObject || isset($source->immutableObjectVars[$name]));
+        }
+    }
+
     public function registerTypedRefLocal(string $name, string $target, string $type): void
     {
         if (!Type::isTypedRefType($type)) {

@@ -18,7 +18,7 @@ class FunctionContextTest extends TestCase
         $this->assertEmpty($ctx->localVars);
         $this->assertEmpty($ctx->staticVars);
         $this->assertEmpty($ctx->globalVars);
-        $this->assertEmpty($ctx->ceWrappers);
+        $this->assertEmpty($ctx->getClassWrappers());
         $this->assertEmpty($ctx->arguments);
         $this->assertFalse($ctx->statements->hasPending());
         $this->assertEmpty($ctx->objectProps);

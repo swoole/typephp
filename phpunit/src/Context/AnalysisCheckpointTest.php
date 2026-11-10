@@ -104,7 +104,7 @@ final class AnalysisCheckpointTest extends TestCase
             $context->objectProps['slot'] = [];
             $context->hoistedProps['object']['property'] = true;
             $context->registerStaticPropertySlot('Example::$value', 'analysis_slot()');
-            $context->classEntryPtrs['Example'] = 'analysis_ce';
+            $context->getOrCreateLocalClassEntry('Example', static fn() => 'analysis_ce');
             $context->needsCalledCe = true;
             $context->needsCalledClass = true;
             $context->enterScope();
@@ -126,7 +126,7 @@ final class AnalysisCheckpointTest extends TestCase
         self::assertSame([], $context->objectProps);
         self::assertSame([], $context->hoistedProps);
         self::assertSame([], $context->getStaticPropertySlots());
-        self::assertSame([], $context->classEntryPtrs);
+        self::assertSame([], $context->getLocalClassEntries());
         self::assertFalse($context->needsCalledCe);
         self::assertFalse($context->needsCalledClass);
         self::assertSame([], $context->scopeLayouts);

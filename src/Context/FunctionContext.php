@@ -107,12 +107,10 @@ class FunctionContext
     public array $staticVars = [];
     public array $globalVars = [];
 
-    /**
-     * @var array<string, string>
-     */
-    public array $ceWrappers = [];
+    /** @var array<string, string> Class name => Object local used as a static-call carrier. */
+    private array $ceWrappers = [];
     /** @var array<string, string> Process-stable class name => function-local zend_class_entry* variable. */
-    public array $classEntryPtrs = [];
+    private array $classEntryPtrs = [];
     /** Reusable php::CallableScope local, created only when this function performs scoped calls. */
     public ?string $callableScopeVar = null;
     /** This function reads the late-static-bound class entry. */
@@ -218,6 +216,51 @@ class FunctionContext
     public function addLocalVar(string $name, string $type): void
     {
         $this->localVars[$name] = $this->varTypeDegradations[$name] ?? $type;
+    }
+
+    /**
+     * Reserve a class-entry name lazily. The caller decides which classes can
+     * be hoisted; these pointers have separate declarations, not Object storage.
+     *
+     * @param callable(): string $allocateName
+     */
+    public function getOrCreateLocalClassEntry(string $className, callable $allocateName): string
+    {
+        if (isset($this->classEntryPtrs[$className])) {
+            return $this->classEntryPtrs[$className];
+        }
+        $entry = $allocateName();
+        $this->classEntryPtrs[$className] = $entry;
+        return $entry;
+    }
+
+    /** @return array<string, string> Entries in first-use declaration order. */
+    public function getLocalClassEntries(): array
+    {
+        return $this->classEntryPtrs;
+    }
+
+    /**
+     * Register the carrier's local storage with its class mapping. Initialization
+     * belongs in the function preamble so it dominates all static-call branches.
+     *
+     * @param callable(): string $allocateName
+     */
+    public function getOrCreateClassWrapper(string $className, callable $allocateName): string
+    {
+        if (isset($this->ceWrappers[$className])) {
+            return $this->ceWrappers[$className];
+        }
+        $object = $allocateName();
+        $this->addLocalVar($object, Type::OBJECT);
+        $this->ceWrappers[$className] = $object;
+        return $object;
+    }
+
+    /** @return array<string, string> Carriers in first-use initialization order. */
+    public function getClassWrappers(): array
+    {
+        return $this->ceWrappers;
     }
 
     /**

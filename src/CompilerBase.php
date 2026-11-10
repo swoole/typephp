@@ -1910,13 +1910,7 @@ abstract class CompilerBase implements PropertyAccessContext
         if (!$this->allowLocalClassEntryHoisting || !$this->isProcessStableClass($className)) {
             return $this->getClassEntryPtr($className);
         }
-        if (isset($this->context->classEntryPtrs[$className])) {
-            return $this->context->classEntryPtrs[$className];
-        }
-
-        $entry = $this->genTmpVarName();
-        $this->context->classEntryPtrs[$className] = $entry;
-        return $entry;
+        return $this->context->getOrCreateLocalClassEntry($className, fn() => $this->genTmpVarName());
     }
 
     protected function withoutLocalClassEntryHoisting(callable $callback): mixed
@@ -1944,12 +1938,7 @@ abstract class CompilerBase implements PropertyAccessContext
 
     protected function getCeWrapper(string $className): string
     {
-        if (isset($this->context->ceWrappers[$className])) {
-            return $this->context->ceWrappers[$className];
-        }
-        $object = $this->addTmpVar(Type::OBJECT);
-        $this->context->ceWrappers[$className] = $object;
-        return $object;
+        return $this->context->getOrCreateClassWrapper($className, fn() => $this->genTmpVarName());
     }
 
     protected function getFuncPtr(string $funcName): string
@@ -6210,7 +6199,7 @@ abstract class CompilerBase implements PropertyAccessContext
                 . $this->getNativeObjectDescriptorName($promotion['class']) . ');'
                 . PHP_EOL;
         }
-        foreach ($this->context->classEntryPtrs as $className => $entry) {
+        foreach ($this->context->getLocalClassEntries() as $className => $entry) {
             $code .= $this->getIndent() . 'zend_class_entry *' . $entry . ' = '
                 . $this->getClassEntryPtr($className) . ';' . PHP_EOL;
         }
@@ -6240,7 +6229,7 @@ abstract class CompilerBase implements PropertyAccessContext
         // but its initialization must dominate every control-flow branch that
         // may use it. Emitting it at the first call site is unsafe when that
         // site belongs to an if/switch/loop branch that is not executed.
-        foreach ($this->context->ceWrappers as $className => $object) {
+        foreach ($this->context->getClassWrappers() as $className => $object) {
             $code .= $this->getIndent() . 'Z_PTR_P(' . $object . '.ptr()) = '
                 . $this->getClassEntryPtr($className) . ';' . PHP_EOL;
         }

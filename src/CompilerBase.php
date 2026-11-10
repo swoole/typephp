@@ -2503,11 +2503,15 @@ abstract class CompilerBase implements PropertyAccessContext
                     $this->unsupportedSyntax($v);
                     break;
             }
-            $lines = array_merge($lines, $this->context->statements->takeBefore());
+            foreach ($this->context->statements->takeBefore() as $line) {
+                $lines[] = $line;
+            }
             if ($result) {
                 $lines[] = $result;
             }
-            $lines = array_merge($lines, $this->context->statements->takeAfter());
+            foreach ($this->context->statements->takeAfter() as $line) {
+                $lines[] = $line;
+            }
         }
 
         $code = '';

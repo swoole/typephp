@@ -38,4 +38,22 @@ class CompositeStaticTypeTest extends \BaseTest
     {
         $this->compile('composite-external-actual-unknown.php');
     }
+
+    public function testAbstractDeclarationAgainstUnrelatedInterfaceRemainsRuntimeUnknown(): void
+    {
+        $this->compile('composite-abstract-decl-interface-return.php');
+    }
+
+    public function testInterfaceDeclarationAgainstUnrelatedInterfaceRemainsRuntimeUnknown(): void
+    {
+        $this->compile('composite-interface-decl-interface-return.php');
+    }
+
+    public function testConcreteClassAgainstUnrelatedInterfaceIsStillRejected(): void
+    {
+        $this->exec(
+            'Cannot assign object to return value of type `?CompositeIteratorLike`',
+            'composite-concrete-class-interface-mismatch.php'
+        );
+    }
 }

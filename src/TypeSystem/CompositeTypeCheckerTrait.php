@@ -170,9 +170,18 @@ trait CompositeTypeCheckerTrait
             return self::COMPOSITE_TYPE_UNKNOWN;
         }
 
-        return $this->isObjectClassStaticallyAssignableTo($class, $expected)
-            ? self::COMPOSITE_TYPE_MATCH
-            : self::COMPOSITE_TYPE_MISMATCH;
+        if ($this->isObjectClassStaticallyAssignableTo($class, $expected)) {
+            return self::COMPOSITE_TYPE_MATCH;
+        }
+
+        // An abstract/interface declaration can only hold concrete subtypes, which
+        // may implement an interface the declaration itself does not. Defer to runtime.
+        if ($this->isInterface($expected)
+            && ($this->isAbstractClass($class) || $this->isInterface($class))) {
+            return self::COMPOSITE_TYPE_UNKNOWN;
+        }
+
+        return self::COMPOSITE_TYPE_MISMATCH;
     }
 
     protected function isNullExpr(NodeAbstract $expr): bool

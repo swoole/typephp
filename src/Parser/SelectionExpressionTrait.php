@@ -386,16 +386,15 @@ trait SelectionExpressionTrait
                 $code .= $this->getIndent() . $tmpVar . ' = ' . $rightExpr . ';' . PHP_EOL;
             }
             $code .= '}';
-            $this->addBeforeStmtLine($code);
         } else {
             // This path materializes a Variant result. Both operands must
             // have that C++ type: Variant and const String (empty_string)
             // otherwise admit conversions in both directions for ?:.
-            $this->addBeforeStmtLine($comment .
-                $tmpVar . ' = ' . $condExpr . ' ? php::Var(' . $leftExpr . ') : php::Var(' . $rightExpr . ');');
+            $code = $comment .
+                $tmpVar . ' = ' . $condExpr . ' ? php::Var(' . $leftExpr . ') : php::Var(' . $rightExpr . ');';
         }
         $expr->setAttribute(self::ATTR_LOWERED_TYPE, Type::VAR);
-        $this->context->materializedExpressions->offsetSet($expr, $tmpVar);
+        $this->context->registerMaterializedExpression($expr, $tmpVar, $code);
 
         return $tmpVar;
     }

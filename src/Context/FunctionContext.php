@@ -154,7 +154,7 @@ class FunctionContext
      *
      * @var SplObjectStorage<Node, string>
      */
-    public SplObjectStorage $materializedExpressions;
+    private SplObjectStorage $materializedExpressions;
     public array $objectProps;
     /** @var array<string, array{name: string, accessorName: string, resolver: string}> */
     private array $staticPropRefs = [];
@@ -215,6 +215,24 @@ class FunctionContext
     public function addLocalVar(string $name, string $type): void
     {
         $this->localVars[$name] = $this->varTypeDegradations[$name] ?? $type;
+    }
+
+    /** Look up only this AST object's result in the current emission scope. */
+    public function getMaterializedExpression(Node $expression): ?string
+    {
+        return $this->materializedExpressions->offsetExists($expression)
+            ? $this->materializedExpressions->offsetGet($expression)
+            : null;
+    }
+
+    /** Publish the assignment and cached result together, after storage exists. */
+    public function registerMaterializedExpression(Node $expression, string $temporary, string $assignment): void
+    {
+        if (!isset($this->localVars[$temporary]) || $assignment === '') {
+            throw new \LogicException('Materialized expressions require local storage and an assignment');
+        }
+        $this->statements->addBefore($assignment);
+        $this->materializedExpressions->offsetSet($expression, $temporary);
     }
 
     /** @param callable(): string $allocateName */

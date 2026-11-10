@@ -54,7 +54,7 @@ final class InitializerPlanCaptureTest extends BaseTest
         $this->assertCompletePlan($second);
         self::assertNotSame($first->expr, $second->expr);
         self::assertSame(['outer' => Type::INT], $this->context->localVars);
-        self::assertCount(0, $this->context->materializedExpressions);
+        self::assertNull($this->context->getMaterializedExpression($expression));
         self::assertFalse($this->context->statements->hasPending());
     }
 
@@ -64,13 +64,12 @@ final class InitializerPlanCaptureTest extends BaseTest
         $outerValue = $this->compiler->parseExpr($expression);
         $locals = $this->context->localVars;
         $before = $this->context->statements->peekBefore();
-        $cache = $this->context->materializedExpressions;
         $plan = $this->plan($expression);
 
         $this->assertCompletePlan($plan);
         self::assertNotSame($outerValue, $plan->expr);
         self::assertSame($locals, $this->context->localVars);
-        self::assertSame($cache, $this->context->materializedExpressions);
+        self::assertSame($outerValue, $this->context->getMaterializedExpression($expression));
         self::assertSame($before, $this->context->statements->peekBefore());
         self::assertSame($outerValue, $this->compiler->parseExpr($expression));
         self::assertSame($before, $this->context->statements->peekBefore());
@@ -83,7 +82,6 @@ final class InitializerPlanCaptureTest extends BaseTest
         $outerValue = $this->compiler->parseExpr($left);
         $locals = $this->context->localVars;
         $before = $this->context->statements->peekBefore();
-        $cache = $this->context->materializedExpressions;
         $counter = $this->context->tmpVarIndex;
         $this->context->statements->addAfter('outer_cleanup();');
         try {
@@ -95,8 +93,7 @@ final class InitializerPlanCaptureTest extends BaseTest
 
         self::assertSame($locals, $this->context->localVars);
         self::assertGreaterThan($counter, $this->context->tmpVarIndex);
-        self::assertSame($cache, $this->context->materializedExpressions);
-        self::assertSame($outerValue, $cache[$left]);
+        self::assertSame($outerValue, $this->context->getMaterializedExpression($left));
         self::assertSame($before, $this->context->statements->peekBefore());
         $this->assertCompletePlan($this->plan($left));
         self::assertSame($locals, $this->context->localVars);

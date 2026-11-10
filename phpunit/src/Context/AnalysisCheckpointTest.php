@@ -100,7 +100,8 @@ final class AnalysisCheckpointTest extends TestCase
             $context->nativeStackPromotions['temporary'] = [];
             $context->statements->addBefore('analysis_prepare();');
             $context->statements->addAfter('analysis_cleanup();');
-            $context->materializedExpressions[new Expr\Variable('root')] = 'analysis_value';
+            $context->addLocalVar('analysis_value', Type::VAR);
+            $context->registerMaterializedExpression($assignment, 'analysis_value', 'analysis_value = read();');
             $context->objectProps['slot'] = [];
             $context->hoistedProps['object']['property'] = true;
             $context->registerStaticPropertySlot('Example::$value', 'analysis_slot()');
@@ -114,7 +115,7 @@ final class AnalysisCheckpointTest extends TestCase
         self::assertSame(['root' => Type::INT], $context->localVars);
         self::assertSame($buffer, $context->statements);
         self::assertFalse($buffer->hasPending());
-        self::assertCount(0, $context->materializedExpressions);
+        self::assertNull($context->getMaterializedExpression($assignment));
         self::assertSame([], $context->localVarInitializers);
         self::assertNull($context->getLocalClosureCandidate($assignment));
         self::assertFalse($context->isNativeLocalClosure('candidate'));
@@ -206,7 +207,7 @@ final class AnalysisCheckpointTest extends TestCase
         self::assertSame([], $context->localVars);
         self::assertSame(0, $context->tmpVarIndex);
         self::assertFalse($context->statements->hasPending());
-        self::assertCount(0, $context->materializedExpressions);
+        self::assertNull($context->getMaterializedExpression($expression));
         $compiler->parseExpr($expression);
         self::assertNotEmpty($context->statements->peekBefore());
     }

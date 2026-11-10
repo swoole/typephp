@@ -1832,7 +1832,7 @@ trait AssignOpTrait
                     $this->fatalError($expr, 'Typed array aliases require a new top-level local');
                 }
                 $this->addTypedRefLocal($left, $right, Type::ARRAY_REF);
-                $this->context->typedArrays[$left] = $definition;
+                $this->context->registerTypedArrayContract($left, $definition);
                 return $expr->getAttribute(self::ATTR_STATEMENT_EXPRESSION, false) ? '' : $left;
             }
             if ($this->getTypedArrayDefinition($expr->var) !== null) {

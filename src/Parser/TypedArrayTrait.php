@@ -142,7 +142,7 @@ trait TypedArrayTrait
             return $this->parseTypedArrayFactoryDefinition(strtolower($expr->name->name), $expr);
         }
         if ($this->isVarExpr($expr)) {
-            return $this->context->typedArrays[$this->parseIdentifier($expr)] ?? null;
+            return $this->context->getTypedArrayContract($this->parseIdentifier($expr));
         }
         return null;
     }
@@ -227,7 +227,7 @@ trait TypedArrayTrait
         $definition = $factory
             ? $this->parseTypedArrayFactoryDefinition(strtolower($right->name->name), $right)
             : $this->getTypedArrayDefinition($right);
-        $existing = $this->context->typedArrays[$name] ?? null;
+        $existing = $this->context->getTypedArrayContract($name);
         if ($definition === null && $existing === null) {
             return null;
         }
@@ -251,7 +251,7 @@ trait TypedArrayTrait
                 $this->fatalError($left, 'Typed array propagation requires a new variable');
             }
             $this->addLocalVar($name, Type::ARRAY);
-            $this->context->typedArrays[$name] = $definition;
+            $this->context->registerTypedArrayContract($name, $definition);
         }
         if ($factory) {
             $initializer = $this->getStdValueInitializer($right);

@@ -40,7 +40,7 @@ trait CompilationStateTrait
         foreach ($analysis['captures'] as $sourceName => $_) {
             $name = $this->escapeVarName($sourceName);
             if (isset($this->context->arguments[$name])) {
-                if (isset($this->context->typedArrays[$name])) {
+                if ($this->context->getTypedArrayContract($name) !== null) {
                     $this->fatalError(new Variable($sourceName), 'Typed arrays cannot be captured by reference');
                 }
                 if ($this->isStdContainerParameter($name)) {

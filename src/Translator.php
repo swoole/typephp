@@ -6976,7 +6976,7 @@ CODE;
                 : ($this->getNativeObjectArgumentType($argInfo) ?? $argInfo->type);
             $this->addArgument($argInfo->name, $argumentType);
             if ($argInfo->typedArray !== null) {
-                $this->context->typedArrays[$argInfo->name] = $argInfo->typedArray;
+                $this->context->registerTypedArrayContract($argInfo->name, $argInfo->typedArray);
             }
             if (!$argInfo->variadic and $argInfo->declaredClass) {
                 if ($argInfo->byRef && $argInfo->type === Type::REF) {

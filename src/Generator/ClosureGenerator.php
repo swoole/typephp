@@ -176,9 +176,12 @@ trait ClosureGenerator
             }
 
             foreach ($capturePlan['bindings'] as $binding) {
+                if ($binding['typedArray'] !== null && isset($this->context->varTypeDegradations[$binding['name']])) {
+                    $this->fatalError($expr, 'Typed arrays cannot be captured by reference');
+                }
                 $this->addArgument($binding['name'], $binding['type']);
                 if ($binding['typedArray'] !== null) {
-                    $this->context->typedArrays[$binding['name']] = $binding['typedArray'];
+                    $this->context->registerTypedArrayContract($binding['name'], $binding['typedArray']);
                 }
                 if ($binding['class'] !== '') {
                     $this->addObject($binding['name'], $binding['class']);
@@ -262,7 +265,7 @@ trait ClosureGenerator
                 'class' => $valueType === Type::OBJECT ? $this->getDeclaredObjectType($name) : '',
                 'immutable' => isset($this->context->immutableVars[$name]),
                 'immutableObject' => isset($this->context->immutableObjectVars[$name]),
-                'typedArray' => $this->context->typedArrays[$name] ?? null,
+                'typedArray' => $this->context->getTypedArrayContract($name),
             ];
         }
         return ['cpp' => $cpp, 'bindings' => $bindings];
@@ -536,13 +539,13 @@ trait ClosureGenerator
 
             foreach ($uses as $i => $useItem) {
                 $var = $this->parseIdentifier($useItem->var);
-                if (isset($oriContext->typedArrays[$var])) {
-                    if ($useItem->byRef) {
+                if ($oriContext->getTypedArrayContract($var) !== null) {
+                    if ($useItem->byRef || isset($this->context->varTypeDegradations[$var])) {
                         $this->fatalError($useItem, 'Typed arrays cannot be captured by reference');
                     }
                     $code .= 'php::Array ' . $var . ' = php::toArray(vars_.get(' . $i . '));' . PHP_EOL;
                     $this->addArgument($var, Type::ARRAY);
-                    $this->context->typedArrays[$var] = $oriContext->typedArrays[$var];
+                    $this->context->importTypedArrayContract($oriContext, $var);
                 } else {
                     $code .= 'auto ' . $var . ' = vars_.get(' . $i . ');' . PHP_EOL;
                     $this->addArgument($var, Type::VAR);
@@ -673,8 +676,17 @@ trait ClosureGenerator
             $this->prepareReferenceCaptureDegradations($body);
 
             foreach ($capturedNames as $i => $capturedName) {
-                $code .= $this->getIndent() . Type::VAR . ' ' . $capturedName . ' = vars_.get(' . $i . ');' . PHP_EOL;
-                $this->addArgument($capturedName, Type::VAR);
+                if ($outerContext->getTypedArrayContract($capturedName) !== null) {
+                    if (isset($this->context->varTypeDegradations[$capturedName])) {
+                        $this->fatalError($expr, 'Typed arrays cannot be captured by reference');
+                    }
+                    $code .= $this->getIndent() . Type::ARRAY . ' ' . $capturedName . ' = php::toArray(vars_.get(' . $i . '));' . PHP_EOL;
+                    $this->addArgument($capturedName, Type::ARRAY);
+                    $this->context->importTypedArrayContract($outerContext, $capturedName);
+                } else {
+                    $code .= $this->getIndent() . Type::VAR . ' ' . $capturedName . ' = vars_.get(' . $i . ');' . PHP_EOL;
+                    $this->addArgument($capturedName, Type::VAR);
+                }
                 $this->context->importImmutableBinding($outerContext, $capturedName);
             }
             if ($this->methodDef) {

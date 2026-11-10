@@ -79,7 +79,7 @@ class FunctionContext
      */
     public array $stdContainers = [];
     /** @var array<string, array{kind: string, keyType: string, type: string, class: ?string}> */
-    public array $typedArrays = [];
+    private array $typedArrays = [];
     public array $localVars = [];
     /** @var array<string, string> Local variable => forced fallback storage type. */
     public array $varTypeDegradations = [];
@@ -219,6 +219,39 @@ class FunctionContext
     public function addLocalVar(string $name, string $type): void
     {
         $this->localVars[$name] = $this->varTypeDegradations[$name] ?? $type;
+    }
+
+    public function getTypedArrayContract(string $name): ?array
+    {
+        return $this->typedArrays[$name] ?? null;
+    }
+
+    /** Attach a checked contract after the caller has registered fixed array storage. */
+    public function registerTypedArrayContract(string $name, array $definition): void
+    {
+        if (!in_array($this->localVars[$name] ?? null, [Type::ARRAY, Type::ARRAY_REF], true)
+            || isset($this->varTypeDegradations[$name])
+            || isset($this->globalVars[$name])
+            || isset($this->staticVars[$name])) {
+            throw new \LogicException('Typed array contracts require fixed local array storage');
+        }
+        if (isset($this->typedArrays[$name]) && $this->typedArrays[$name] !== $definition) {
+            throw new \LogicException('Typed array bindings must retain an identical list/dict contract');
+        }
+        if (isset($this->typedRefRoots[$name])
+            && $this->getTypedArrayContract($this->getTypedRefRoot($name)) !== $definition) {
+            throw new \LogicException('Typed array aliases must retain their root contract');
+        }
+        $this->typedArrays[$name] = $definition;
+    }
+
+    /** Import only the contract; destination storage and reference identity belong to its caller. */
+    public function importTypedArrayContract(FunctionContext $source, string $name): void
+    {
+        $definition = $source->getTypedArrayContract($name);
+        if ($definition !== null) {
+            $this->registerTypedArrayContract($name, $definition);
+        }
     }
 
     /** Analysis types are provisional; they do not change the storage plan. */

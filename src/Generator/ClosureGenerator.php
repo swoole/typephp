@@ -187,7 +187,7 @@ trait ClosureGenerator
             }
 
             $body = $this->genClosureBody($expr);
-            if ($this->context->needsUserCodeCallableScope) {
+            if ($this->context->needsUserCodeCallableScope()) {
                 $body = $this->genUserCodeCallableScopeGuard() . $body;
             }
             $code = $this->genScopeVarDecl() . $parameterChecks . $body;
@@ -555,7 +555,7 @@ trait ClosureGenerator
             $body = $isGenerator
                 ? $this->genGeneratorClosureFactoryBody($expr, $params, $uses)
                 : $this->genClosureBody($expr);
-            if ($this->context->needsUserCodeCallableScope) {
+            if ($this->context->needsUserCodeCallableScope()) {
                 $body = $this->genUserCodeCallableScopeGuard() . $body;
             }
             $code .= $this->genScopeVarDecl() . $body;
@@ -706,7 +706,7 @@ trait ClosureGenerator
                     $body .= $this->getIndent() . 'return php::null;' . PHP_EOL;
                 }
             }
-            if ($this->context->needsUserCodeCallableScope) {
+            if ($this->context->needsUserCodeCallableScope()) {
                 $body = $this->genUserCodeCallableScopeGuard() . $body;
             }
             $this->indentLevel--;

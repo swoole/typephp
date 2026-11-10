@@ -1875,16 +1875,13 @@ abstract class CompilerBase implements PropertyAccessContext
     /** Return the function-local late-static-bound class entry. */
     protected function getCalledCeExpr(): string
     {
-        $this->context->needsCalledCe = true;
-        return '_typephp_called_ce';
+        return $this->context->requireCalledCe();
     }
 
     /** Return the function-local late-static-bound class name. */
     protected function getCalledClassExpr(): string
     {
-        $this->context->needsCalledCe = true;
-        $this->context->needsCalledClass = true;
-        return '_typephp_called_class';
+        return $this->context->requireCalledClass();
     }
 
     protected function getClassEntryPtr(string $className): string
@@ -1930,10 +1927,7 @@ abstract class CompilerBase implements PropertyAccessContext
         if (!$this->classDef || !$this->methodDef) {
             return 'php::CallableScope(nullptr, nullptr, nullptr)';
         }
-        if ($this->context->callableScopeVar === null) {
-            $this->context->callableScopeVar = $this->genTmpVarName();
-        }
-        return $this->context->callableScopeVar;
+        return $this->context->getOrCreateCallableScope(fn() => $this->genTmpVarName());
     }
 
     protected function getCeWrapper(string $className): string
@@ -4379,14 +4373,13 @@ abstract class CompilerBase implements PropertyAccessContext
     /** Reserve one reusable Zend user-code frame for scoped dynamic callbacks. */
     protected function markUserCodeCallableScope(): void
     {
-        if ($this->methodDef) {
+        if ($this->classDef && $this->methodDef) {
             // This state belongs to the generated function body, not to its
             // MethodDef. A method and each nested Closure have independent
             // FunctionContext instances and therefore independent guards.
-            $this->context->needsUserCodeCallableScope = true;
             // Reserve the declaration before the generated function prologue
             // is emitted. The guard itself is inserted after parsing the body.
-            $this->getCallableScopeExpr();
+            $this->context->requireUserCodeCallableScope(fn() => $this->genTmpVarName());
         }
     }
 
@@ -6175,18 +6168,19 @@ abstract class CompilerBase implements PropertyAccessContext
         if ($this->context->hasMultiLevelContinue) {
             $code .= $this->getIndent() . 'int _cnt_flag = 0;' . PHP_EOL;
         }
-        if ($this->context->callableScopeVar !== null) {
+        $callableScopeVar = $this->context->getCallableScopeVariable();
+        if ($callableScopeVar !== null) {
             $code .= $this->getIndent() . 'php::CallableScope '
-                . $this->context->callableScopeVar . ' = php::getCallableScope('
+                . $callableScopeVar . ' = php::getCallableScope('
                 . $this->getMethodPtr($this->getFullClassName(), $this->methodDef->name)
                 . ', this_);' . PHP_EOL;
         }
-        if ($this->context->needsCalledCe) {
+        if ($this->context->needsCalledCe()) {
             $code .= $this->getIndent()
                 . 'zend_class_entry *const _typephp_called_ce = typephp_get_called_ce(this_);'
                 . PHP_EOL;
         }
-        if ($this->context->needsCalledClass) {
+        if ($this->context->needsCalledClass()) {
             $code .= $this->getIndent()
                 . 'const php::Str _typephp_called_class = typephp_get_called_class(_typephp_called_ce);'
                 . PHP_EOL;

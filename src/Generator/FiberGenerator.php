@@ -306,7 +306,7 @@ trait FiberGenerator
                 );
             }
             $body .= $this->getIndent() . 'return ' . self::VALUE_NULL . ';' . PHP_EOL;
-            if ($this->context->needsUserCodeCallableScope) {
+            if ($this->context->needsUserCodeCallableScope()) {
                 $body = $this->genUserCodeCallableScopeGuard() . $body;
             }
             $this->indentLevel--;

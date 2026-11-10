@@ -112,13 +112,13 @@ class FunctionContext
     /** @var array<string, string> Process-stable class name => function-local zend_class_entry* variable. */
     private array $classEntryPtrs = [];
     /** Reusable php::CallableScope local, created only when this function performs scoped calls. */
-    public ?string $callableScopeVar = null;
+    private ?string $callableScopeVar = null;
     /** This function reads the late-static-bound class entry. */
-    public bool $needsCalledCe = false;
+    private bool $needsCalledCe = false;
     /** This function reads the late-static-bound class name. */
-    public bool $needsCalledClass = false;
+    private bool $needsCalledClass = false;
     /** This generated body needs a temporary lexical scope on the nearest user-code frame. */
-    public bool $needsUserCodeCallableScope = false;
+    private bool $needsUserCodeCallableScope = false;
     public int $tmpVarIndex = 0;
     public array $arguments = [];
     /** @var array<string, true> Bindings protected by #[Immutable]. */
@@ -203,7 +203,6 @@ class FunctionContext
         $this->needsCalledClass = false;
         $this->tmpVarIndex = 0;
         $this->scopeLayouts = [];
-        $this->callableScopeVar = null;
         $this->scopeLevel = 0;
         $this->inLoop = false;
         $this->inContinuableLoop = false;
@@ -216,6 +215,61 @@ class FunctionContext
     public function addLocalVar(string $name, string $type): void
     {
         $this->localVars[$name] = $this->varTypeDegradations[$name] ?? $type;
+    }
+
+    /** @param callable(): string $allocateName */
+    public function getOrCreateCallableScope(callable $allocateName): string
+    {
+        if ($this->callableScopeVar === null) {
+            $this->callableScopeVar = $allocateName();
+        }
+        return $this->callableScopeVar;
+    }
+
+    /** Inspect declarations without reserving or marking another scope. */
+    public function getCallableScopeVariable(): ?string
+    {
+        return $this->callableScopeVar;
+    }
+
+    /**
+     * Commit the guard requirement only after its declaration is reserved.
+     *
+     * @param callable(): string $allocateName
+     */
+    public function requireUserCodeCallableScope(callable $allocateName): void
+    {
+        $this->getOrCreateCallableScope($allocateName);
+        $this->needsUserCodeCallableScope = true;
+    }
+
+    public function needsUserCodeCallableScope(): bool
+    {
+        return $this->needsUserCodeCallableScope;
+    }
+
+    public function requireCalledCe(): string
+    {
+        $this->needsCalledCe = true;
+        return '_typephp_called_ce';
+    }
+
+    /** The called class name always depends on the called class entry. */
+    public function requireCalledClass(): string
+    {
+        $this->needsCalledCe = true;
+        $this->needsCalledClass = true;
+        return '_typephp_called_class';
+    }
+
+    public function needsCalledCe(): bool
+    {
+        return $this->needsCalledCe;
+    }
+
+    public function needsCalledClass(): bool
+    {
+        return $this->needsCalledClass;
     }
 
     /**

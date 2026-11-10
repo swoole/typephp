@@ -6098,7 +6098,7 @@ abstract class CompilerBase implements PropertyAccessContext
     {
         $code = '';
         foreach ($localVars as $name => $type) {
-            if (isset($this->context->nativeLocalClosures[$name])) {
+            if ($this->context->isNativeLocalClosure($name)) {
                 continue;
             }
             if (isset($this->context->arguments[$name])) {

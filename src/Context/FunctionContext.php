@@ -9,6 +9,7 @@
 namespace TypePhp\Context;
 
 use PhpParser\Node;
+use PhpParser\Node\Expr;
 use SplObjectStorage;
 use TypePhp\Analysis\SsaBuilder;
 use TypePhp\Type;
@@ -87,14 +88,14 @@ class FunctionContext
     public array $localVarInitializers = [];
     /**
      * Proven non-escaping local Closure candidates. These are declaration-site
-     * plans only; the generator moves a successfully lowered entry into
-     * nativeLocalClosures when it emits the concrete C++ lambda.
+     * plans only. Keep them after lowering so repeated parses of the same AST
+     * still select the local lambda path; emitted bindings are tracked below.
      *
      * @var array<string, array{assignment: \PhpParser\Node\Expr\Assign, closure: \PhpParser\Node\Expr\Closure|\PhpParser\Node\Expr\ArrowFunction, calls: int}>
      */
-    public array $localClosureCandidates = [];
+    private array $localClosureCandidates = [];
     /** @var array<string, true> Local variables already emitted as concrete C++ lambdas. */
-    public array $nativeLocalClosures = [];
+    private array $nativeLocalClosures = [];
     /** @var array<string, string> typed-ref local => directly referenced local. */
     public array $typedRefBindings = [];
     /** @var array<string, string> typed-ref local => canonical fixed-storage root. */
@@ -217,6 +218,45 @@ class FunctionContext
     public function addLocalVar(string $name, string $type): void
     {
         $this->localVars[$name] = $this->varTypeDegradations[$name] ?? $type;
+    }
+
+    /**
+     * Install analysis plans before body lowering begins. Keys are PHP source
+     * names, whereas emitted bindings use the caller's escaped C++ names.
+     *
+     * @param array<string, array{assignment: Expr\Assign, closure: Expr\Closure|Expr\ArrowFunction, calls: int}> $candidates
+     */
+    public function setLocalClosureCandidates(array $candidates): void
+    {
+        if ($this->nativeLocalClosures !== []) {
+            throw new \LogicException('Cannot replace local Closure plans after lambda emission');
+        }
+        $this->localClosureCandidates = $candidates;
+    }
+
+    /** @return array{assignment: Expr\Assign, closure: Expr\Closure|Expr\ArrowFunction, calls: int}|null */
+    public function getLocalClosureCandidate(Expr\Assign $assignment): ?array
+    {
+        if (!$assignment->var instanceof Expr\Variable || !is_string($assignment->var->name)) {
+            return null;
+        }
+        $candidate = $this->localClosureCandidates[$assignment->var->name] ?? null;
+        return $candidate !== null && $candidate['assignment'] === $assignment ? $candidate : null;
+    }
+
+    /** Commit storage only after the matched candidate has lowered successfully. */
+    public function registerNativeLocalClosure(string $name, Expr\Assign $assignment): void
+    {
+        if ($this->getLocalClosureCandidate($assignment) === null) {
+            throw new \LogicException('Native local Closures require a matching assignment plan');
+        }
+        $this->addLocalVar($name, Type::OBJECT);
+        $this->nativeLocalClosures[$name] = true;
+    }
+
+    public function isNativeLocalClosure(string $name): bool
+    {
+        return isset($this->nativeLocalClosures[$name]);
     }
 
     /**

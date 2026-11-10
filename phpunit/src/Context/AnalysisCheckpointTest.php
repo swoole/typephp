@@ -85,13 +85,18 @@ final class AnalysisCheckpointTest extends TestCase
         $context = new FunctionContext();
         $context->addLocalVar('root', Type::INT);
         $buffer = $context->statements;
-        $this->analyze($context, function () use ($context): void {
+        $assignment = new Expr\Assign(new Expr\Variable('candidate'), new Expr\Closure());
+        $this->analyze($context, function () use ($context, $assignment): void {
             $context->registerTypedRefLocal('alias', 'root', Type::INT_REF);
             $context->withTypedRefBridgeScope(function () use ($context): void {
                 $context->registerTypedRefBridge('alias', 'analysis_wrapper');
             });
-            $context->localClosureCandidates['candidate'] = [];
-            $context->nativeLocalClosures['lowered'] = true;
+            $context->setLocalClosureCandidates(['candidate' => [
+                'assignment' => $assignment,
+                'closure' => $assignment->expr,
+                'calls' => 1,
+            ]]);
+            $context->registerNativeLocalClosure('candidate', $assignment);
             $context->nativeStackPromotions['temporary'] = [];
             $context->statements->addBefore('analysis_prepare();');
             $context->statements->addAfter('analysis_cleanup();');
@@ -112,8 +117,8 @@ final class AnalysisCheckpointTest extends TestCase
         self::assertFalse($buffer->hasPending());
         self::assertCount(0, $context->materializedExpressions);
         self::assertSame([], $context->localVarInitializers);
-        self::assertSame([], $context->localClosureCandidates);
-        self::assertSame([], $context->nativeLocalClosures);
+        self::assertNull($context->getLocalClosureCandidate($assignment));
+        self::assertFalse($context->isNativeLocalClosure('candidate'));
         self::assertSame([], $context->typedRefBindings);
         self::assertSame([], $context->typedRefRoots);
         self::assertSame([], $context->typedRefAliases);

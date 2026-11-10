@@ -95,16 +95,11 @@ trait ClosureGenerator
      */
     protected function parseNativeLocalClosureAssignment(Expr\Assign $assign): ?string
     {
-        if (!$this->isVarExpr($assign->var) || !is_string($assign->var->name)) {
+        $candidate = $this->context->getLocalClosureCandidate($assign);
+        if ($candidate === null) {
             return null;
         }
-
-        $sourceName = $assign->var->name;
         $name = $this->parseIdentifier($assign->var);
-        $candidate = $this->context->localClosureCandidates[$sourceName] ?? null;
-        if ($candidate === null || $candidate['assignment'] !== $assign) {
-            return null;
-        }
 
         $expr = $candidate['closure'];
         $uses = $expr instanceof Expr\ArrowFunction
@@ -202,8 +197,7 @@ trait ClosureGenerator
             return $code . $this->getIndent(0) . '}';
         });
 
-        $this->addLocalVar($name, Type::OBJECT);
-        $this->context->nativeLocalClosures[$name] = true;
+        $this->context->registerNativeLocalClosure($name, $assign);
         return $code;
     }
 
@@ -295,7 +289,7 @@ trait ClosureGenerator
 
     protected function parseNativeLocalClosureCall(Expr\FuncCall $expr, string $name): ?string
     {
-        if (!isset($this->context->nativeLocalClosures[$name])) {
+        if (!$this->context->isNativeLocalClosure($name)) {
             return null;
         }
 

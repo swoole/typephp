@@ -62,7 +62,7 @@ trait DeclarationSymbolTrait
             codegenFinalized: $this->compilerPhase === self::PHASE_CONVERT,
         );
         $this->constants[$this->escapeConstVar($name)] = $constInfo;
-        $this->symbolDeclInFile[$this->getConstantDependencySymbol($name)] = $this->file;
+        $this->registerSymbolDeclaration($this->file, $this->getConstantDependencySymbol($name));
     }
 
     protected function hasConstant(string $name): bool

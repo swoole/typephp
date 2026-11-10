@@ -1083,10 +1083,10 @@ class Translator extends Preprocessor
 
         foreach ($includeGlobals ? $this->globalVars : [] as $name => $type) {
             if ($sourceFile !== null
-                && ($this->globalVarDeclInFile[$name] ?? null) !== $sourceFile) {
+                && $this->getGlobalDeclarationFile($name) !== $sourceFile) {
                 continue;
             }
-            if ($commonOnly && isset($this->globalVarDeclInFile[$name])) {
+            if ($commonOnly && $this->getGlobalDeclarationFile($name) !== null) {
                 continue;
             }
             $cppType = isset($this->nativeGlobalObjects[$name])
@@ -3392,8 +3392,8 @@ CODE;
         if ($includeOwn && isset($this->declarationHeaderFiles[$file])) {
             $headers[] = $this->declarationHeaderFiles[$file];
         }
-        foreach ($this->symbolCallInFile[$file] ?? [] as $symbol) {
-            $dependencyFile = $this->symbolDeclInFile[$symbol] ?? null;
+        foreach ($this->getFileSymbolUses($file) as $symbol) {
+            $dependencyFile = $this->getSymbolDeclarationFile($symbol);
             if ($dependencyFile === null || $dependencyFile === $file) {
                 continue;
             }

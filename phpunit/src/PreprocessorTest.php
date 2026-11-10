@@ -280,15 +280,14 @@ class PreprocessorTest extends TestCase
 
     public function testSortFilesAllowsCircularFunctionDependencies(): void
     {
-        $this->setProperty('symbolDeclInFile', [
+        $this->invokeMethod('restoreSymbolDependencyState', ['symbolDeclInFile' => [
             'function:a' => '/a.php',
             'function:b' => '/b.php',
-        ]);
-        $this->setProperty('symbolCallInFile', [
+        ], 'symbolCallInFile' => [
             '/a.php' => ['function:b'],
             '/b.php' => ['function:a'],
             '/consumer.php' => ['function:a'],
-        ]);
+        ], 'globalVarDeclInFile' => []]);
 
         $files = $this->invokeMethod('getSortedFiles', ['/consumer.php', '/a.php', '/b.php']);
 
@@ -303,6 +302,7 @@ class PreprocessorTest extends TestCase
 namespace DependencyConsumer;
 use function Vendor\provider as imported;
 function invoke(): void {
+    bridge();
     bridge();
     \explicit();
     namespace\relative();
@@ -322,7 +322,7 @@ PHP);
             'function:dependencyconsumer\\other\\qualified',
             'function:vendor\\provider',
             'function:dependencyconsumer\\strlen',
-        ], $this->getProperty('symbolCallInFile')[$file]);
+        ], $this->invokeMethod('getFileSymbolUses', $file));
     }
 
     public function testPrepareFileParsesInterfaceMembersAndTypeChecks(): void

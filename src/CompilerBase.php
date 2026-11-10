@@ -142,6 +142,7 @@ abstract class CompilerBase implements PropertyAccessContext
     use ImmutableSupportTrait;
     use \TypePhp\Parser\TypedArrayTrait;
     use NativeBuildConfigurationTrait;
+    use \TypePhp\Build\SymbolDependencyTrait;
     use PythonModuleTrait;
     use DeclarationSymbolTrait;
     use NameResolutionTrait;
@@ -507,16 +508,6 @@ abstract class CompilerBase implements PropertyAccessContext
     protected array $internalFunctions = [];
     protected array $internalConstants = [];
 
-    /** @var array<string, string> Canonical symbol key => declaring PHP file. */
-    protected array $symbolDeclInFile = [];
-
-    /**
-     * Stores every function / class-method call. Key is the file name; value is
-     * a list of the functions / class methods called within that file.
-     * @var array<string, array<string>>
-     */
-    protected array $symbolCallInFile = [];
-
     /** @var array<string, string> Canonical PHP file => generated declaration header. */
     protected array $declarationHeaderFiles = [];
 
@@ -675,9 +666,6 @@ abstract class CompilerBase implements PropertyAccessContext
 
     /** @var array<string, array<string, string>> PHP source => global slot => inferred type. */
     protected array $globalVarsInFile = [];
-
-    /** @var array<string, string> Global/static storage name => owning PHP file. */
-    protected array $globalVarDeclInFile = [];
 
     /** @var array<string, string> Global/static Native pointer slot => class name. */
     protected array $nativeGlobalObjects = [];
@@ -2115,7 +2103,7 @@ abstract class CompilerBase implements PropertyAccessContext
             $seen[$interfaceNameLower] = true;
             $list[] = $interfaceName;
             if (!$this->isInternalInterface($interfaceName)) {
-                $this->symbolCallInFile[$this->file][] = $this->getClassDependencySymbol($interfaceNameLower);
+                $this->recordSymbolUse($this->file, $this->getClassDependencySymbol($interfaceNameLower));
             }
         }
         return $list;

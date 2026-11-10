@@ -266,14 +266,12 @@ abstract class Preprocessor extends CompilerBase
         $fileDeps = [];
 
         // Build the dependency graph
-        foreach ($this->symbolCallInFile as $file => $symbols) {
+        foreach ($this->getSymbolUsesByFile() as $file => $symbols) {
             $deps = [];
             foreach ($symbols as $symbol) {
-                if (isset($this->symbolDeclInFile[$symbol])) {
-                    $depFile = $this->symbolDeclInFile[$symbol];
-                    if ($depFile !== $file) {
-                        $deps[] = $depFile;
-                    }
+                $depFile = $this->getSymbolDeclarationFile($symbol);
+                if ($depFile !== null && $depFile !== $file) {
+                    $deps[] = $depFile;
                 }
             }
             $deps = array_unique($deps);
@@ -455,7 +453,7 @@ abstract class Preprocessor extends CompilerBase
         $previousPhase = $this->enterCompilerPhase(self::PHASE_PREPARE);
         try {
             $phpCode = $this->loadFile($file);
-            $this->symbolCallInFile[$this->file] = [];
+            $this->clearFileSymbolUses($this->file);
             $this->resetFile();
             $this->resetFunction();
             $this->resetMethod();
@@ -1168,7 +1166,6 @@ abstract class Preprocessor extends CompilerBase
                 $this->recordSymbolUsingNode($node);
             }
         }
-        $this->deduplicateCurrentFileSymbolDependencies();
     }
 
     protected function recordSymbolUsingNode(Node $node): void
@@ -1180,7 +1177,7 @@ abstract class Preprocessor extends CompilerBase
                 ?? $node->name;
             $funcName = strtolower($resolvedName->toString());
             if (!$this->isInternalFunction($funcName)) {
-                $this->symbolCallInFile[$this->file][] = $this->getFunctionDependencySymbol($funcName);
+                $this->recordSymbolUse($this->file, $this->getFunctionDependencySymbol($funcName));
             }
             // An unqualified call in a namespace also searches the global
             // function table. Providers can be prepared later, so retain both
@@ -1194,7 +1191,7 @@ abstract class Preprocessor extends CompilerBase
             ) {
                 $globalName = strtolower($node->name->toString());
                 if (!$this->isInternalFunction($globalName)) {
-                    $this->symbolCallInFile[$this->file][] = $this->getFunctionDependencySymbol($globalName);
+                    $this->recordSymbolUse($this->file, $this->getFunctionDependencySymbol($globalName));
                 }
             }
         } elseif ($node instanceof Node\Expr\ConstFetch) {
@@ -1203,7 +1200,7 @@ abstract class Preprocessor extends CompilerBase
                 ?? $node->name;
             $constantName = $resolvedName->toString();
             if (!in_array(strtolower($constantName), ['true', 'false', 'null'], true)) {
-                $this->symbolCallInFile[$this->file][] = $this->getConstantDependencySymbol($constantName);
+                $this->recordSymbolUse($this->file, $this->getConstantDependencySymbol($constantName));
             }
         } elseif (($node instanceof Node\Expr\StaticCall
                 || $node instanceof Node\Expr\StaticPropertyFetch
@@ -1216,7 +1213,7 @@ abstract class Preprocessor extends CompilerBase
                 ?? $node->class;
             $className = $resolvedClass->toString();
             if ($className !== 'self' && $className !== 'static') {
-                $this->symbolCallInFile[$this->file][] = $this->getClassDependencySymbol($className);
+                $this->recordSymbolUse($this->file, $this->getClassDependencySymbol($className));
             }
         } elseif ($node instanceof Node\Expr\Instanceof_ && $node->class instanceof Node\Name) {
             $this->recordClassTypeDependency($node->class);
@@ -1240,16 +1237,11 @@ abstract class Preprocessor extends CompilerBase
                 if (!$variable instanceof Node\Expr\Variable || !is_string($variable->name)) {
                     continue;
                 }
-                $this->symbolCallInFile[$this->file][] = $this->getGlobalDependencySymbol(
+                $this->recordSymbolUse($this->file, $this->getGlobalDependencySymbol(
                     $this->escapeVarName($variable->name),
-                );
+                ));
             }
         }
-    }
-
-    private function deduplicateCurrentFileSymbolDependencies(): void
-    {
-        $this->symbolCallInFile[$this->file] = array_values(array_unique($this->symbolCallInFile[$this->file]));
     }
 
     protected function recordClassTypeDependency(?NodeAbstract $type): void
@@ -1261,9 +1253,9 @@ abstract class Preprocessor extends CompilerBase
             $resolvedName = $type->getAttribute('resolvedName')
                 ?? $type->getAttribute('namespacedName')
                 ?? $type;
-            $this->symbolCallInFile[$this->file][] = $this->getClassDependencySymbol(
+            $this->recordSymbolUse($this->file, $this->getClassDependencySymbol(
                 $resolvedName->toString(),
-            );
+            ));
             return;
         }
         if ($type instanceof Node\NullableType) {
@@ -1851,11 +1843,11 @@ abstract class Preprocessor extends CompilerBase
             ? $this->classDef->getNamespacedName(false) . '::' . $functionDef->name
             : $functionDef->getNamespacedName();
         $this->addFunction($name, $functionDef);
-        $this->symbolDeclInFile[$this->getNativeFunctionDependencySymbol($name)] = $this->file;
+        $this->registerSymbolDeclaration($this->file, $this->getNativeFunctionDependencySymbol($name));
         if (!$functionDef->method) {
-            $this->symbolDeclInFile[$this->getFunctionDependencySymbol(
+            $this->registerSymbolDeclaration($this->file, $this->getFunctionDependencySymbol(
                 $functionDef->getNamespacedName(),
-            )] = $this->file;
+            ));
         }
         if ($this->methodDef) {
             $this->methodDef->functionDef = $functionDef;
@@ -1880,7 +1872,7 @@ abstract class Preprocessor extends CompilerBase
             $flags = Modifiers::PUBLIC;
         }
         $classDependencySymbol = $this->getClassDependencySymbol($fullClassNameLower);
-        if (isset($this->symbolDeclInFile[$classDependencySymbol])) {
+        if ($this->getSymbolDeclarationFile($classDependencySymbol) !== null) {
             $this->fatalError($class, "Duplicate class `{$fullClassName}`");
         }
         // Dynamic properties are forbidden on readonly classes and enums.
@@ -1937,7 +1929,7 @@ abstract class Preprocessor extends CompilerBase
             $this->symbols->setParent($fullClassNameLower, $parentClassLower);
             $this->classSubClasses[$parentClassLower][] = $fullClassNameLower;
             if (!$this->isInternalClass($parentClassLower)) {
-                $this->symbolCallInFile[$this->file][] = $this->getClassDependencySymbol($parentClassLower);
+                $this->recordSymbolUse($this->file, $this->getClassDependencySymbol($parentClassLower));
             }
             $this->classDef->extends = $this->parentClass;
             // Whether it inherits from an internal class
@@ -1970,7 +1962,7 @@ abstract class Preprocessor extends CompilerBase
             $this->classDef->traitUseFunctions = $this->useFunctions;
             $this->classDef->traitUseConstants = $this->useConstants;
         }
-        $this->symbolDeclInFile[$classDependencySymbol] = $this->file;
+        $this->registerSymbolDeclaration($this->file, $classDependencySymbol);
 
         if ($class instanceof Node\Stmt\Class_) {
             $generatedPrinter = null;
@@ -3289,16 +3281,16 @@ abstract class Preprocessor extends CompilerBase
                 $this->interfaceDef->extends = $parentName;
             }
             if (!$this->isInternalInterface($parentName)) {
-                $this->symbolCallInFile[$this->file][] = $this->getClassDependencySymbol($parentName);
+                $this->recordSymbolUse($this->file, $this->getClassDependencySymbol($parentName));
             }
         }
 
         $interfaceDependencySymbol = $this->getClassDependencySymbol($interfaceNameLower);
-        if (isset($this->symbolDeclInFile[$interfaceDependencySymbol])) {
+        if ($this->getSymbolDeclarationFile($interfaceDependencySymbol) !== null) {
             $this->fatalError($v, "Duplicate interface `{$interfaceName}`");
         }
 
-        $this->symbolDeclInFile[$interfaceDependencySymbol] = $this->file;
+        $this->registerSymbolDeclaration($this->file, $interfaceDependencySymbol);
         $this->symbols->putInterface($this->escapeClass($interfaceName), $this->interfaceDef);
         $this->interfacesDefineInFile[$interfaceName] = $this->interfaceDef;
 
@@ -3566,7 +3558,7 @@ abstract class Preprocessor extends CompilerBase
             $traitName = $this->getNamespacedClassName($this->parseIdentifier($trait));
             $this->classDef->usedTraits[] = $traitName;
             if (!$this->isInternalClass($traitName)) {
-                $this->symbolCallInFile[$this->file][] = $this->getClassDependencySymbol($traitName);
+                $this->recordSymbolUse($this->file, $this->getClassDependencySymbol($traitName));
             }
         }
         foreach ($aliases as $fullMethodName => $aliasList) {

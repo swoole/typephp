@@ -184,12 +184,7 @@ trait CompilationStateTrait
             return;
         }
         $this->globalVarsInFile[$this->file][$name] = $this->globalVars[$name] ?? Type::VAR;
-        $symbol = $this->getGlobalDependencySymbol($name);
-        if (!isset($this->globalVarDeclInFile[$name])) {
-            $this->globalVarDeclInFile[$name] = $this->file;
-            $this->symbolDeclInFile[$symbol] = $this->file;
-        }
-        $this->symbolCallInFile[$this->file][] = $symbol;
+        $this->recordGlobalDependencyUsage($this->file, $name);
     }
 
     protected function promoteGlobalOrStaticToNativeObject(
@@ -343,8 +338,9 @@ trait CompilationStateTrait
         // The function declaration was detected during the preprocessing stage but is not yet defined,
         // meaning it is in the current file but appears in the wrong order. Skip it and handle it later.
         $symbol = $this->getNativeFunctionDependencySymbol($name);
-        if (isset($this->symbolDeclInFile[$symbol])
-            and $this->symbolDeclInFile[$symbol] === $this->file
+        $declaringFile = $this->getSymbolDeclarationFile($symbol);
+        if ($declaringFile !== null
+            and $declaringFile === $this->file
             and !$this->hasFunction($name)) {
             $this->redoAfterDeclare[$name] = true;
             throw new Skip();

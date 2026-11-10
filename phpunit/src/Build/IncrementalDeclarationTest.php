@@ -90,9 +90,8 @@ final class IncrementalDeclarationTest extends TestCase
             $extensionCode,
         );
 
-        $symbols = $this->property($compiler, 'symbolDeclInFile');
-        self::assertSame($this->provider, $symbols['function:incremental\\answer']);
-        self::assertSame($this->provider, $symbols['constant:Incremental\\LIMIT']);
+        self::assertSame($this->provider, $this->invoke($compiler, 'getSymbolDeclarationFile', 'function:incremental\\answer'));
+        self::assertSame($this->provider, $this->invoke($compiler, 'getSymbolDeclarationFile', 'constant:Incremental\\LIMIT'));
     }
 
     public function testGroupedDeclarationsPreserveHelpersAndFilesWithoutFunctions(): void

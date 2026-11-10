@@ -5,7 +5,7 @@ interface CompositeIteratorLike
     public function next(): void;
 }
 
-class CompositePlainBox
+final class CompositePlainBox
 {
     public function value(): int
     {

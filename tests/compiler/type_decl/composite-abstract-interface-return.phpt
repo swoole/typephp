@@ -1,5 +1,5 @@
 --TEST--
-Abstract and interface declarations keep nullable interface returns runtime-checked
+Abstract, interface and plain class declarations keep nullable interface returns runtime-checked
 --FILE--
 <?php
 
@@ -71,6 +71,31 @@ function composite_writable(CompositeReadable $value): ?CompositeWritable
     return null;
 }
 
+interface CompositeTickable
+{
+    public function tick(): int;
+}
+
+class CompositeBaseBox
+{
+}
+
+class CompositeTickBox extends CompositeBaseBox implements CompositeTickable
+{
+    public function tick(): int
+    {
+        return 42;
+    }
+}
+
+function composite_tickable(CompositeBaseBox $box): ?CompositeTickable
+{
+    if ($box instanceof CompositeTickable) {
+        return $box;
+    }
+    return null;
+}
+
 function main(): void
 {
     $scroll = composite_target(composite_state(true));
@@ -85,6 +110,13 @@ function main(): void
     if ($writable !== null) {
         echo $writable->label(), "\n";
     }
+
+    $tick = composite_tickable(new CompositeTickBox());
+    var_dump($tick !== null);
+    if ($tick !== null) {
+        echo $tick->tick(), "\n";
+    }
+    var_dump(composite_tickable(new CompositeBaseBox()));
 }
 ?>
 --EXPECT--
@@ -93,3 +125,6 @@ bool(true)
 NULL
 bool(true)
 writable
+bool(true)
+42
+NULL

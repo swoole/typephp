@@ -174,10 +174,11 @@ trait CompositeTypeCheckerTrait
             return self::COMPOSITE_TYPE_MATCH;
         }
 
-        // An abstract/interface declaration can only hold concrete subtypes, which
-        // may implement an interface the declaration itself does not. Defer to runtime.
-        if ($this->isInterface($expected)
-            && ($this->isAbstractClass($class) || $this->isInterface($class))) {
+        // Only a final class or a `new` expression pins the exact runtime type;
+        // an interface, abstract class or plain non-final declaration may still
+        // hold a subtype that implements/inherits the expected type, so keep the
+        // runtime check instead of proving a mismatch.
+        if (!$this->isFinalClass($class) && !$this->isKnownConcreteObjectExpr($value, $class)) {
             return self::COMPOSITE_TYPE_UNKNOWN;
         }
 

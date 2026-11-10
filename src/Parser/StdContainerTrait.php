@@ -76,7 +76,7 @@ trait StdContainerTrait
                 } else {
                     $this->parseStdOrderedMap('__std_parameter', $call);
                 }
-                $info = $this->context->stdContainers['__std_parameter'];
+                $info = $this->getStdContainerVarInfo('__std_parameter');
                 if ($this->isNativeObjectClass($info['class'] ?? '')) {
                     $this->fatalError($attribute, 'Std container parameters cannot hold Native objects across a Box boundary');
                 }
@@ -172,21 +172,9 @@ trait StdContainerTrait
             if ($argument->stdContainer === null) {
                 continue;
             }
-            $info = $this->addStdTypeId($argument->stdContainer);
+            $info = $argument->stdContainer;
             $info['parameter'] = true;
-            $type = match ($info['kind']) {
-                'array' => Type::STD_ARRAY,
-                'vector' => Type::STD_VECTOR,
-                'map' => Type::STD_MAP,
-                'ordered_map' => Type::STD_ORDERED_MAP,
-                default => throw new \LogicException('Unknown std container kind: ' . (string) $info['kind']),
-            };
-            if ($type === Type::STD_ARRAY) {
-                $this->context->stdArrays[$argument->name] = $info;
-            } else {
-                $this->context->stdContainers[$argument->name] = $info;
-            }
-            $this->addLocalVar($argument->name, $type);
+            $info = $this->registerStdStorage($argument->name, $info);
             $code .= 'if (UNEXPECTED(!' . $argument->name . '.isBox())) { php::throwStdContainerTypeMismatch(); }' . PHP_EOL;
             $code .= 'auto &' . $argument->name . '_ref = php::toStdContainer<' . $info['decl'] . '>('
                 . $argument->name . ', ' . $info['typeId'] . ');' . PHP_EOL;
@@ -196,8 +184,7 @@ trait StdContainerTrait
 
     protected function isStdContainerParameter(string $name): bool
     {
-        return !empty($this->context->stdContainers[$name]['parameter'])
-            || !empty($this->context->stdArrays[$name]['parameter']);
+        return !empty($this->context->getStdStorageInfo($name)['parameter']);
     }
 
     /**
@@ -280,7 +267,7 @@ trait StdContainerTrait
 
     protected function isStdContainerIterating(string $var): bool
     {
-        return !empty($this->context->stdContainers[$var]['iterationDepth']);
+        return $this->context->isStdContainerIterating($var);
     }
 
     protected function assertStdContainerStructureMutable(NodeAbstract $node, string $var): void
@@ -345,12 +332,17 @@ trait StdContainerTrait
         return $info;
     }
 
+    protected function registerStdStorage(string $var, array $info): array
+    {
+        $info = $this->addStdTypeId($info);
+        $this->context->registerStdStorage($var, $info);
+        return $info;
+    }
+
     protected function getStdContainerVarInfo(string $var): array
     {
-        if ($this->isStdArray($var)) {
-            return $this->context->stdArrays[$var];
-        }
-        return $this->context->stdContainers[$var];
+        return $this->context->getStdStorageInfo($var)
+            ?? throw new \LogicException('Missing std container storage: ' . $var);
     }
 
     protected function getStdContainerNativeObjectClass(string $var): string
@@ -447,7 +439,7 @@ trait StdContainerTrait
             $this->parseStdArrayDimFetch($expr);
         }
         $attr = $expr->getAttribute('stdArrayDimFetch');
-        return $this->getNestedStdArrayInfo($this->context->stdArrays[$attr['var']], $attr['accessLevel']);
+        return $this->getNestedStdArrayInfo($this->getStdContainerVarInfo($attr['var']), $attr['accessLevel']);
     }
 
     protected function isSameStdContainerInfo(array $leftInfo, array $rightInfo): bool
@@ -552,7 +544,7 @@ trait StdContainerTrait
             if ($this->isArrayDimFetch($tmp)) {
                 $tmp = $tmp->var;
             } elseif ($this->isVarExpr($tmp) and $this->isStdArray($this->parseVariable($tmp))) {
-                return $this->context->stdArrays[$this->parseVariable($tmp)];
+                return $this->getStdContainerVarInfo($this->parseVariable($tmp));
             } else {
                 return null;
             }
@@ -568,7 +560,7 @@ trait StdContainerTrait
             } elseif ($this->isVarExpr($tmp)) {
                 $var = $this->parseVariable($tmp);
                 if ($this->isStdVector($var) || $this->isStdMap($var) || $this->isStdOrderedMap($var)) {
-                    return $this->context->stdContainers[$var];
+                    return $this->getStdContainerVarInfo($var);
                 }
                 return null;
             } else {
@@ -728,67 +720,65 @@ trait StdContainerTrait
     {
         $container = $this->parseIdentifier($node->expr);
         $mutableContainer = !$this->isStdArray($container);
-        if ($mutableContainer) {
-            $this->context->stdContainers[$container]['iterationDepth'] =
-                ($this->context->stdContainers[$container]['iterationDepth'] ?? 0) + 1;
-        }
-        $iterator = $this->genTmpVarName();
-        $code = '';
-        if ($mutableContainer) {
-            $guard = $this->genTmpVarName();
-            $code .= '{' . PHP_EOL;
-            $this->indentLevel++;
-            $code .= $this->getIndent() . "auto $guard = {$container}_ref.iterationGuard();" . PHP_EOL;
-            $code .= $this->getIndent();
-        }
-        $code .= "for (auto $iterator = {$container}_ref.begin(); $iterator != {$container}_ref.end(); ++$iterator) {" . PHP_EOL;
-        $this->indentLevel++;
-        if ($node->keyVar) {
-            $keyVar = $this->parseIdentifier($node->keyVar);
-            $this->checkVar($node, $keyVar, $this->getStdContainerKeyType($container));
-            if ($this->isStdVector($container) or $this->isStdArray($container)) {
-                $code .= $this->getIndent() . "$keyVar = $iterator - {$container}_ref.begin();" . PHP_EOL;
-            } else {
-                $code .= $this->getIndent() . "$keyVar = {$iterator}->first;" . PHP_EOL;
-            }
-        }
-
-        if ($node->byRef) {
-            $this->fatalError($node, 'Cannot use & with std container foreach');
-        }
-
-        if (!$this->isVarExpr($node->valueVar)) {
-            $this->fatalError($node, 'Cannot assign value to std container foreach');
-        }
-
-        $valueVar = $this->parseIdentifier($node->valueVar);
-        $this->checkVar($node, $valueVar, $this->getStdContainerValueType($container, $valueVar));
-
-        if ($this->isStdVector($container) or $this->isStdArray($container)) {
-            $code .= $this->getIndent() . "$valueVar = *$iterator;" . PHP_EOL;
-        } else {
-            $code .= $this->getIndent() . "$valueVar = {$iterator}->second;" . PHP_EOL;
-        }
-
-        try {
-            $body = $this->parseForeachBody($node);
-        } finally {
+        return $this->context->withStdContainerIteration($container, function () use ($node, $container, $mutableContainer): string {
+            $iterator = $this->genTmpVarName();
             if ($mutableContainer) {
-                --$this->context->stdContainers[$container]['iterationDepth'];
+                $guard = $this->genTmpVarName();
+                $code = '{' . PHP_EOL;
+                [$loop, $valueVar] = $this->withIndentedBlock(function () use ($node, $container, $iterator, $guard): array {
+                    [$loop, $valueVar] = $this->parseStdContainerForeachLoop($node, $container, $iterator);
+                    $code = $this->getIndent() . "auto $guard = {$container}_ref.iterationGuard();" . PHP_EOL;
+                    return [$code . $this->getIndent() . $loop, $valueVar];
+                });
+                $code .= $loop . PHP_EOL . $this->getIndent() . '}';
+            } else {
+                [$code, $valueVar] = $this->parseStdContainerForeachLoop($node, $container, $iterator);
             }
-        }
-        $this->indentLevel--;
+            $this->context->forgetObjectDispatchClass($valueVar);
+            return $code;
+        });
+    }
 
+    /** @return array{string, string} Rendered loop and its value binding. */
+    private function parseStdContainerForeachLoop(Foreach_ $node, string $container, string $iterator): array
+    {
+        $code = "for (auto $iterator = {$container}_ref.begin(); $iterator != {$container}_ref.end(); ++$iterator) {" . PHP_EOL;
+        [$assignments, $body, $valueVar] = $this->withIndentedBlock(function () use ($node, $container, $iterator): array {
+            $code = '';
+            if ($node->keyVar) {
+                $keyVar = $this->parseIdentifier($node->keyVar);
+                $this->checkVar($node, $keyVar, $this->getStdContainerKeyType($container));
+                if ($this->isStdVector($container) or $this->isStdArray($container)) {
+                    $code .= $this->getIndent() . "$keyVar = $iterator - {$container}_ref.begin();" . PHP_EOL;
+                } else {
+                    $code .= $this->getIndent() . "$keyVar = {$iterator}->first;" . PHP_EOL;
+                }
+            }
+
+            if ($node->byRef) {
+                $this->fatalError($node, 'Cannot use & with std container foreach');
+            }
+
+            if (!$this->isVarExpr($node->valueVar)) {
+                $this->fatalError($node, 'Cannot assign value to std container foreach');
+            }
+
+            $valueVar = $this->parseIdentifier($node->valueVar);
+            $this->checkVar($node, $valueVar, $this->getStdContainerValueType($container, $valueVar));
+
+            if ($this->isStdVector($container) or $this->isStdArray($container)) {
+                $code .= $this->getIndent() . "$valueVar = *$iterator;" . PHP_EOL;
+            } else {
+                $code .= $this->getIndent() . "$valueVar = {$iterator}->second;" . PHP_EOL;
+            }
+
+            return [$code, $this->parseForeachBody($node), $valueVar];
+        });
+        $code .= $assignments;
         $code .= $this->parseBeforeStmtLines() . PHP_EOL;
         $code .= $body . PHP_EOL;
-
         $code .= $this->getIndent() . '}';
-        if ($mutableContainer) {
-            $this->indentLevel--;
-            $code .= PHP_EOL . $this->getIndent() . '}';
-        }
-        $this->context->forgetObjectDispatchClass($valueVar);
-        return $code;
+        return [$code, $valueVar];
     }
 
     protected function parseStdContainerDimFetch(Expr\ArrayDimFetch $expr, bool $forUpdate = false): string
@@ -1313,8 +1303,8 @@ trait StdContainerTrait
         if ($containerType === 'array') {
             $this->addLocalVar($var, Type::STD_ARRAY);
             $this->parseStdArray($var, $fakeCall);
-            $this->context->stdArrays[$var]['boxExpr'] = $sourceVar;
-            return '// StdContainer<' . $this->context->stdArrays[$var]['decl'] . '>(' . $sourceVar . ')';
+            $this->context->bindStdBoxSource($var, $sourceVar);
+            return '// StdContainer<' . $this->getStdContainerVarInfo($var)['decl'] . '>(' . $sourceVar . ')';
         }
 
         if ($containerType === 'vector') {
@@ -1327,8 +1317,8 @@ trait StdContainerTrait
             $this->addLocalVar($var, Type::STD_ORDERED_MAP);
             $this->parseStdOrderedMap($var, $fakeCall);
         }
-        $this->context->stdContainers[$var]['boxExpr'] = $sourceVar;
-        return '// StdContainer<' . $this->context->stdContainers[$var]['decl'] . '>(' . $sourceVar . ')';
+        $this->context->bindStdBoxSource($var, $sourceVar);
+        return '// StdContainer<' . $this->getStdContainerVarInfo($var)['decl'] . '>(' . $sourceVar . ')';
     }
 
     protected function parseStdMapKeyType(NodeAbstract $expr, string $owner): string
@@ -1375,7 +1365,7 @@ trait StdContainerTrait
                 'dimensions' => $dimensions,
                 'bytes' => $totalElements * $this->getStdValueTypeBytes($type),
             ];
-            $this->context->stdArrays[$var] = $this->addStdTypeId($info);
+            $this->registerStdStorage($var, $info);
             return $this->genStdArrayValueInitializer($var, $info, $inferred['entries']);
         }
 
@@ -1412,7 +1402,7 @@ trait StdContainerTrait
         $totalBytes = array_product($nesting) * $byte;
 
         $decl = $this->getStdArrayDecl($type, $nesting, $typeInfo['class']);
-        $this->context->stdArrays[$var] = $this->addStdTypeId([
+        $this->registerStdStorage($var, [
             'kind' => 'array',
             'decl' => $decl,
             'type' => $type,
@@ -1438,7 +1428,7 @@ trait StdContainerTrait
                 'class' => $inferred['class'],
                 'size' => null,
             ];
-            $this->context->stdContainers[$var] = $this->addStdTypeId($info);
+            $this->registerStdStorage($var, $info);
             return $this->genStdVectorValueInitializer($var, $info, $inferred['items']);
         }
 
@@ -1456,7 +1446,7 @@ trait StdContainerTrait
         }
         $decl = Type::STD_VECTOR . '<'
             . $this->getStdContainerElementType($type, $typeInfo['class']) . '>';
-        $this->context->stdContainers[$var] = $this->addStdTypeId([
+        $this->registerStdStorage($var, [
             'kind' => 'vector',
             'decl' => $decl,
             'type' => $type,
@@ -1494,7 +1484,7 @@ trait StdContainerTrait
                 'class' => $inferred['class'],
                 'keyType' => $inferred['keyType'],
             ];
-            $this->context->stdContainers[$var] = $this->addStdTypeId($info);
+            $this->registerStdStorage($var, $info);
             return $this->genStdMapValueInitializer($var, $info, $inferred['items']);
         }
 
@@ -1505,7 +1495,7 @@ trait StdContainerTrait
         $valueTypeInfo = $this->parseStdValueTypeInfo($expr->args[1]->value, $funcName);
         $valueType = $valueTypeInfo['type'];
         $decl = $this->getStdMapDecl($containerType, $keyType, $valueType, $valueTypeInfo['class']);
-        $this->context->stdContainers[$var] = $this->addStdTypeId([
+        $this->registerStdStorage($var, [
             'kind' => $kind,
             'decl' => $decl,
             'type' => $valueType,
@@ -1525,7 +1515,7 @@ trait StdContainerTrait
         if ($this->isVarExpr($expr)) {
             $var = $this->parseVariable($expr);
             if ($this->isStdArray($var)) {
-                $info = $this->context->stdArrays[$var];
+                $info = $this->getStdContainerVarInfo($var);
                 $sizes = array_reverse($info['sizes']);
                 return $sizes[0] . $this->getPlatform()->getIntegerLiteralSuffix();
             }
@@ -1549,7 +1539,7 @@ trait StdContainerTrait
             if ($this->isVarExpr($tmp)) {
                 $var = $this->parseVariable($tmp);
                 if ($this->isStdArray($var)) {
-                    $info = $this->context->stdArrays[$var];
+                    $info = $this->getStdContainerVarInfo($var);
                     $outerSizes = array_reverse($info['sizes']);
                     if ($dimLevel < count($outerSizes)) {
                         return $outerSizes[$dimLevel] . $this->getPlatform()->getIntegerLiteralSuffix();

@@ -13,8 +13,8 @@ class FunctionContextTest extends TestCase
         $ctx = new FunctionContext();
 
         $this->assertEmpty($ctx->objects);
-        $this->assertEmpty($ctx->stdArrays);
-        $this->assertEmpty($ctx->stdContainers);
+        $this->assertNull($ctx->getStdStorageInfo('missing'));
+        $this->assertFalse($ctx->isStdContainerIterating('missing'));
         $this->assertEmpty($ctx->localVars);
         $this->assertEmpty($ctx->staticVars);
         $this->assertEmpty($ctx->globalVars);

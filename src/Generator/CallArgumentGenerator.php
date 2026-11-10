@@ -1115,14 +1115,14 @@ trait CallArgumentGenerator
                 $valueExpr = $this->parseStdArrayDimFetch($arg->value);
                 $attr = $arg->value->getAttribute('stdArrayDimFetch');
                 if ($attr['accessLevel'] === $attr['totalLevel']) {
-                    return $this->convertExprFromType($this->context->stdArrays[$attr['var']]['type'], $valueExpr);
+                    return $this->convertExprFromType($this->getStdContainerVarInfo($attr['var'])['type'], $valueExpr);
                 } else {
                     return $this->convertArrayExpr($valueExpr);
                 }
             } else {
                 $valueExpr = $this->parseStdContainerDimFetch($arg->value);
                 $attr = $arg->value->getAttribute('stdContainerDimFetch');
-                return $this->convertExprFromType($this->context->stdContainers[$attr['var']]['type'], $valueExpr);
+                return $this->convertExprFromType($this->getStdContainerVarInfo($attr['var'])['type'], $valueExpr);
             }
         }
         $expr = $this->parseIdentifier($arg->value);

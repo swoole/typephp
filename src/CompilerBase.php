@@ -2758,7 +2758,7 @@ abstract class CompilerBase implements PropertyAccessContext
                 }
                 $attr = $expr->getAttribute('stdArrayDimFetch');
                 if ($attr['accessLevel'] === $attr['totalLevel']) {
-                    return $this->context->stdArrays[$attr['var']]['class'] ?? '';
+                    return $this->getStdContainerVarInfo($attr['var'])['class'] ?? '';
                 }
                 return '';
             }
@@ -2766,7 +2766,7 @@ abstract class CompilerBase implements PropertyAccessContext
                 $this->parseStdContainerDimFetch($expr);
             }
             $attr = $expr->getAttribute('stdContainerDimFetch');
-            return $this->context->stdContainers[$attr['var']]['class'] ?? '';
+            return $this->getStdContainerVarInfo($attr['var'])['class'] ?? '';
         }
         if ($this->isFuncCallExpr($expr) and $this->isNameExpr($expr->name)) {
             $fn = $this->parseIdentifier($expr->name);
@@ -4078,7 +4078,7 @@ abstract class CompilerBase implements PropertyAccessContext
                     }
                     $attr = $expr->getAttribute('stdArrayDimFetch');
                     if ($attr['accessLevel'] === $attr['totalLevel']) {
-                        return $this->context->stdArrays[$attr['var']]['type'];
+                        return $this->getStdContainerVarInfo($attr['var'])['type'];
                     } else {
                         return Type::ARRAY;
                     }
@@ -4088,7 +4088,7 @@ abstract class CompilerBase implements PropertyAccessContext
                         $this->parseStdContainerDimFetch($expr);
                     }
                     $attr = $expr->getAttribute('stdContainerDimFetch');
-                    return $this->context->stdContainers[$attr['var']]['type'];
+                    return $this->getStdContainerVarInfo($attr['var'])['type'];
                 }
                 break;
             case 'Expr_New':
@@ -6118,7 +6118,7 @@ abstract class CompilerBase implements PropertyAccessContext
             $stdContainerInfo = null;
             $code .= $this->getIndent();
             if ($type === Type::STD_ARRAY) {
-                $info = $this->context->stdArrays[$name];
+                $info = $this->getStdContainerVarInfo($name);
                 $stdContainerInfo = $info;
                 if (isset($info['boxExpr'])) {
                     $code .= 'auto &' . $name . '_ref = php::toStdContainer<' . $info['decl'] . '>(' . $info['boxExpr'] . ', ' . $info['typeId'] . ');';
@@ -6131,7 +6131,7 @@ abstract class CompilerBase implements PropertyAccessContext
                     $code .= PHP_EOL . $this->getIndent() . 'php::initializeStdContainer(' . $name . '_ref, ' . $defaultValue . ');';
                 }
             } elseif ($type === Type::STD_VECTOR) {
-                $info = $this->context->stdContainers[$name];
+                $info = $this->getStdContainerVarInfo($name);
                 $stdContainerInfo = $info;
                 if (isset($info['boxExpr'])) {
                     $code .= 'auto &' . $name . '_ref = php::toStdContainer<' . $info['decl'] . '>(' . $info['boxExpr'] . ', ' . $info['typeId'] . ');';
@@ -6150,7 +6150,7 @@ abstract class CompilerBase implements PropertyAccessContext
                     $code .= PHP_EOL . $this->getIndent() . 'php::initializeStdContainer(' . $name . '_ref, ' . $defaultValue . ');';
                 }
             } elseif ($type === Type::STD_MAP || $type === Type::STD_ORDERED_MAP) {
-                $info = $this->context->stdContainers[$name];
+                $info = $this->getStdContainerVarInfo($name);
                 $stdContainerInfo = $info;
                 if (isset($info['boxExpr'])) {
                     $code .= 'auto &' . $name . '_ref = php::toStdContainer<' . $info['decl'] . '>(' . $info['boxExpr'] . ', ' . $info['typeId'] . ');';

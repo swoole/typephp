@@ -64,24 +64,24 @@ class FunctionContextExtendedTest extends TestCase
     public function testStdArraysManipulation(): void
     {
         $ctx = new FunctionContext();
-        $ctx->stdArrays['arr1'] = ['kind' => 'array', 'decl' => 'php::StdArray<php::Int, 10>'];
-        $ctx->stdArrays['arr2'] = ['kind' => 'array', 'decl' => 'php::StdArray<php::Float, 5>'];
+        $ctx->registerStdStorage('arr1', ['kind' => 'array', 'decl' => 'php::StdArray<php::Int, 10>']);
+        $ctx->registerStdStorage('arr2', ['kind' => 'array', 'decl' => 'php::StdArray<php::Float, 5>']);
 
-        $this->assertArrayHasKey('arr1', $ctx->stdArrays);
-        $this->assertArrayHasKey('arr2', $ctx->stdArrays);
-        $this->assertCount(2, $ctx->stdArrays);
+        $this->assertSame('php::StdArray<php::Int, 10>', $ctx->getStdStorageInfo('arr1')['decl']);
+        $this->assertSame('php::StdArray<php::Float, 5>', $ctx->getStdStorageInfo('arr2')['decl']);
+        $this->assertCount(2, $ctx->localVars);
     }
 
     public function testStdContainersManipulation(): void
     {
         $ctx = new FunctionContext();
-        $ctx->stdContainers['vec'] = ['kind' => 'vector', 'decl' => 'php::StdVector<php::Int>'];
-        $ctx->stdContainers['map'] = ['kind' => 'map', 'decl' => 'php::StdMap<php::Str, php::Int>'];
+        $ctx->registerStdStorage('vec', ['kind' => 'vector', 'decl' => 'php::StdVector<php::Int>']);
+        $ctx->registerStdStorage('map', ['kind' => 'map', 'decl' => 'php::StdMap<php::Str, php::Int>']);
 
-        $this->assertArrayHasKey('vec', $ctx->stdContainers);
-        $this->assertArrayHasKey('map', $ctx->stdContainers);
-        $this->assertEquals('vector', $ctx->stdContainers['vec']['kind']);
-        $this->assertEquals('map', $ctx->stdContainers['map']['kind']);
+        $this->assertSame('php::StdVector<php::Int>', $ctx->getStdStorageInfo('vec')['decl']);
+        $this->assertSame('php::StdMap<php::Str, php::Int>', $ctx->getStdStorageInfo('map')['decl']);
+        $this->assertEquals('vector', $ctx->getStdStorageInfo('vec')['kind']);
+        $this->assertEquals('map', $ctx->getStdStorageInfo('map')['kind']);
     }
 
     public function testArgumentsManipulation(): void

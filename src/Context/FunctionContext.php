@@ -72,12 +72,10 @@ class FunctionContext
     /**
      * @var array<string, array>
      */
-    public array $stdArrays = [];
+    private array $stdStorage = [];
 
-    /**
-     * @var array<string, array>
-     */
-    public array $stdContainers = [];
+    /** @var array<string, int> Active foreach depth for resizable container bindings. */
+    private array $stdContainerIterationDepths = [];
     /** @var array<string, array{kind: string, keyType: string, type: string, class: ?string}> */
     private array $typedArrays = [];
     public array $localVars = [];
@@ -190,8 +188,8 @@ class FunctionContext
         $this->nonNullNativeObjects = [];
         $this->nativeStackPromotions = [];
         $this->declaredObjects = [];
-        $this->stdArrays = [];
-        $this->stdContainers = [];
+        $this->stdStorage = [];
+        $this->stdContainerIterationDepths = [];
         $this->objectProps = [];
         $this->ssaBuilder = null;
         $this->stableObjects = [];
@@ -251,6 +249,69 @@ class FunctionContext
         $definition = $source->getTypedArrayContract($name);
         if ($definition !== null) {
             $this->registerTypedArrayContract($name, $definition);
+        }
+    }
+
+    /** Commit container metadata and its local storage without changing parameter ABI. */
+    public function registerStdStorage(string $name, array $info): void
+    {
+        $type = match ($info['kind']) {
+            'array' => Type::STD_ARRAY,
+            'vector' => Type::STD_VECTOR,
+            'map' => Type::STD_MAP,
+            'ordered_map' => Type::STD_ORDERED_MAP,
+            default => throw new \LogicException('Unknown std container kind: ' . (string) $info['kind']),
+        };
+        if (isset($this->varTypeDegradations[$name]) || $this->getTypedArrayContract($name) !== null) {
+            throw new \LogicException('Std containers require fixed container storage');
+        }
+        $existingType = $this->localVars[$name] ?? null;
+        if ($existingType !== null && $existingType !== $type
+            && !($existingType === Type::VAR && ($this->arguments[$name] ?? null) === Type::VAR)) {
+            throw new \LogicException('Std container metadata must match its local storage type');
+        }
+        $this->addLocalVar($name, $type);
+        $this->stdStorage[$name] = $info;
+    }
+
+    public function getStdStorageInfo(string $name): ?array
+    {
+        return $this->stdStorage[$name] ?? null;
+    }
+
+    public function bindStdBoxSource(string $name, string $source): void
+    {
+        if (!isset($this->stdStorage[$name])) {
+            throw new \LogicException('A Box source requires registered std container storage');
+        }
+        $this->stdStorage[$name]['boxExpr'] = $source;
+    }
+
+    public function isStdContainerIterating(string $name): bool
+    {
+        return !empty($this->stdContainerIterationDepths[$name]);
+    }
+
+    /** Protect all foreach lowering, including target validation before the body. */
+    public function withStdContainerIteration(string $name, callable $callback): mixed
+    {
+        $info = $this->getStdStorageInfo($name);
+        if ($info === null) {
+            throw new \LogicException('Iteration requires registered std container storage');
+        }
+        if ($info['kind'] === 'array') {
+            return $callback();
+        }
+        $depth = $this->stdContainerIterationDepths[$name] ?? 0;
+        $this->stdContainerIterationDepths[$name] = $depth + 1;
+        try {
+            return $callback();
+        } finally {
+            if ($depth === 0) {
+                unset($this->stdContainerIterationDepths[$name]);
+            } else {
+                $this->stdContainerIterationDepths[$name] = $depth;
+            }
         }
     }
 

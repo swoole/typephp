@@ -2677,6 +2677,11 @@ abstract class CompilerBase implements PropertyAccessContext
             // Shared by the Python probes and the call branch. Detecting it
             // once keeps chain compilation linear (per-site detection was 2^depth).
             $callReceiverClass = $this->detectClassOfExpr($expr->var);
+            if ($callReceiverClass === '' && $this->isVarExpr($expr->var)) {
+                // Interface locals have a declaration but no concrete
+                // dispatch class. Use the contract only for return classes.
+                $callReceiverClass = $this->getDeclaredObjectType($this->parseVariable($expr->var));
+            }
         }
         $pythonOperatorClass = $this->detectPythonOperatorReturnClass($expr);
         if ($pythonOperatorClass !== null) {
@@ -2723,6 +2728,18 @@ abstract class CompilerBase implements PropertyAccessContext
                     && $property->type === Type::OBJECT
                     && $this->isNativeObjectClass($property->class)
                 ) {
+                    return $property->class;
+                }
+            } elseif ($receiverClass !== '') {
+                $property = $this->createPropertyAccessResolver()->findReadableInstanceProperty(
+                    $receiverClass,
+                    $expr->name->toString(),
+                    $this->classDef ? $this->getFullClassName() : '',
+                );
+                // The declaration is an upper bound, including for nullable
+                // objects. Dispatch still decides whether the runtime class
+                // is exact enough for a direct call; reads keep their guards.
+                if ($property !== null && $property->type === Type::OBJECT) {
                     return $property->class;
                 }
             }
@@ -3924,7 +3941,10 @@ abstract class CompilerBase implements PropertyAccessContext
                         }
                         return $classDef->getMethod($method)->getReturnType();
                     }
-                    if ($classDef === null) {
+                    if ($classDef === null && !$expr->var instanceof Expr\PropertyFetch) {
+                        // An interface property still lowers to a dynamic
+                        // call. Preserve its scalar storage inference while
+                        // detectClassOfExpr() carries object return contracts.
                         $interfaceMethod = $this->resolveInterfaceMethod(
                             $this->detectClassOfExpr($expr->var),
                             $method,

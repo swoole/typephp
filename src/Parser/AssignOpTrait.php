@@ -497,12 +497,12 @@ trait AssignOpTrait
         if ($left instanceof Expr\PropertyFetch && $this->isIdExpr($left->name)) {
             $receiverClass = $this->detectClassOfExpr($left->var);
             if ($this->isNativeObjectClass($receiverClass)) {
-                $property = $left->name->toString();
+                $propertyName = $left->name->toString();
                 $access = $this->getNativePropertyAccess($left);
                 if ($access === null) {
-                    $resolution = $this->resolveNativeInstanceProperty($left, $property, $receiverClass);
+                    $resolution = $this->resolveNativeInstanceProperty($left, $propertyName, $receiverClass);
                     if ($resolution === null) {
-                        $this->fatalError($left, "Native class `{$receiverClass}` has no property `\${$property}`");
+                        $this->fatalError($left, "Native class `{$receiverClass}` has no property `\${$propertyName}`");
                     }
                     $this->applyNativePropertyAccessResult($left, $resolution);
                     $access = $this->getNativePropertyAccess($left);
@@ -516,13 +516,13 @@ trait AssignOpTrait
                 if ($def->type === Type::OBJECT && $this->isNativeObjectClass($def->class)) {
                     if ($this->isNull($right)) {
                         if (!$def->nullable) {
-                            $this->fatalError($right, "Cannot assign null to native property `{$receiverClass}::\${$property}`");
+                            $this->fatalError($right, "Cannot assign null to native property `{$receiverClass}::\${$propertyName}`");
                         }
                         return $leftExpr . ' = nullptr';
                     }
                     $rightClass = $this->detectClassOfExpr($right);
                     if ($rightClass === '' || !$this->isObjectClassStaticallyAssignableTo($rightClass, $def->class)) {
-                        $this->fatalError($right, "Cannot assign value to native property `{$receiverClass}::\${$property}`");
+                        $this->fatalError($right, "Cannot assign value to native property `{$receiverClass}::\${$propertyName}`");
                     }
                     return $leftExpr . ' = ' . $this->parseExprAsValue($right);
                 }

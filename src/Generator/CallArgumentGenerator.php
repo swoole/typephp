@@ -125,14 +125,13 @@ trait CallArgumentGenerator
         bool $materializeTrailingDefaults = false,
     ): string {
         $this->assertCallArgumentLimit($callArgs);
-        $this->context->typedRefBridgeScopes[] = [];
         // Pending after-lines that predate this call (short-circuit captures,
         // assignment heads) mark the boundary of the region this call's
         // cleanup must stay inside: capture keeps cleanup suffixes by count,
         // so a line before this baseline can be flushed in another scope
         // than the guard declaration queued below.
-        $afterStmtStart = $this->context->statements->afterCount();
-        try {
+        return $this->context->withTypedRefBridgeScope(function () use ($callArgs, $nativeFunc, $parameterOffset, $deferTrailingDefaults, $materializeTrailingDefaults): string {
+            $afterStmtStart = $this->context->statements->afterCount();
             $functionDef = $this->getFunction($nativeFunc);
             $providedArgs = [];
             $defaultArgs = [];
@@ -369,9 +368,7 @@ trait CallArgumentGenerator
             }
             ksort($resolvedArgs);
             return implode(', ', $resolvedArgs);
-        } finally {
-            array_pop($this->context->typedRefBridgeScopes);
-        }
+        });
     }
 
     protected function isReferenceArgument($funcName, $className, $argIndex): bool
@@ -568,9 +565,8 @@ trait CallArgumentGenerator
         // Nested calls need independent bridge identities and commit points.
         // Within one call, typed aliases that share a canonical native root
         // must reuse one RefWrap so Zend observes one reference identity.
-        $this->context->typedRefBridgeScopes[] = [];
-        $afterStmtStart = $this->context->statements->afterCount();
-        try {
+        return $this->context->withTypedRefBridgeScope(function () use ($args, $funcName, $className, $separateNamedArgs, $forceArrayArgs, $preserveExistingReferences): string {
+            $afterStmtStart = $this->context->statements->afterCount();
             $list_args = [];
             $arrayArgsVar = null;
             $argsVar = null;
@@ -781,9 +777,7 @@ trait CallArgumentGenerator
                 $namedArgsVar,
             );
             return $result;
-        } finally {
-            array_pop($this->context->typedRefBridgeScopes);
-        }
+        });
     }
 
     private function isExistingReferenceCallArg(Node\Arg $arg): bool
@@ -1101,17 +1095,13 @@ trait CallArgumentGenerator
      */
     private function getDynamicTypedRefBridge(string $name, string $valueType): string
     {
-        $root = $this->context->typedRefRoots[$name] ?? $name;
-        $scopeIndex = array_key_last($this->context->typedRefBridgeScopes);
-        if ($scopeIndex === null) {
-            throw new \LogicException('Typed reference bridge requires an active call-argument scope');
-        }
-        if (isset($this->context->typedRefBridgeScopes[$scopeIndex][$root])) {
-            return $this->context->typedRefBridgeScopes[$scopeIndex][$root];
+        $existing = $this->context->findTypedRefBridge($name);
+        if ($existing !== null) {
+            return $existing;
         }
 
         $wrapper = $this->genTmpVarName();
-        $this->context->typedRefBridgeScopes[$scopeIndex][$root] = $wrapper;
+        $this->context->registerTypedRefBridge($name, $wrapper);
         $this->addBeforeStmtLine('php::RefWrap<' . $valueType . '> '
             . $wrapper . '(' . $name . ');');
         $this->addAfterStmtLine($wrapper . '.commit();');

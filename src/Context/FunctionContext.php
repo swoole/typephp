@@ -104,7 +104,7 @@ class FunctionContext
     /** @var array<string, array<string, true>> canonical root => aliases. */
     public array $typedRefAliases = [];
     /** @var list<array<string, string>> active dynamic-call root => RefWrap variable scopes. */
-    public array $typedRefBridgeScopes = [];
+    private array $typedRefBridgeScopes = [];
     public array $staticVars = [];
     public array $globalVars = [];
 
@@ -315,6 +315,60 @@ class FunctionContext
     public function discardInitializerLocals(int $originalCount): void
     {
         $this->localVars = array_slice($this->localVars, 0, $originalCount, true);
+    }
+
+    public function registerTypedRefLocal(string $name, string $target, string $type): void
+    {
+        if (!Type::isTypedRefType($type)) {
+            throw new \LogicException('Typed reference local requires a typed-ref type');
+        }
+        $root = $this->getTypedRefRoot($target);
+        $this->addLocalVar($name, $type);
+        $this->localVarInitializers[$name] = $target;
+        $this->typedRefBindings[$name] = $target;
+        $this->typedRefRoots[$name] = $root;
+        $this->typedRefAliases[$root][$name] = true;
+    }
+
+    public function getTypedRefRoot(string $name): string
+    {
+        return $this->typedRefRoots[$name] ?? $name;
+    }
+
+    public function withTypedRefBridgeScope(callable $lower): mixed
+    {
+        $this->typedRefBridgeScopes[] = [];
+        try {
+            return $lower();
+        } finally {
+            array_pop($this->typedRefBridgeScopes);
+        }
+    }
+
+    public function findTypedRefBridge(string $name): ?string
+    {
+        $scope = $this->activeTypedRefBridgeScope();
+        return $this->typedRefBridgeScopes[$scope][$this->getTypedRefRoot($name)] ?? null;
+    }
+
+    public function registerTypedRefBridge(string $name, string $wrapper): void
+    {
+        $scope = $this->activeTypedRefBridgeScope();
+        $root = $this->getTypedRefRoot($name);
+        $existing = $this->typedRefBridgeScopes[$scope][$root] ?? null;
+        if ($existing !== null && $existing !== $wrapper) {
+            throw new \LogicException('Typed reference aliases must reuse one bridge within a call');
+        }
+        $this->typedRefBridgeScopes[$scope][$root] = $wrapper;
+    }
+
+    private function activeTypedRefBridgeScope(): int
+    {
+        $scope = array_key_last($this->typedRefBridgeScopes);
+        if ($scope === null) {
+            throw new \LogicException('Typed reference bridge requires an active call-argument scope');
+        }
+        return $scope;
     }
 
     public function enterScope(): void

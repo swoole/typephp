@@ -279,35 +279,36 @@ trait AssignOpTrait
     {
         $items = $left->items;
         $code  = '{' . PHP_EOL;
-        $this->indentLevel++;
-        $tmpVar = $this->genTmpVarName();
-        $this->addLocalVar($tmpVar, Type::VAR);
-        $code .= $this->getIndent() . $tmpVar . ' = ' . $this->parseExpr($right) . ';' . PHP_EOL;
-        foreach ($items as $k => $item) {
-            if (!$item) {
-                continue;
-            }
-            if ($item instanceof ArrayItem) {
-                $key = $item->key ?? new Node\Scalar\Int_($k, $item->getAttributes());
-                $itemExpr = new Expr\ArrayDimFetch(
-                    new Variable($tmpVar, $item->getAttributes()),
-                    $key,
-                    $item->getAttributes(),
-                );
-                if ($item->value instanceof Expr\List_) {
-                    $code .= $this->getIndent()
-                        . $this->parseAssignToList($item->value, $itemExpr)
-                        . PHP_EOL;
-                } else {
-                    $code .= $this->getIndent()
-                        . $this->parseDestructuringWrite($item->value, $itemExpr)
-                        . ';' . PHP_EOL;
+        $code .= $this->withIndentedBlock(function () use ($items, $right): string {
+            $tmpVar = $this->genTmpVarName();
+            $this->addLocalVar($tmpVar, Type::VAR);
+            $code = $this->getIndent() . $tmpVar . ' = ' . $this->parseExpr($right) . ';' . PHP_EOL;
+            foreach ($items as $k => $item) {
+                if (!$item) {
+                    continue;
                 }
-            } else {
-                $this->unsupportedSyntax($item);
+                if ($item instanceof ArrayItem) {
+                    $key = $item->key ?? new Node\Scalar\Int_($k, $item->getAttributes());
+                    $itemExpr = new Expr\ArrayDimFetch(
+                        new Variable($tmpVar, $item->getAttributes()),
+                        $key,
+                        $item->getAttributes(),
+                    );
+                    if ($item->value instanceof Expr\List_) {
+                        $code .= $this->getIndent()
+                            . $this->parseAssignToList($item->value, $itemExpr)
+                            . PHP_EOL;
+                    } else {
+                        $code .= $this->getIndent()
+                            . $this->parseDestructuringWrite($item->value, $itemExpr)
+                            . ';' . PHP_EOL;
+                    }
+                } else {
+                    $this->unsupportedSyntax($item);
+                }
             }
-        }
-        $this->indentLevel--;
+            return $code;
+        });
 
         return $code . $this->getIndent() . '}';
     }

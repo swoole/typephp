@@ -83,9 +83,10 @@ final class ImmutableBindingTest extends TestCase
     public function testAnalysisResetKeepsContractsWhileFreshContextsStartEmpty(): void
     {
         $context = new FunctionContext();
-        $context->markImmutableBinding('array');
-        $context->markImmutableBinding('object', true);
-        $context->resetAnalysisTemporaries([], 0, []);
+        $context->withAnalysisTemporaries(function () use ($context): void {
+            $context->markImmutableBinding('array');
+            $context->markImmutableBinding('object', true);
+        });
         self::assertSame(['array' => true, 'object' => true], $context->immutableVars);
         self::assertSame(['object' => true], $context->immutableObjectVars);
         $fresh = new FunctionContext();

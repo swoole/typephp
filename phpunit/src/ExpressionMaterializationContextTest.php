@@ -75,11 +75,11 @@ final class ExpressionMaterializationContextTest extends \BaseTest
     {
         $compiler = $this->compiler();
         $expr = $this->expression();
-        $compiler->parseExpr($expr);
         $context = $this->context($compiler);
-        self::assertNotEmpty($context->statements->peekBefore());
-
-        $context->resetAnalysisTemporaries([], 0, []);
+        $context->withAnalysisTemporaries(function () use ($compiler, $expr, $context): void {
+            $compiler->parseExpr($expr);
+            self::assertNotEmpty($context->statements->peekBefore());
+        });
         self::assertEmpty($context->statements->peekBefore());
         $compiler->parseExpr($expr);
         self::assertNotEmpty($context->statements->peekBefore());

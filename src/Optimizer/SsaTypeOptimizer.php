@@ -99,7 +99,7 @@ trait SsaTypeOptimizer
         // pass has registered their inputs. This includes variables introduced
         // by destructuring foreach targets, which are deliberately not always
         // represented as standalone SSA definitions. Seed every statically
-        // named variable read as Var for analysis only; resetAnalysisTemporaries()
+        // named variable read as Var for analysis only; withAnalysisTemporaries()
         // restores the real symbol table before code generation, where genuine
         // undefined-variable diagnostics still run normally.
         $nodeFinder = new NodeFinder();

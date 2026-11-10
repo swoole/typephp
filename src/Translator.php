@@ -7007,33 +7007,24 @@ CODE;
 
         // Build SSA/e-SSA analysis for this function
         if ($v->stmts) {
-            $oriLocalVars = $this->context->localVars;
-            $oriTmpVarIndex = $this->context->tmpVarIndex;
-            $oriDeclaredObjects = $this->context->declaredObjects;
-            $oriNativeObjects = $this->context->nativeObjects;
-            $oriNonNullNativeObjects = $this->context->nonNullNativeObjects;
-            /** SSA/e-SSA analysis for the current function. Built once per function, discarded with the context. */
-            $ssaBuilder = new SsaBuilder($v->stmts, $this->functionDef->argInfoList);
-            $ssaBuilder->build();
-            $this->context->ssaBuilder = $ssaBuilder;
-            $this->analyzeStableObjects($ssaBuilder);
-            // Range-proven loop counters are safe to narrow even with
-            // `use varint_types`: the optimizer rejects counters whose PHP
-            // integer semantics could widen to float or otherwise escape.
-            $optimizedLoopVars = $this->optimizeLoopVars($ssaBuilder);
-            if (!$this->varIntTypes) {
-                // Narrow local variable types based on SSA analysis.
-                $this->optimizeVarTypes($ssaBuilder);
-                // Narrow native property accesses.
-                $this->optimizeObjectProps($ssaBuilder);
-            }
-            $this->context->resetAnalysisTemporaries(
-                $oriLocalVars,
-                $oriTmpVarIndex,
-                $oriDeclaredObjects,
-                $oriNativeObjects,
-                $oriNonNullNativeObjects,
-            );
+            $optimizedLoopVars = $this->context->withAnalysisTemporaries(function () use ($v): array {
+                /** SSA/e-SSA analysis for the current function. Built once per function, discarded with the context. */
+                $ssaBuilder = new SsaBuilder($v->stmts, $this->functionDef->argInfoList);
+                $ssaBuilder->build();
+                $this->context->ssaBuilder = $ssaBuilder;
+                $this->analyzeStableObjects($ssaBuilder);
+                // Range-proven loop counters are safe to narrow even with
+                // `use varint_types`: the optimizer rejects counters whose PHP
+                // integer semantics could widen to float or otherwise escape.
+                $optimizedLoopVars = $this->optimizeLoopVars($ssaBuilder);
+                if (!$this->varIntTypes) {
+                    // Narrow local variable types based on SSA analysis.
+                    $this->optimizeVarTypes($ssaBuilder);
+                    // Narrow native property accesses.
+                    $this->optimizeObjectProps($ssaBuilder);
+                }
+                return $optimizedLoopVars;
+            });
             foreach ($optimizedLoopVars as $varName => $type) {
                 $this->context->setInferredLocalType($varName, $type);
             }

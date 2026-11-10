@@ -150,11 +150,16 @@ final class TypedRefBridgeScopeTest extends TestCase
 
     public function testAnalysisResetDiscardsAliasAndBridgeState(): void
     {
-        $context = $this->aliasedContext();
-        $context->withTypedRefBridgeScope(function () use ($context): void {
-            $context->registerTypedRefBridge('first', 'old_wrapper');
+        $context = new FunctionContext();
+        $context->addLocalVar('root', Type::INT);
+        $context->withAnalysisTemporaries(function () use ($context): void {
+            $context->registerTypedRefLocal('first', 'root', Type::INT_REF);
+            $context->registerTypedRefLocal('second', 'first', Type::INT_REF);
+            $context->withTypedRefBridgeScope(function () use ($context): void {
+                $context->registerTypedRefBridge('first', 'old_wrapper');
+            });
         });
-        $context->resetAnalysisTemporaries(['root' => Type::INT], 0, []);
+        self::assertSame(['root' => Type::INT], $context->localVars);
         self::assertSame([], $context->typedRefBindings);
         self::assertSame([], $context->typedRefAliases);
         self::assertSame([], $context->typedRefRoots);

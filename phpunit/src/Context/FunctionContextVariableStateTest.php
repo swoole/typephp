@@ -16,11 +16,11 @@ final class FunctionContextVariableStateTest extends TestCase
         $context->addLocalVar('value', Type::OBJECT);
         self::assertSame(Type::VAR, $context->localVars['value']);
 
-        $locals = $context->localVars;
-        $context->setInferredLocalType('value', Type::INT);
-        self::assertSame(Type::INT, $context->localVars['value']);
-        self::assertSame(Type::VAR, $context->varTypeDegradations['value']);
-        $context->resetAnalysisTemporaries($locals, 0, []);
+        $context->withAnalysisTemporaries(function () use ($context): void {
+            $context->setInferredLocalType('value', Type::INT);
+            self::assertSame(Type::INT, $context->localVars['value']);
+            self::assertSame(Type::VAR, $context->varTypeDegradations['value']);
+        });
         $context->addLocalVar('value', Type::FLOAT);
         self::assertSame(Type::VAR, $context->localVars['value']);
     }

@@ -1,5 +1,12 @@
 # Working agreements
 
+## Compiler implementation syntax
+
+Use ordinary properties and explicit methods for encapsulation. Do not use
+`readonly` properties or classes, property hooks, or asymmetric property
+visibility in compiler implementation code. Compiler support for these
+constructs in input programs and their test fixtures is a separate concern.
+
 ## Build concurrency in CI
 
 The user explicitly requires dedicated CI runners to build with their available

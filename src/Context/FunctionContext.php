@@ -149,7 +149,7 @@ class FunctionContext
     /** True if any continue N (N > 1) appears in this function. */
     public bool $hasMultiLevelContinue = false;
 
-    public readonly StatementBuffer $statements;
+    public StatementBuffer $statements;
     /**
      * Materialized expression results belong to the context that emitted their
      * assignments. Repeated parses in this context reuse the same temporary;
@@ -435,15 +435,26 @@ class FunctionContext
         }
     }
 
-    public function resetAnalysisTemporaries(
-        array $localVars,
-        int $tmpVarIndex,
-        array $declaredObjects,
-        array $nativeObjects = [],
-        array $nonNullNativeObjects = [],
-    ): void
+    /**
+     * Run function-entry analysis with provisional storage and emission state.
+     * Restore the entry storage and discard lowering temporaries on every exit.
+     * SSA, stable/exact class proofs, unsafe-property facts, storage degradation
+     * plans and Immutable contracts intentionally survive this boundary.
+     * Apply final loop-counter types to the restored storage after returning.
+     */
+    public function withAnalysisTemporaries(callable $callback): mixed
     {
-        $this->localVars = $localVars;
+        $checkpoint = new AnalysisCheckpoint($this);
+        try {
+            return $callback();
+        } finally {
+            $checkpoint->restore($this);
+            $this->clearAnalysisTemporaries();
+        }
+    }
+
+    private function clearAnalysisTemporaries(): void
+    {
         $this->localVarInitializers = [];
         $this->localClosureCandidates = [];
         $this->nativeLocalClosures = [];
@@ -451,10 +462,6 @@ class FunctionContext
         $this->typedRefRoots = [];
         $this->typedRefAliases = [];
         $this->typedRefBridgeScopes = [];
-        $this->tmpVarIndex = $tmpVarIndex;
-        $this->declaredObjects = $declaredObjects;
-        $this->nativeObjects = $nativeObjects;
-        $this->nonNullNativeObjects = $nonNullNativeObjects;
         $this->nativeStackPromotions = [];
         $this->statements->clear();
         $this->materializedExpressions = new SplObjectStorage();

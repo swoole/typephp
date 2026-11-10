@@ -121,8 +121,10 @@ final class FunctionContextVariableStateTest extends TestCase
     {
         $context = new FunctionContext();
         $context->addLocalVar('outer', Type::INT);
-        $context->addLocalVar('temporary', Type::ARRAY);
-        $context->discardInitializerLocals(1);
+        $capture = $context->captureInitializer(function () use ($context): void {
+            $context->addLocalVar('temporary', Type::ARRAY);
+        });
+        self::assertSame(['temporary' => Type::ARRAY], $capture[1]);
         self::assertSame(['outer' => Type::INT], $context->localVars);
     }
 

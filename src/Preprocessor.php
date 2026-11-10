@@ -2228,18 +2228,15 @@ abstract class Preprocessor extends CompilerBase
 
     protected function buildExpressionInitPlan(Node\Expr $defaultNode): ArrayInitPlan
     {
-        $localVarCount = count($this->context->localVars);
-        [$expr, $newBeforeStmtLines, $newAfterStmtLines] = $this->captureStmtLines(
+        [$expr, $newLocalVars, $newBeforeStmtLines, $newAfterStmtLines] = $this->context->captureInitializer(
             fn() => $this->parseIdentifier($defaultNode),
         );
 
         $init = '';
         $clean = '';
-        $newLocalVars = array_slice($this->context->localVars, $localVarCount, null, true);
 
         if ($newLocalVars) {
             $init .= $this->genLocalVarDecl($newLocalVars);
-            $this->context->discardInitializerLocals($localVarCount);
         }
         if ($newBeforeStmtLines) {
             $init .= implode(PHP_EOL, $newBeforeStmtLines) . PHP_EOL;

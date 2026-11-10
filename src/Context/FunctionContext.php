@@ -472,10 +472,27 @@ class FunctionContext
         }
     }
 
-    /** Discard only the locals appended while lowering a standalone initializer. */
-    public function discardInitializerLocals(int $originalCount): void
+    /**
+     * Capture a standalone initializer's value, appended locals and statements.
+     * Materialized expressions belong to that helper, never to its caller or
+     * another helper lowering the same AST. Keep temporary numbering monotonic
+     * and retain updates to existing bindings, as this is not analysis rollback.
+     *
+     * @return array{mixed, array<string, string>, list<string>, list<string>}
+     */
+    public function captureInitializer(callable $lower): array
     {
-        $this->localVars = array_slice($this->localVars, 0, $originalCount, true);
+        $originalCount = count($this->localVars);
+        $materializedExpressions = $this->materializedExpressions;
+        $this->materializedExpressions = new SplObjectStorage();
+        try {
+            [$value, $before, $after] = $this->statements->capture($lower);
+            $locals = array_slice($this->localVars, $originalCount, null, true);
+            return [$value, $locals, $before, $after];
+        } finally {
+            $this->localVars = array_slice($this->localVars, 0, $originalCount, true);
+            $this->materializedExpressions = $materializedExpressions;
+        }
     }
 
     /** Object identity implies an immutable binding; weaker facts never erase it. */

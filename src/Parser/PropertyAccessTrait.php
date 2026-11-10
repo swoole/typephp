@@ -498,7 +498,7 @@ trait PropertyAccessTrait
                 $this->fatalError($expr, "The 'static' keyword can only be used as the class name in class methods");
             }
             $propertyName = $this->parseIdentifier($expr->name);
-            $slot = $this->registerStaticPropertySlot(
+            $slot = $this->context->registerStaticPropertySlot(
                 'static::$' . $propertyName,
                 'typephp_get_static_property_slot(' . $this->getCalledCeExpr() . ', '
                     . $this->getLiteralString($propertyName) . ')',
@@ -520,7 +520,7 @@ trait PropertyAccessTrait
             if ($resolution->nativeProperty && $class !== null) {
                 $classPtr = $this->getClassEntryPtr($class);
                 $property = $this->parseIdentifier($expr->name);
-                $slot = $this->registerStaticPropertySlot(
+                $slot = $this->context->registerStaticPropertySlot(
                     $class . '::$' . $property,
                     'typephp_get_static_property_slot(' . $classPtr . ', ' . $nativeProp . ')',
                 );
@@ -531,7 +531,7 @@ trait PropertyAccessTrait
                 // called CE is stable for this function invocation, just like
                 // static::$property, but not across separate invocations.
                 $propertyName = $this->parseIdentifier($expr->name);
-                $slot = $this->registerStaticPropertySlot(
+                $slot = $this->context->registerStaticPropertySlot(
                     'trait-self::$' . $propertyName,
                     'typephp_get_static_property_slot(' . $this->getCalledCeExpr() . ', '
                         . $this->getLiteralString($propertyName) . ')',
@@ -555,7 +555,7 @@ trait PropertyAccessTrait
         $info = $this->getHoistedObjectPropInfo($def->type);
         $propName = $this->parseIdentifier($expr->name);
         $classPtr = $this->getClassEntryPtr($class);
-        $slot = $this->registerStaticPropertySlot(
+        $slot = $this->context->registerStaticPropertySlot(
             $class . '::$' . $propName,
             'typephp_get_static_property_slot(' . $classPtr . ', ' . $nativeProp . ')',
         );
@@ -566,27 +566,6 @@ trait PropertyAccessTrait
         }
 
         return $slot;
-    }
-
-    /**
-     * Cache only the raw Zend static-property slot in the current C++ function
-     * invocation. Its value and reference/indirect state remain live and are
-     * deliberately re-read on every use.
-     */
-    private function registerStaticPropertySlot(string $key, string $resolver): string
-    {
-        if (isset($this->context->staticPropRefs[$key])) {
-            return $this->context->staticPropRefs[$key]['accessorName'] . '()';
-        }
-
-        $name = '_typephp_static_property_slot_' . count($this->context->staticPropRefs);
-        $accessorName = '_typephp_static_property_' . count($this->context->staticPropRefs);
-        $this->context->staticPropRefs[$key] = [
-            'name' => $name,
-            'accessorName' => $accessorName,
-            'resolver' => $resolver,
-        ];
-        return $accessorName . '()';
     }
 
     protected function parseStaticPropertyFetch(Expr\StaticPropertyFetch $expr): string

@@ -157,8 +157,8 @@ class FunctionContext
      */
     public SplObjectStorage $materializedExpressions;
     public array $objectProps;
-    /** Map of lazily resolved, function-local static-property zval slots. */
-    public array $staticPropRefs = [];
+    /** @var array<string, array{name: string, accessorName: string, resolver: string}> */
+    private array $staticPropRefs = [];
     public int $scopeLevel = 0;
     /**
      * @var array<int, ScopeContext>
@@ -217,6 +217,33 @@ class FunctionContext
     public function addLocalVar(string $name, string $type): void
     {
         $this->localVars[$name] = $this->varTypeDegradations[$name] ?? $type;
+    }
+
+    /**
+     * Register one lazy static-property accessor per semantic key, retaining
+     * its first resolver and declaration order within this function context.
+     * Only the raw Zend slot is cached; each access still reads its live value.
+     */
+    public function registerStaticPropertySlot(string $key, string $resolver): string
+    {
+        if (isset($this->staticPropRefs[$key])) {
+            return $this->staticPropRefs[$key]['accessorName'] . '()';
+        }
+
+        $index = count($this->staticPropRefs);
+        $accessorName = '_typephp_static_property_' . $index;
+        $this->staticPropRefs[$key] = [
+            'name' => '_typephp_static_property_slot_' . $index,
+            'accessorName' => $accessorName,
+            'resolver' => $resolver,
+        ];
+        return $accessorName . '()';
+    }
+
+    /** @return array<string, array{name: string, accessorName: string, resolver: string}> */
+    public function getStaticPropertySlots(): array
+    {
+        return $this->staticPropRefs;
     }
 
     public function getTypedArrayContract(string $name): ?array

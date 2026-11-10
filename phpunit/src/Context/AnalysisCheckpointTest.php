@@ -98,7 +98,7 @@ final class AnalysisCheckpointTest extends TestCase
             $context->materializedExpressions[new Expr\Variable('root')] = 'analysis_value';
             $context->objectProps['slot'] = [];
             $context->hoistedProps['object']['property'] = true;
-            $context->staticPropRefs['static_slot'] = [];
+            $context->registerStaticPropertySlot('Example::$value', 'analysis_slot()');
             $context->classEntryPtrs['Example'] = 'analysis_ce';
             $context->needsCalledCe = true;
             $context->needsCalledClass = true;
@@ -120,7 +120,7 @@ final class AnalysisCheckpointTest extends TestCase
         self::assertSame([], $context->nativeStackPromotions);
         self::assertSame([], $context->objectProps);
         self::assertSame([], $context->hoistedProps);
-        self::assertSame([], $context->staticPropRefs);
+        self::assertSame([], $context->getStaticPropertySlots());
         self::assertSame([], $context->classEntryPtrs);
         self::assertFalse($context->needsCalledCe);
         self::assertFalse($context->needsCalledClass);

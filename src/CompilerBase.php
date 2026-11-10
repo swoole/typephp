@@ -6258,7 +6258,7 @@ abstract class CompilerBase implements PropertyAccessContext
                 $code .= $this->getIndent() . $info['type'] . ' &' . $name . ' = ' . $info['getter'] . ';' . PHP_EOL;
             }
         }
-        foreach ($this->context->staticPropRefs as $info) {
+        foreach ($this->context->getStaticPropertySlots() as $info) {
             $code .= $this->getIndent() . 'zval *' . $info['name'] . ' = nullptr;' . PHP_EOL;
             $code .= $this->getIndent() . 'const auto ' . $info['accessorName'] . ' = [&]() {'
                 . ' return typephp_get_static_property_cached(' . $info['name'] . ', [&]() {'

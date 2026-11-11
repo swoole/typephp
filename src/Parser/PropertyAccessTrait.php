@@ -1148,6 +1148,34 @@ trait PropertyAccessTrait
         return '[&]() {' . PHP_EOL . implode(PHP_EOL, $body) . PHP_EOL . '}()';
     }
 
+    /** Look up declaration metadata without lowering the receiver or emitting diagnostics. */
+    protected function findReadablePropertyDefinition(NodeAbstract $expr, bool $includeNative = false): ?PropertyDef
+    {
+        $static = $expr instanceof Expr\StaticPropertyFetch;
+        if (($expr instanceof Expr\PropertyFetch || $expr instanceof Expr\NullsafePropertyFetch)
+            && $expr->name instanceof Node\Identifier) {
+            $class = $this->detectDeclaredClassOfExpr($expr->var);
+        } elseif ($static && $expr->class instanceof Node\Name && $expr->name instanceof Node\VarLikeIdentifier) {
+            $class = $this->parseIdentifier($expr->class);
+            if ($class === 'static' || ($class === 'self' && $this->classDef?->trait)) {
+                return null;
+            }
+            $class = match ($class) {
+                'self' => $this->getFullClassName(),
+                'parent' => $this->classDef?->extends ?? '',
+                default => $this->getNamespacedClassName($class),
+            };
+        } else {
+            return null;
+        }
+        if ($class === '' || (!$includeNative && $this->isNativeObjectClass($class))) {
+            return null;
+        }
+        return $this->createPropertyAccessResolver()->findReadableProperty(
+            $class, $expr->name->toString(), $this->classDef ? $this->getFullClassName() : '', $static,
+        );
+    }
+
     protected function getPropertyIdentifier(Expr\PropertyFetch $expr, NodeAbstract $object, NodeAbstract $property): ?string
     {
         $target = $this->resolveInstancePropertyFetchTarget($object, $property);

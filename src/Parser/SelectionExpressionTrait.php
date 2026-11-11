@@ -8,7 +8,6 @@
 namespace TypePhp\Parser;
 
 use TypePhp\Type;
-use TypePhp\Entity\PropertyDef;
 
 use PhpParser\Node;
 use PhpParser\Node\Expr;
@@ -25,7 +24,7 @@ trait SelectionExpressionTrait
             }
             $class = $this->detectDeclaredClassOfExpr($branch);
             if ($class === '') {
-                $property = $this->getSelectionPropertyDef($branch);
+                $property = $this->findReadablePropertyDefinition($branch);
                 if ($property?->type === Type::OBJECT) {
                     $class = $property->class;
                 }
@@ -75,33 +74,6 @@ trait SelectionExpressionTrait
         return $left;
     }
 
-    protected function getSelectionPropertyDef(Expr $expr): ?PropertyDef
-    {
-        $static = $expr instanceof Expr\StaticPropertyFetch;
-        if (($expr instanceof Expr\PropertyFetch || $expr instanceof Expr\NullsafePropertyFetch)
-            && $expr->name instanceof Node\Identifier) {
-            $class = $this->detectDeclaredClassOfExpr($expr->var);
-        } elseif ($static && $expr->class instanceof Node\Name && $expr->name instanceof Node\VarLikeIdentifier) {
-            $class = $this->parseIdentifier($expr->class);
-            if ($class === 'static' || ($class === 'self' && $this->classDef?->trait)) {
-                return null;
-            }
-            $class = match ($class) {
-                'self' => $this->getFullClassName(),
-                'parent' => $this->classDef?->extends ?? '',
-                default => $this->getNamespacedClassName($class),
-            };
-        } else {
-            return null;
-        }
-        if ($class === '' || $this->isNativeObjectClass($class)) {
-            return null;
-        }
-        return $this->createPropertyAccessResolver()->findReadableProperty(
-            $class, $expr->name->toString(), $this->classDef ? $this->getFullClassName() : '', $static,
-        );
-    }
-
     /** Read a single nullable contract; heterogeneous unions stay dynamic. */
     protected function getNonNullSelectionType(Expr $expr): string
     {
@@ -114,7 +86,7 @@ trait SelectionExpressionTrait
         if ($type !== Type::VAR && $type !== Type::REF) {
             return $type;
         }
-        $property = $this->getSelectionPropertyDef($expr);
+        $property = $this->findReadablePropertyDefinition($expr);
         $check = $property?->typeCheck;
         if ($property !== null && $property->type !== Type::VAR) {
             return $property->type;
@@ -168,7 +140,7 @@ trait SelectionExpressionTrait
         if ($this->isNativeType($receiverType)) {
             $receiver = 'php::Var(' . $receiver . ')';
         }
-        $property = $this->getSelectionPropertyDef($expr);
+        $property = $this->findReadablePropertyDefinition($expr);
         $name = $expr->name instanceof Node\Identifier
             ? $this->getLiteralString($expr->name->toString())
             : $this->parseOrderedOperand($expr->name, false, true);
@@ -237,9 +209,16 @@ trait SelectionExpressionTrait
         }
         $probe = $presence !== null || $this->isVarExpr($expr->left)
             ? $left : $this->addTmpVar($type === Type::OBJECT ? Type::OBJECT : Type::VAR);
+        $selected = $probe;
+        $propertyArray = $this->getTypedArrayPropertyReadDefinition($expr->left);
+        if ($propertyArray !== null) {
+            $selected = $this->convertTypedArrayPropertyValue(
+                $propertyArray['type'], $propertyArray['class'] ?? '', $probe,
+            );
+        }
         $code = $probe !== $left ? $probe . ' = ' . $left . ';' . PHP_EOL : '';
         $code .= 'if (' . ($presence ?? 'php::exists(' . $probe . ')') . ') {' . PHP_EOL;
-        $code .= $this->withIndentedBlock(fn() => $this->getIndent() . $result . ' = ' . $format($probe) . ';' . PHP_EOL);
+        $code .= $this->withIndentedBlock(fn() => $this->getIndent() . $result . ' = ' . $format($selected) . ';' . PHP_EOL);
         $code .= $this->getIndent() . '} else {' . PHP_EOL;
         $code .= $this->withIndentedBlock(fn() => $this->formatCapturedStmtLines($rightBefore)
             . $this->getIndent() . $result . ' = ' . $format($right) . ';' . PHP_EOL
@@ -574,8 +553,14 @@ trait SelectionExpressionTrait
         }
 
         $leftType = $this->detectTypeOfExpr($left);
+        $propertyArray = $this->getTypedArrayPropertyReadDefinition($left);
+        if ($propertyArray !== null) {
+            $temporary = $this->addTmpVar($propertyArray['type']);
+            $this->materializeStatementTemporary($temporary, $leftExpr);
+            $leftExpr = $temporary;
+        }
         $simpleShorthand = $op === self::OP_NOT_EMPTY
-            && $this->isVarExpr($left)
+            && ($this->isVarExpr($left) || $propertyArray !== null)
             && $leftType !== Type::REF;
         if ($simpleShorthand) {
             // A local variable is already a stable value. Avoid routing it

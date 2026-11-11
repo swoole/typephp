@@ -218,6 +218,10 @@ trait ForeachTrait
         if (($typedArray = $this->getTypedArrayDefinition($node->expr)) !== null) {
             return $this->parseTypedArrayForeach($node, $typedArray);
         }
+        $typedProperty = $this->getTypedArrayPropertyDefinition($node->expr);
+        if ($typedProperty !== null && !$node->byRef && $this->canBindTypedPropertyForeachTargets($node, $typedProperty)) {
+            return $this->parseTypedArrayForeach($node, $typedProperty, true);
+        }
         if ($node->byRef) {
             $this->assertImmutableMutationTarget($node->expr);
             $this->assertTypedArrayReferenceForbidden($node->expr);
@@ -268,5 +272,29 @@ trait ForeachTrait
         $code .= $this->parseForeachIterable($node, $iterableVar);
 
         return $code;
+    }
+
+    private function canBindTypedPropertyForeachTargets(Foreach_ $node, array $definition): bool
+    {
+        $keyName = null;
+        foreach ([[$node->keyVar, $definition['keyType'], ''],
+            [$node->valueVar, $definition['type'], $definition['class'] ?? '']] as [$target, $type, $class]) {
+            if ($target === null) {
+                continue;
+            }
+            if (!$this->isVarExpr($target)) {
+                return false;
+            }
+            $name = $this->parseVariable($target);
+            if ($name === $keyName || isset($this->context->varTypeDegradations[$name])) {
+                return false;
+            }
+            if ($this->hasVar($name) && ($this->getRawVarType($name) !== $type
+                || ($class !== '' && $this->getDeclaredObjectType($name) !== $class))) {
+                return false;
+            }
+            $keyName = $name;
+        }
+        return true;
     }
 }

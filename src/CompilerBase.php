@@ -2620,7 +2620,7 @@ abstract class CompilerBase implements PropertyAccessContext
 
     protected function detectClassOfExpr(NodeAbstract $expr): string
     {
-        if (($typedArray = $this->getTypedArrayAccessDefinition($expr)) !== null) {
+        if (($typedArray = $this->getTypedArrayReadDefinition($expr)) !== null) {
             return $typedArray['class'] ?? '';
         }
         // Error suppression changes diagnostics only; it must never erase the
@@ -4070,7 +4070,7 @@ abstract class CompilerBase implements PropertyAccessContext
                 }
                 return $this->detectStaticClassConstantStorageType($expr);
             case 'Expr_ArrayDimFetch':
-                if (($typedArray = $this->getTypedArrayAccessDefinition($expr)) !== null) {
+                if (($typedArray = $this->getTypedArrayReadDefinition($expr)) !== null) {
                     return $typedArray['type'];
                 }
                 if ($this->isStdArrayExpr($expr)) {
@@ -5361,7 +5361,7 @@ abstract class CompilerBase implements PropertyAccessContext
                 // resolve a parent private property against the runtime child
                 // class, so isset()/?? could observe a different slot from a
                 // normal native read or write.
-                if ($this->isVarExpr($expr->var) && $this->getSelectionPropertyDef($expr) !== null) {
+                if ($this->isVarExpr($expr->var) && $this->findReadablePropertyDefinition($expr) !== null) {
                     $var = in_array($op, [self::OP_ISSET, self::OP_EMPTY, self::OP_NOT_EMPTY], true)
                         ? $this->parsePropertyPresenceValue($expr)
                         : $this->parsePropertyFetch($expr);

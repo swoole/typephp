@@ -164,7 +164,7 @@ trait NullsafeAccessTrait
                             : $this->parseOrderedOperand($node->name, false, true);
                         $scope = $this->classDef ? $this->getClassEntryPtr($this->getFullClassName()) : 'nullptr';
                         if ($receiverClass !== '' && $node->name instanceof Node\Identifier
-                            && $this->getSelectionPropertyDef($node) !== null) {
+                            && $this->findReadablePropertyDefinition($node) !== null) {
                             $resolution = $this->resolveNativeInstanceProperty($node, $node->name->toString(), $receiverClass);
                             if ($resolution !== null) {
                                 $scope = $this->getClassEntryPtr($resolution->declaringClass);

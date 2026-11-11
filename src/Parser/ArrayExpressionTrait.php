@@ -221,6 +221,10 @@ trait ArrayExpressionTrait
             }
             return $this->parseTypedArrayRead($node);
         }
+        if (!$this->isArrayDimFetchUpdate($node)
+            && ($propertyArray = $this->getTypedArrayPropertyReadDefinition($node)) !== null) {
+            return $this->parseTypedArrayPropertyRead($node, $propertyArray);
+        }
         if ($this->isNativeObjectClass($this->detectClassOfExpr($node->var))) {
             if ($node->dim === null) {
                 $this->fatalError($node, 'Cannot use [] for reading');

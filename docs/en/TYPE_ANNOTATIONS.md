@@ -108,6 +108,8 @@ Typed PHP arrays primarily establish their constraints statically. They introduc
 
 Ordinary local list/dict assignment propagates the contract and preserves PHP COW. Reference assignment propagates the same contract and alias relationship. TypePHP function/method parameters, including reference parameters, require annotations with the same kind and key/value types.
 
+Direct index reads from a statically resolved `StdList` or `StdDict` property without hooks use the declared element type. By-value `foreach` uses the declared key and value types for simple locals with compatible storage. The compiler checks each consumed element because the property can be replaced. It does not scan the array. Use `isset` or `??` for missing keys. A by-value copy of the whole property remains an ordinary PHP array with COW.
+
 The target design also propagates property contracts:
 
 ```php
@@ -126,7 +128,7 @@ The goal is preventing dynamic code from invalidating a static contract, not res
 - Dynamic mutation through `array_push`, sorting, references, or callbacks is forbidden. A read-only result does not prove a call has no mutation side effects.
 - `std::ref()`, element references, and dynamic reference escape paths are forbidden. Ordinary callable or unannotated `array` parameters cannot recover a trusted list/dict contract.
 - Array results of read-only operations normally remain ordinary PHP arrays unless their result contract is separately proven and propagated.
-- Annotations do not protect arbitrary Zend objects from dynamic whole-object mutation. Existing PHP-array property checks cover first-level direct element writes, not whole-property replacement, object escapes, or property references. Property reads cannot automatically become trusted typed locals.
+- TypePHP rejects explicit reference acquisition for statically resolved typed array properties and their elements. The annotations still allow whole-property replacement and cannot prevent mutation through arbitrary dynamic Zend objects. Reads validate elements before using their declared types.
 - List/dict descriptors within `StdFunc` grant no exception: both the callback and its bridge must preserve the contract, rather than using an ordinary Zend Bridge that loses metadata.
 
 The historical `ArrayDef` has been removed in favor of `StdList` / `StdDict`. Its old hole restrictions no longer apply to PHP typed arrays. Independent C++ array/vector bounds checks remain intact.

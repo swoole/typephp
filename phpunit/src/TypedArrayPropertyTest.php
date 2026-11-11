@@ -36,4 +36,34 @@ final class TypedArrayPropertyTest extends \BaseTest
         self::assertStringNotContainsString('.length() + 1', $code);
         self::assertStringNotContainsString('.newItem()', $code);
     }
+
+    public function testPropertyReadsAndIterationRecoverElementTypes(): void
+    {
+        global $translator;
+        $this->compile('typed-array-property-reads.php');
+        $source = TYPEPHP_ROOT_PATH . '/phpunit/code/typed-array-property-reads.php';
+        $code = file_get_contents($translator->getCppFile($source));
+
+        foreach ([
+            'typedarraypropertysum' => ['php::Int number', 'php::Int index', 'php::Int value', 'php::toIntExact('],
+            'typedarraypropertyobjects' => ['php::Object first', 'php::Object item', 'php::toObjectExact('],
+            'typedarraystaticread' => ['php::Str label', 'php::Int count', 'php::toIntExact('],
+            'typedarraynativeread' => ['php::Int number', 'php::toIntExact('],
+        ] as $function => $expected) {
+            self::assertSame(1, preg_match('/php::Int php_' . $function . '\(.*?\) \{(.*?)\n\}/s', $code, $matches));
+            $body = $matches[1];
+            foreach ($expected as $fragment) {
+                self::assertStringContainsString($fragment, $body);
+            }
+            self::assertMatchesRegularExpression('/php::ForeachIterator \w+\{[^\n]+, false, nullptr\}/', $body);
+            self::assertStringNotContainsString('toTypedArray(', $body);
+        }
+        self::assertStringContainsString('php_typedarrayreaditem__value(first)', $code);
+        self::assertStringContainsString('php_typedarrayreaditem__value(item)', $code);
+    }
+
+    public function testPropertyElementsCannotEscapeByReference(): void
+    {
+        $this->exec('Typed arrays cannot escape', 'typed-array-property-element-reference.php');
+    }
 }

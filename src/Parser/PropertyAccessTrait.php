@@ -1319,6 +1319,15 @@ trait PropertyAccessTrait
             $getProperty = $objectVar . '.attr(' . $id . ', ' . $this->escapeAttrMode($update) . ')';
         }
         $def = $this->getNativePropertyDef($expr);
+        if ($def === null && $nativeExpressionClass !== '') {
+            // Expression receivers use dynamic lookup, but a readable readonly
+            // declaration still proves the scalar storage of a successful read.
+            $declared = $this->findReadablePropertyDefinition($expr);
+            if ($declared !== null && $declared->isReadonly()
+                && $this->usesNativeScalarStorage($declared->type)) {
+                $def = $declared;
+            }
+        }
         if ($def && $this->usesNativeScalarStorage($def->type)) {
             $propName = $this->parseIdentifier($property);
             $typedFetch = $this->emitNativeInstancePropertyTypedFetch(
@@ -1435,6 +1444,23 @@ trait PropertyAccessTrait
     ): ?string {
         if ($this->isPropertyFetchUpdate($expr) && !in_array($def->type, [Type::INT, Type::FLOAT], true)) {
             return null;
+        }
+
+        // Readonly properties cannot use hoisted references, regardless of
+        // the receiver. A checked read must report uninitialized properties
+        // before scalar conversion, rather than treating their slots as zero.
+        if ($def->isReadonly()) {
+            $scope = 'nullptr';
+            if ($this->usesTraitPropertyScope($objectVar)) {
+                $scope = 'php::FakeScopeGuard::current()';
+            } elseif ($this->classDef !== null) {
+                $scope = $this->getClassEntryPtr($this->getFullClassName());
+            }
+            $getter = 'typephp_read_property_scoped(' . $objectVar . ', '
+                . $this->getLiteralString($propName) . ', ' . $scope . ', '
+                . $this->escapeAttrMode($this->isPropertyFetchUpdate($expr)) . ')';
+            $this->setNativePropertyValueSource($expr, self::NATIVE_PROPERTY_VALUE_DYNAMIC);
+            return $this->convertExprFromType($def->type, $getter);
         }
 
         if ($def->type === Type::BOOL) {

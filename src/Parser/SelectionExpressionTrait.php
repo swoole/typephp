@@ -272,6 +272,11 @@ trait SelectionExpressionTrait
         if (!$hasBranchStmts && $typeChanged) {
             $if = 'php::Var(' . $if . ')';
             $else = 'php::Var(' . $else . ')';
+        } elseif (!$hasBranchStmts && !$nativeSelection && $ifType === $elseType
+            && $ifType === Type::STR && $ifStorageType !== $elseStorageType) {
+            $if = $this->convertExprFromType(Type::STR, $if);
+            $else = $this->convertExprFromType(Type::STR, $else);
+            $expr->setAttribute(self::ATTR_LOWERED_TYPE, Type::STR);
         }
         if ($hasBranchStmts) {
             // REF and VOID are expression implementation types, not valid

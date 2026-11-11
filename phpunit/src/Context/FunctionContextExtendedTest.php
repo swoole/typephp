@@ -97,11 +97,11 @@ class FunctionContextExtendedTest extends TestCase
     public function testCeWrappersManipulation(): void
     {
         $ctx = new FunctionContext();
-        $ctx->ceWrappers['stdClass'] = 'ce_wrapper_0';
-        $ctx->ceWrappers['Exception'] = 'ce_wrapper_1';
+        $ctx->getOrCreateClassWrapper('stdClass', static fn() => 'ce_wrapper_0');
+        $ctx->getOrCreateClassWrapper('Exception', static fn() => 'ce_wrapper_1');
 
-        $this->assertArrayHasKey('stdClass', $ctx->ceWrappers);
-        $this->assertArrayHasKey('Exception', $ctx->ceWrappers);
+        $this->assertArrayHasKey('stdClass', $ctx->getClassWrappers());
+        $this->assertArrayHasKey('Exception', $ctx->getClassWrappers());
     }
 
     public function testObjectPropsManipulation(): void

@@ -57,6 +57,39 @@ final class PropertyAccessResolver
             || $this->isSameOrSubclassOf($declaringClass, $scope);
     }
 
+    /**
+     * Query a declared read contract without lowering an access or emitting
+     * diagnostics. Inaccessible/missing properties may use runtime magic and
+     * must not lend their declaration's type to that unrelated result.
+     */
+    public function findReadableInstanceProperty(string $class, string $property, string $scope): ?PropertyDef
+    {
+        return $this->findReadableProperty($class, $property, $scope, false);
+    }
+
+    public function findReadableProperty(string $class, string $property, string $scope, bool $static): ?PropertyDef
+    {
+        while (($classDef = $this->compiler->getClassDef($class)) !== null) {
+            if ($classDef->hasProperty($property)) {
+                $definition = $classDef->getProperty($property);
+                if ($definition->isStatic() !== $static) {
+                    return null;
+                }
+                if ($definition->isPublic()
+                    || ($definition->isPrivate() && $this->isSameClassName($scope, $class))
+                    || ($definition->isProtected() && $this->canAccessProtectedProperty($scope, $class))) {
+                    return $definition;
+                }
+                return null;
+            }
+            if ($classDef->extends === '') {
+                break;
+            }
+            $class = $classDef->extends;
+        }
+        return null;
+    }
+
     public function resolveNativeProperty(
         NodeAbstract $expr,
         string $property,

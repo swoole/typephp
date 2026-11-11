@@ -54,6 +54,27 @@ class CompositeStaticTypeTest extends \BaseTest
         $this->compile('composite-concrete-base-interface-return.php');
     }
 
+    public function testExpectedSubclassRelationRemainsRuntime(): void
+    {
+        $this->compile('composite-expected-subclass-return.php');
+    }
+
+    public function testUnrelatedClassesAreStillRejected(): void
+    {
+        $this->exec(
+            'Cannot assign object to return value of type `?CompositeSecondBox`',
+            'composite-unrelated-classes-mismatch.php'
+        );
+    }
+
+    public function testBuiltinFinalClassIsStillRejected(): void
+    {
+        $this->exec(
+            'Cannot assign object to return value of type `?CompositeTickLike`',
+            'composite-builtin-final-class-mismatch.php'
+        );
+    }
+
     public function testFinalClassAgainstUnrelatedInterfaceIsStillRejected(): void
     {
         $this->exec(

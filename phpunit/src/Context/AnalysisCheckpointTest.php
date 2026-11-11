@@ -85,23 +85,28 @@ final class AnalysisCheckpointTest extends TestCase
         $context = new FunctionContext();
         $context->addLocalVar('root', Type::INT);
         $buffer = $context->statements;
-        $this->analyze($context, function () use ($context): void {
+        $assignment = new Expr\Assign(new Expr\Variable('candidate'), new Expr\Closure());
+        $this->analyze($context, function () use ($context, $assignment): void {
             $context->registerTypedRefLocal('alias', 'root', Type::INT_REF);
             $context->withTypedRefBridgeScope(function () use ($context): void {
                 $context->registerTypedRefBridge('alias', 'analysis_wrapper');
             });
-            $context->localClosureCandidates['candidate'] = [];
-            $context->nativeLocalClosures['lowered'] = true;
+            $context->setLocalClosureCandidates(['candidate' => [
+                'assignment' => $assignment,
+                'closure' => $assignment->expr,
+                'calls' => 1,
+            ]]);
+            $context->registerNativeLocalClosure('candidate', $assignment);
             $context->nativeStackPromotions['temporary'] = [];
             $context->statements->addBefore('analysis_prepare();');
             $context->statements->addAfter('analysis_cleanup();');
-            $context->materializedExpressions[new Expr\Variable('root')] = 'analysis_value';
+            $context->addLocalVar('analysis_value', Type::VAR);
+            $context->registerMaterializedExpression($assignment, 'analysis_value', 'analysis_value = read();');
             $context->objectProps['slot'] = [];
             $context->hoistedProps['object']['property'] = true;
-            $context->staticPropRefs['static_slot'] = [];
-            $context->classEntryPtrs['Example'] = 'analysis_ce';
-            $context->needsCalledCe = true;
-            $context->needsCalledClass = true;
+            $context->registerStaticPropertySlot('Example::$value', 'analysis_slot()');
+            $context->getOrCreateLocalClassEntry('Example', static fn() => 'analysis_ce');
+            $context->requireCalledClass();
             $context->enterScope();
             $context->inLoop = true;
             $context->inContinuableLoop = true;
@@ -110,20 +115,20 @@ final class AnalysisCheckpointTest extends TestCase
         self::assertSame(['root' => Type::INT], $context->localVars);
         self::assertSame($buffer, $context->statements);
         self::assertFalse($buffer->hasPending());
-        self::assertCount(0, $context->materializedExpressions);
+        self::assertNull($context->getMaterializedExpression($assignment));
         self::assertSame([], $context->localVarInitializers);
-        self::assertSame([], $context->localClosureCandidates);
-        self::assertSame([], $context->nativeLocalClosures);
+        self::assertNull($context->getLocalClosureCandidate($assignment));
+        self::assertFalse($context->isNativeLocalClosure('candidate'));
         self::assertSame([], $context->typedRefBindings);
         self::assertSame([], $context->typedRefRoots);
         self::assertSame([], $context->typedRefAliases);
         self::assertSame([], $context->nativeStackPromotions);
         self::assertSame([], $context->objectProps);
         self::assertSame([], $context->hoistedProps);
-        self::assertSame([], $context->staticPropRefs);
-        self::assertSame([], $context->classEntryPtrs);
-        self::assertFalse($context->needsCalledCe);
-        self::assertFalse($context->needsCalledClass);
+        self::assertSame([], $context->getStaticPropertySlots());
+        self::assertSame([], $context->getLocalClassEntries());
+        self::assertFalse($context->needsCalledCe());
+        self::assertFalse($context->needsCalledClass());
         self::assertSame([], $context->scopeLayouts);
         self::assertSame(0, $context->scopeLevel);
         self::assertFalse($context->inLoop);
@@ -202,7 +207,7 @@ final class AnalysisCheckpointTest extends TestCase
         self::assertSame([], $context->localVars);
         self::assertSame(0, $context->tmpVarIndex);
         self::assertFalse($context->statements->hasPending());
-        self::assertCount(0, $context->materializedExpressions);
+        self::assertNull($context->getMaterializedExpression($expression));
         $compiler->parseExpr($expression);
         self::assertNotEmpty($context->statements->peekBefore());
     }

@@ -160,6 +160,9 @@ PHP);
         yield 'class constant and trait constant differ' => [
             'trait A { public const X = 1; } class C { use A; public const X = 2; }',
         ];
+        yield 'explicit and inferred constant types differ' => [
+            'trait A { public const int X = 2; } trait B { public const X = 2; } class C { use A, B; }',
+        ];
     }
 
     /** @return array{CompilerTest, string} */

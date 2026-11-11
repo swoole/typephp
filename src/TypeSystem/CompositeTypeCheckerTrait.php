@@ -11,6 +11,7 @@ use TypePhp\Type;
 
 use PhpParser\Node\Expr;
 use PhpParser\NodeAbstract;
+use TypePhp\Resolver\Reflection;
 
 trait CompositeTypeCheckerTrait
 {
@@ -173,16 +174,39 @@ trait CompositeTypeCheckerTrait
         if ($this->isObjectClassStaticallyAssignableTo($class, $expected)) {
             return self::COMPOSITE_TYPE_MATCH;
         }
-
-        // Only a final class or a `new` expression pins the exact runtime type;
-        // an interface, abstract class or plain non-final declaration may still
-        // hold a subtype that implements/inherits the expected type, so keep the
-        // runtime check instead of proving a mismatch.
-        if (!$this->isFinalClass($class) && !$this->isKnownConcreteObjectExpr($value, $class)) {
-            return self::COMPOSITE_TYPE_UNKNOWN;
+        // A final class (including built-in final classes) or an explicit
+        // `new` expression pins the runtime type, so the relation is decided.
+        if ($this->isKnownConcreteObjectExpr($value, $class) || $this->isFinalRuntimeClass($class)) {
+            return self::COMPOSITE_TYPE_MISMATCH;
         }
 
-        return self::COMPOSITE_TYPE_MISMATCH;
+        // Two unrelated classes cannot share a subclass under PHP's single
+        // inheritance, so that relation is a proven mismatch. A shared subtype
+        // may still exist when the expected class extends the declared one, or
+        // when either side is an interface a concrete class can implement.
+        if (!$this->isInterface($class) && !$this->isInterface($expected)) {
+            return $this->isObjectClassStaticallyAssignableTo($expected, $class)
+                ? self::COMPOSITE_TYPE_UNKNOWN
+                : self::COMPOSITE_TYPE_MISMATCH;
+        }
+        if ($this->isInterface($class) && $this->isFinalRuntimeClass($expected)) {
+            return $this->isObjectClassStaticallyAssignableTo($expected, $class)
+                ? self::COMPOSITE_TYPE_UNKNOWN
+                : self::COMPOSITE_TYPE_MISMATCH;
+        }
+
+        return self::COMPOSITE_TYPE_UNKNOWN;
+    }
+
+    protected function isFinalRuntimeClass(string $class): bool
+    {
+        // isFinalClass() only inspects project classes; built-in final classes
+        // such as Closure cannot gain subclasses either.
+        if ($this->isFinalClass($class)) {
+            return true;
+        }
+        return $this->isInternalClass($class)
+            && Reflection::getClass($class)?->isFinal() === true;
     }
 
     protected function isNullExpr(NodeAbstract $expr): bool

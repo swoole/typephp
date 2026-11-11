@@ -14,6 +14,27 @@ use TypePhp\CompilerTest;
  */
 final class LocalClosureCodegenTest extends BaseTest
 {
+    public function testEscapedLocalNameAndFallbackClosuresKeepSeparateStorage(): void
+    {
+        global $translator;
+
+        $compiler = CompilerTest::create(TYPEPHP_ROOT_PATH);
+        $translator = $compiler;
+        $source = TYPEPHP_ROOT_PATH . '/phpunit/code/local-closure-state.php';
+        $compiler->addFiles([$source]);
+        $compiler->prepareFile($source);
+        $generated = $compiler->convertFile($source);
+        $code = file_get_contents($generated);
+
+        self::assertIsString($code);
+        self::assertStringContainsString('auto _php__var__class = [](', $code);
+        self::assertStringContainsString('_php__var__class(input)', $code);
+        self::assertStringNotContainsString('php::Object _php__var__class;', $code);
+        self::assertStringNotContainsString('auto fallback = [', $code);
+        self::assertStringNotContainsString('auto escaping = [', $code);
+        self::assertSame(2, substr_count($code, 'php::newClosureWithParameters('));
+    }
+
     public function testOnlyProvenLocalClosuresUseConcreteCppLambdas(): void
     {
         global $translator;
@@ -27,10 +48,11 @@ final class LocalClosureCodegenTest extends BaseTest
         $code = file_get_contents($generated);
 
         self::assertIsString($code);
-        self::assertStringContainsString(
-            'auto direct = [base = base](php::Var value) mutable -> php::Var {',
+        self::assertMatchesRegularExpression(
+            '/auto direct = \[base = base\]\(php::Var tmp_var_\d+\) mutable -> php::Var \{/',
             $code,
         );
+        self::assertStringContainsString('php::Int value = php::toInt(', $code);
         self::assertStringContainsString('direct(2L)', $code);
         self::assertStringNotContainsString('typephp_call_cached(direct', $code);
 

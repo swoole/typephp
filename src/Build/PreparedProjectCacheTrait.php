@@ -24,10 +24,7 @@ trait PreparedProjectCacheTrait
         foreach (get_loaded_extensions() as $extension) {
             $extensions[$extension] = phpversion($extension);
         }
-        $initialState = [];
-        foreach (self::PREPARED_PROJECT_FIELDS as $field) {
-            $initialState[$field] = $this->{$field};
-        }
+        $initialState = $this->capturePreparedProjectState();
         return hash('sha256', serialize([
             2, $this->getIncrementalGeneratorFingerprint(), $sources, PHP_VERSION,
             $extensions, get_defined_constants(), $this->linkLibs,
@@ -38,6 +35,16 @@ trait PreparedProjectCacheTrait
     private function preparedProjectCacheFile(): string
     {
         return $this->buildDir . '/cache/prepared/' . hash('sha256', $this->targetName) . '.bin';
+    }
+
+    private function capturePreparedProjectState(): array
+    {
+        $dependencies = $this->exportSymbolDependencyState();
+        $state = [];
+        foreach (self::PREPARED_PROJECT_FIELDS as $field) {
+            $state[$field] = $dependencies[$field] ?? $this->{$field};
+        }
+        return $state;
     }
 
     private function restorePreparedProject(string $key): bool
@@ -68,14 +75,19 @@ trait PreparedProjectCacheTrait
                     && !($state['nativeGlobalTypeResolver'] instanceof \TypePhp\NativeClass\NativeGlobalTypeResolver))) {
                 return false;
             }
+            $currentState = $this->capturePreparedProjectState();
             foreach (self::PREPARED_PROJECT_FIELDS as $field) {
-                if (get_debug_type($state[$field]) !== get_debug_type($this->{$field})
+                if (get_debug_type($state[$field]) !== get_debug_type($currentState[$field])
                     && $field !== 'nativeGlobalTypeResolver') {
                     return false;
                 }
             }
+            $this->restoreSymbolDependencyState($state);
+            $dependencies = $this->exportSymbolDependencyState();
             foreach (self::PREPARED_PROJECT_FIELDS as $field) {
-                $this->{$field} = $state[$field];
+                if (!array_key_exists($field, $dependencies)) {
+                    $this->{$field} = $state[$field];
+                }
             }
             $this->resetFile();
             $this->resetNamespace();
@@ -127,10 +139,7 @@ trait PreparedProjectCacheTrait
                     }
                 }
             }
-            $state = [];
-            foreach (self::PREPARED_PROJECT_FIELDS as $field) {
-                $state[$field] = $this->{$field};
-            }
+            $state = $this->capturePreparedProjectState();
             $file = $this->preparedProjectCacheFile();
             AtomicFile::write($file, $key . "\n" . serialize($state), '.prepared-');
         } catch (\Throwable) {

@@ -12,7 +12,8 @@ final class ClassConstantExpressionInlineTest extends \BaseTest
 
         $leaf = $this->methodBody($code, 'php_classconstantexpressioninline__readleaf');
         self::assertDoesNotMatchRegularExpression('/php::(constant|classConstant)\(/', $leaf);
-        self::assertMatchesRegularExpression('/= \(1L+\);/', $leaf);
+        self::assertStringContainsString('1L', $leaf);
+        self::assertStringNotContainsString('php::Var', $leaf);
 
         $mask = $this->methodBody($code, 'php_classconstantexpressioninline__readmask');
         self::assertStringContainsString('php::constant(', $mask);

@@ -272,6 +272,10 @@ trait FiberGenerator
 
             $this->prepareReferenceCaptureDegradations($v->stmts);
 
+            $this->prepareLiteralArrayShapes($v->stmts);
+
+            $this->prepareObjectBindingFacts($v->stmts);
+
             foreach ($functionDef->argInfoList as $i => $argInfo) {
                 $code .= $this->getIndent() . Type::VAR . ' ' . $argInfo->name . ' = vars_.get(' . $i . ');' . PHP_EOL;
                 $this->addArgument($argInfo->name, Type::VAR);
@@ -306,7 +310,7 @@ trait FiberGenerator
                 );
             }
             $body .= $this->getIndent() . 'return ' . self::VALUE_NULL . ';' . PHP_EOL;
-            if ($this->context->needsUserCodeCallableScope) {
+            if ($this->context->needsUserCodeCallableScope()) {
                 $body = $this->genUserCodeCallableScopeGuard() . $body;
             }
             $this->indentLevel--;

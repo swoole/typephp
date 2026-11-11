@@ -1083,10 +1083,10 @@ class Translator extends Preprocessor
 
         foreach ($includeGlobals ? $this->globalVars : [] as $name => $type) {
             if ($sourceFile !== null
-                && ($this->globalVarDeclInFile[$name] ?? null) !== $sourceFile) {
+                && $this->getGlobalDeclarationFile($name) !== $sourceFile) {
                 continue;
             }
-            if ($commonOnly && isset($this->globalVarDeclInFile[$name])) {
+            if ($commonOnly && $this->getGlobalDeclarationFile($name) !== null) {
                 continue;
             }
             $cppType = isset($this->nativeGlobalObjects[$name])
@@ -1849,7 +1849,7 @@ CODE;
         }
         $code .= $this->genRequestArrayDefaultCleanup();
         foreach ($this->constants as $name => $const) {
-            if ($const->type !== Type::VAR) {
+            if ($const->type !== Type::VAR && $const->type !== Type::STR) {
                 continue;
             }
             $code .= $name . '.unset();' . PHP_EOL;
@@ -3392,8 +3392,8 @@ CODE;
         if ($includeOwn && isset($this->declarationHeaderFiles[$file])) {
             $headers[] = $this->declarationHeaderFiles[$file];
         }
-        foreach ($this->symbolCallInFile[$file] ?? [] as $symbol) {
-            $dependencyFile = $this->symbolDeclInFile[$symbol] ?? null;
+        foreach ($this->getFileSymbolUses($file) as $symbol) {
+            $dependencyFile = $this->getSymbolDeclarationFile($symbol);
             if ($dependencyFile === null || $dependencyFile === $file) {
                 continue;
             }
@@ -6779,6 +6779,8 @@ CODE;
                         (string) ($k + 1)
                     );
                     $expr = $this->convertExprFromType($argInfo->type, $rawVar);
+                } elseif ($argInfo->type === Type::OBJECT && $declaredClass === '' && $argInfo->typeCheck) {
+                    $expr = $this->convertCompositeObjectArgument($argExpr, $argInfo, $displayName, $k);
                 } elseif ($argInfo->type === Type::OBJECT && $declaredClass !== '') {
                     $expr = $argInfo->nullable
                         ? $this->convertNullableObjectExpr($argExpr, $this->getClassEntryPtr($declaredClass))
@@ -6996,6 +6998,8 @@ CODE;
         $stdParameterBindings = $this->initializeStdContainerParameters($this->functionDef);
         $this->initializeImmutableFunctionContext();
         $this->prepareReferenceCaptureDegradations($v->stmts, true);
+        $this->prepareLiteralArrayShapes($v->stmts);
+        $this->prepareObjectBindingFacts($v->stmts);
 
         if ($this->functionDef->generator) {
             try {
@@ -7048,7 +7052,7 @@ CODE;
         }
 
         if ($v->stmts && !$this->class && $this->methodDef === null) {
-            $this->context->localClosureCandidates = (new LocalClosureAnalyzer())->analyze($v->stmts);
+            $this->context->setLocalClosureCandidates((new LocalClosureAnalyzer())->analyze($v->stmts));
         }
 
         $stmts = '';
@@ -7141,7 +7145,7 @@ CODE;
         // Argument unpacking can hide a callback position from the compiler.
         // Only that fallback exposes the called class through the user frame;
         // ordinary callback resolution uses the explicit CallableScope above.
-        if ($this->context->needsUserCodeCallableScope) {
+        if ($this->context->needsUserCodeCallableScope()) {
             $code .= $this->genUserCodeCallableScopeGuard();
         }
 
@@ -9216,7 +9220,7 @@ CODE;
         string $incomingOrigin,
     ): bool {
         if ($existing->flags !== $incoming->flags
-            || $existing->type !== $incoming->type
+            || $existing->declaredType !== $incoming->declaredType
             || $existing->class !== $incoming->class
         ) {
             return false;
@@ -9232,12 +9236,12 @@ CODE;
                 $incoming->valueExpr,
                 $incomingOrigin,
                 $this->classDef,
-                $existing->type,
+                $existing->declaredType,
             );
         }
 
         return $existing->flags === $incoming->flags
-            && $existing->type === $incoming->type
+            && $existing->declaredType === $incoming->declaredType
             && $existing->class === $incoming->class
             && $existing->value === $incoming->value;
     }

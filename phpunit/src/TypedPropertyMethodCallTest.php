@@ -20,7 +20,7 @@ final class TypedPropertyMethodCallTest extends BaseTest
             $code,
             $matches,
         ));
-        self::assertSame(2, substr_count($matches['body'], 'php_propertycalltarget__record('));
+        self::assertSame(3, substr_count($matches['body'], 'php_propertycalltarget__record('));
         self::assertStringNotContainsString('php_propertycallbase__value(', $matches['body']);
     }
 

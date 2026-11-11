@@ -208,8 +208,9 @@ trait NameResolutionTrait
             return $this->parseTypeDecl($objectType, $what, $class);
         }
         if ($type instanceof UnionType || $type instanceof NullableType || $type instanceof IntersectionType) {
-            // Complex types are uniformly treated as mixed/var at the static stage; the runtime typeCheck provides the fallback.
-            return Type::VAR;
+            // All object alternatives share a Zend object handle. No single
+            // member is an exact dispatch class for the complete declaration.
+            return $this->isObjectOnlyTypeNode($type) ? Type::OBJECT : Type::VAR;
         } else {
             $typeName = $this->parseIdentifier($type);
             $typeNameLower = strtolower($typeName);
@@ -240,6 +241,44 @@ trait NameResolutionTrait
                 return Type::OBJECT;
             }
         }
+    }
+
+    protected function isObjectOnlyTypeNode(NodeAbstract $type): bool
+    {
+        if ($type instanceof Node\Name) {
+            return true;
+        }
+        if ($type instanceof NullableType) {
+            return $this->isObjectOnlyTypeNode($type->type);
+        }
+        if ($type instanceof UnionType || $type instanceof IntersectionType) {
+            foreach ($type->types as $member) {
+                if ($type instanceof UnionType && $member instanceof Node\Identifier
+                    && strtolower($member->name) === 'null') {
+                    continue;
+                }
+                if (!$this->isObjectOnlyTypeNode($member)) {
+                    return false;
+                }
+            }
+            return true;
+        }
+        return $type instanceof Node\Identifier && strtolower($type->name) === 'object';
+    }
+
+    protected function typeDeclarationAllowsNull(?NodeAbstract $type): bool
+    {
+        if ($type instanceof NullableType) {
+            return true;
+        }
+        if ($type instanceof UnionType) {
+            foreach ($type->types as $member) {
+                if ($member instanceof Node\Identifier && strtolower($member->name) === 'null') {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
 }

@@ -266,14 +266,12 @@ abstract class Preprocessor extends CompilerBase
         $fileDeps = [];
 
         // Build the dependency graph
-        foreach ($this->symbolCallInFile as $file => $symbols) {
+        foreach ($this->getSymbolUsesByFile() as $file => $symbols) {
             $deps = [];
             foreach ($symbols as $symbol) {
-                if (isset($this->symbolDeclInFile[$symbol])) {
-                    $depFile = $this->symbolDeclInFile[$symbol];
-                    if ($depFile !== $file) {
-                        $deps[] = $depFile;
-                    }
+                $depFile = $this->getSymbolDeclarationFile($symbol);
+                if ($depFile !== null && $depFile !== $file) {
+                    $deps[] = $depFile;
                 }
             }
             $deps = array_unique($deps);
@@ -455,7 +453,7 @@ abstract class Preprocessor extends CompilerBase
         $previousPhase = $this->enterCompilerPhase(self::PHASE_PREPARE);
         try {
             $phpCode = $this->loadFile($file);
-            $this->symbolCallInFile[$this->file] = [];
+            $this->clearFileSymbolUses($this->file);
             $this->resetFile();
             $this->resetFunction();
             $this->resetMethod();
@@ -953,6 +951,8 @@ abstract class Preprocessor extends CompilerBase
         $this->resetFunction();
         $constant->arrayExpr = '';
         $constant->value = $this->parseIdentifier($expression);
+        $constant->loweredType = $this->getLoweredExpressionType($expression)
+            ?? $this->detectLiteralConstantType($expression);
         // resetFunction() installed a fresh context, so the temporary counter
         // reflects only this constant's lowering — a structural record of
         // whether the value depends on prelude temporaries.
@@ -1168,7 +1168,6 @@ abstract class Preprocessor extends CompilerBase
                 $this->recordSymbolUsingNode($node);
             }
         }
-        $this->deduplicateCurrentFileSymbolDependencies();
     }
 
     protected function recordSymbolUsingNode(Node $node): void
@@ -1180,7 +1179,7 @@ abstract class Preprocessor extends CompilerBase
                 ?? $node->name;
             $funcName = strtolower($resolvedName->toString());
             if (!$this->isInternalFunction($funcName)) {
-                $this->symbolCallInFile[$this->file][] = $this->getFunctionDependencySymbol($funcName);
+                $this->recordSymbolUse($this->file, $this->getFunctionDependencySymbol($funcName));
             }
             // An unqualified call in a namespace also searches the global
             // function table. Providers can be prepared later, so retain both
@@ -1194,7 +1193,7 @@ abstract class Preprocessor extends CompilerBase
             ) {
                 $globalName = strtolower($node->name->toString());
                 if (!$this->isInternalFunction($globalName)) {
-                    $this->symbolCallInFile[$this->file][] = $this->getFunctionDependencySymbol($globalName);
+                    $this->recordSymbolUse($this->file, $this->getFunctionDependencySymbol($globalName));
                 }
             }
         } elseif ($node instanceof Node\Expr\ConstFetch) {
@@ -1203,7 +1202,7 @@ abstract class Preprocessor extends CompilerBase
                 ?? $node->name;
             $constantName = $resolvedName->toString();
             if (!in_array(strtolower($constantName), ['true', 'false', 'null'], true)) {
-                $this->symbolCallInFile[$this->file][] = $this->getConstantDependencySymbol($constantName);
+                $this->recordSymbolUse($this->file, $this->getConstantDependencySymbol($constantName));
             }
         } elseif (($node instanceof Node\Expr\StaticCall
                 || $node instanceof Node\Expr\StaticPropertyFetch
@@ -1216,7 +1215,7 @@ abstract class Preprocessor extends CompilerBase
                 ?? $node->class;
             $className = $resolvedClass->toString();
             if ($className !== 'self' && $className !== 'static') {
-                $this->symbolCallInFile[$this->file][] = $this->getClassDependencySymbol($className);
+                $this->recordSymbolUse($this->file, $this->getClassDependencySymbol($className));
             }
         } elseif ($node instanceof Node\Expr\Instanceof_ && $node->class instanceof Node\Name) {
             $this->recordClassTypeDependency($node->class);
@@ -1240,16 +1239,11 @@ abstract class Preprocessor extends CompilerBase
                 if (!$variable instanceof Node\Expr\Variable || !is_string($variable->name)) {
                     continue;
                 }
-                $this->symbolCallInFile[$this->file][] = $this->getGlobalDependencySymbol(
+                $this->recordSymbolUse($this->file, $this->getGlobalDependencySymbol(
                     $this->escapeVarName($variable->name),
-                );
+                ));
             }
         }
-    }
-
-    private function deduplicateCurrentFileSymbolDependencies(): void
-    {
-        $this->symbolCallInFile[$this->file] = array_values(array_unique($this->symbolCallInFile[$this->file]));
     }
 
     protected function recordClassTypeDependency(?NodeAbstract $type): void
@@ -1261,9 +1255,9 @@ abstract class Preprocessor extends CompilerBase
             $resolvedName = $type->getAttribute('resolvedName')
                 ?? $type->getAttribute('namespacedName')
                 ?? $type;
-            $this->symbolCallInFile[$this->file][] = $this->getClassDependencySymbol(
+            $this->recordSymbolUse($this->file, $this->getClassDependencySymbol(
                 $resolvedName->toString(),
-            );
+            ));
             return;
         }
         if ($type instanceof Node\NullableType) {
@@ -1489,8 +1483,7 @@ abstract class Preprocessor extends CompilerBase
             $argInfo->variadic = $param->variadic;
             $argInfo->property = $param->isPromoted();
             $argInfo->immutable = \TypePhp\Transform\CompileTimeAttribute::consume($param, 'Immutable');
-            if ($param->type === null || $param->type instanceof NullableType
-                || $this->getNullableObjectTypeNode($param->type) !== null) {
+            if ($param->type === null || $this->typeDeclarationAllowsNull($param->type)) {
                 $argInfo->nullable = $argInfo->stdContainer === null && $argInfo->typedArray === null;
             }
             if (($param->byRef && $param->type !== null && !Type::isTypedRefType($type))
@@ -1683,7 +1676,7 @@ abstract class Preprocessor extends CompilerBase
         $functionDef->exported = !($this->classDef?->exported === false || $this->hasNoExportAttribute($v));
         $functionDef->returnClass = $class;
         $functionDef->returnNullable = $nullableNativeReturn !== null
-            || $this->getNullableObjectTypeNode($v->returnType) !== null;
+            || $this->typeDeclarationAllowsNull($v->returnType);
         $functionDef->returnTypeStr = $v->returnType === null
             ? ''
             : $this->typeCheckNodeToString($v->returnType);
@@ -1851,11 +1844,11 @@ abstract class Preprocessor extends CompilerBase
             ? $this->classDef->getNamespacedName(false) . '::' . $functionDef->name
             : $functionDef->getNamespacedName();
         $this->addFunction($name, $functionDef);
-        $this->symbolDeclInFile[$this->getNativeFunctionDependencySymbol($name)] = $this->file;
+        $this->registerSymbolDeclaration($this->file, $this->getNativeFunctionDependencySymbol($name));
         if (!$functionDef->method) {
-            $this->symbolDeclInFile[$this->getFunctionDependencySymbol(
+            $this->registerSymbolDeclaration($this->file, $this->getFunctionDependencySymbol(
                 $functionDef->getNamespacedName(),
-            )] = $this->file;
+            ));
         }
         if ($this->methodDef) {
             $this->methodDef->functionDef = $functionDef;
@@ -1880,7 +1873,7 @@ abstract class Preprocessor extends CompilerBase
             $flags = Modifiers::PUBLIC;
         }
         $classDependencySymbol = $this->getClassDependencySymbol($fullClassNameLower);
-        if (isset($this->symbolDeclInFile[$classDependencySymbol])) {
+        if ($this->getSymbolDeclarationFile($classDependencySymbol) !== null) {
             $this->fatalError($class, "Duplicate class `{$fullClassName}`");
         }
         // Dynamic properties are forbidden on readonly classes and enums.
@@ -1937,7 +1930,7 @@ abstract class Preprocessor extends CompilerBase
             $this->symbols->setParent($fullClassNameLower, $parentClassLower);
             $this->classSubClasses[$parentClassLower][] = $fullClassNameLower;
             if (!$this->isInternalClass($parentClassLower)) {
-                $this->symbolCallInFile[$this->file][] = $this->getClassDependencySymbol($parentClassLower);
+                $this->recordSymbolUse($this->file, $this->getClassDependencySymbol($parentClassLower));
             }
             $this->classDef->extends = $this->parentClass;
             // Whether it inherits from an internal class
@@ -1970,7 +1963,7 @@ abstract class Preprocessor extends CompilerBase
             $this->classDef->traitUseFunctions = $this->useFunctions;
             $this->classDef->traitUseConstants = $this->useConstants;
         }
-        $this->symbolDeclInFile[$classDependencySymbol] = $this->file;
+        $this->registerSymbolDeclaration($this->file, $classDependencySymbol);
 
         if ($class instanceof Node\Stmt\Class_) {
             $generatedPrinter = null;
@@ -2236,18 +2229,15 @@ abstract class Preprocessor extends CompilerBase
 
     protected function buildExpressionInitPlan(Node\Expr $defaultNode): ArrayInitPlan
     {
-        $localVarCount = count($this->context->localVars);
-        [$expr, $newBeforeStmtLines, $newAfterStmtLines] = $this->captureStmtLines(
+        [$expr, $newLocalVars, $newBeforeStmtLines, $newAfterStmtLines] = $this->context->captureInitializer(
             fn() => $this->parseIdentifier($defaultNode),
         );
 
         $init = '';
         $clean = '';
-        $newLocalVars = array_slice($this->context->localVars, $localVarCount, null, true);
 
         if ($newLocalVars) {
             $init .= $this->genLocalVarDecl($newLocalVars);
-            $this->context->discardInitializerLocals($localVarCount);
         }
         if ($newBeforeStmtLines) {
             $init .= implode(PHP_EOL, $newBeforeStmtLines) . PHP_EOL;
@@ -2286,7 +2276,7 @@ abstract class Preprocessor extends CompilerBase
                 $type = match ($const->value->getType()) {
                     'Expr_Array' => Type::ARRAY,
                     'Scalar_String' => Type::STR,
-                    default => Type::VAR,
+                    default => $this->detectLiteralConstantType($const->value),
                 };
                 // `::class` is a compile-time magic constant that always yields a string,
                 // so a constant declared as `X = self::class` (or `Foo::class`) must be
@@ -2375,6 +2365,8 @@ abstract class Preprocessor extends CompilerBase
         $constInfo->declaredType = $declaredType;
         $constInfo->codegenFinalized = $this->compilerPhase === self::PHASE_CONVERT;
         if ($constInfo->codegenFinalized) {
+            $constInfo->loweredType = $this->getLoweredExpressionType($const->value)
+                ?? $this->detectLiteralConstantType($const->value);
             // Structural dependency record: computed from the lowering context
             // (temporary counter / captured prelude), not from the value text.
             $constInfo->hasMaterializedTemporaries = $this->context->tmpVarIndex > 0
@@ -2430,7 +2422,7 @@ abstract class Preprocessor extends CompilerBase
         // validation (callable as an intersection/DNF member is rejected
         // there, ahead of the property-specific rule, matching Zend).
         [$type, $class] = $this->resolveTypeDecl($typeNode, self::DECL_TYPE_OF_PROPERTY);
-        $nullable = $nullable || $this->getNullableObjectTypeNode($typeNode) !== null;
+        $nullable = $nullable || $this->typeDeclarationAllowsNull($typeNode);
         // `callable` is a runtime-context type (a string or array may or may
         // not be callable depending on scope), so Zend forbids it in property
         // types entirely - bare, nullable, or as a union member.
@@ -3289,16 +3281,16 @@ abstract class Preprocessor extends CompilerBase
                 $this->interfaceDef->extends = $parentName;
             }
             if (!$this->isInternalInterface($parentName)) {
-                $this->symbolCallInFile[$this->file][] = $this->getClassDependencySymbol($parentName);
+                $this->recordSymbolUse($this->file, $this->getClassDependencySymbol($parentName));
             }
         }
 
         $interfaceDependencySymbol = $this->getClassDependencySymbol($interfaceNameLower);
-        if (isset($this->symbolDeclInFile[$interfaceDependencySymbol])) {
+        if ($this->getSymbolDeclarationFile($interfaceDependencySymbol) !== null) {
             $this->fatalError($v, "Duplicate interface `{$interfaceName}`");
         }
 
-        $this->symbolDeclInFile[$interfaceDependencySymbol] = $this->file;
+        $this->registerSymbolDeclaration($this->file, $interfaceDependencySymbol);
         $this->symbols->putInterface($this->escapeClass($interfaceName), $this->interfaceDef);
         $this->interfacesDefineInFile[$interfaceName] = $this->interfaceDef;
 
@@ -3326,7 +3318,7 @@ abstract class Preprocessor extends CompilerBase
                         $type = match ($const->value->getType()) {
                             'Expr_Array' => Type::ARRAY,
                             'Scalar_String' => Type::STR,
-                            default => Type::VAR,
+                            default => $this->detectLiteralConstantType($const->value),
                         };
                     }
                     if ($this->interfaceDef->hasConstant($constName)) {
@@ -3566,7 +3558,7 @@ abstract class Preprocessor extends CompilerBase
             $traitName = $this->getNamespacedClassName($this->parseIdentifier($trait));
             $this->classDef->usedTraits[] = $traitName;
             if (!$this->isInternalClass($traitName)) {
-                $this->symbolCallInFile[$this->file][] = $this->getClassDependencySymbol($traitName);
+                $this->recordSymbolUse($this->file, $this->getClassDependencySymbol($traitName));
             }
         }
         foreach ($aliases as $fullMethodName => $aliasList) {

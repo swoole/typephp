@@ -280,15 +280,14 @@ class PreprocessorTest extends TestCase
 
     public function testSortFilesAllowsCircularFunctionDependencies(): void
     {
-        $this->setProperty('symbolDeclInFile', [
+        $this->invokeMethod('restoreSymbolDependencyState', ['symbolDeclInFile' => [
             'function:a' => '/a.php',
             'function:b' => '/b.php',
-        ]);
-        $this->setProperty('symbolCallInFile', [
+        ], 'symbolCallInFile' => [
             '/a.php' => ['function:b'],
             '/b.php' => ['function:a'],
             '/consumer.php' => ['function:a'],
-        ]);
+        ], 'globalVarDeclInFile' => []]);
 
         $files = $this->invokeMethod('getSortedFiles', ['/consumer.php', '/a.php', '/b.php']);
 
@@ -303,6 +302,7 @@ class PreprocessorTest extends TestCase
 namespace DependencyConsumer;
 use function Vendor\provider as imported;
 function invoke(): void {
+    bridge();
     bridge();
     \explicit();
     namespace\relative();
@@ -322,7 +322,7 @@ PHP);
             'function:dependencyconsumer\\other\\qualified',
             'function:vendor\\provider',
             'function:dependencyconsumer\\strlen',
-        ], $this->getProperty('symbolCallInFile')[$file]);
+        ], $this->invokeMethod('getFileSymbolUses', $file));
     }
 
     public function testPrepareFileParsesInterfaceMembersAndTypeChecks(): void
@@ -346,7 +346,7 @@ PHP);
         $this->assertNull($functionDef->argInfoList[0]->typeCheck);
         $this->assertSame('php::Var', $functionDef->argInfoList[1]->type);
         $this->assertNotEmpty($functionDef->argInfoList[1]->typeCheck);
-        $this->assertSame('php::Var', $functionDef->returnType);
+        $this->assertSame('php::Object', $functionDef->returnType);
         $this->assertNotEmpty($functionDef->returnTypeCheck);
     }
 
@@ -523,22 +523,22 @@ PHP);
         $this->compiler->prepareFile($file);
     }
 
-    public function testIntersectionParamDeclFallsBackToVarWithRuntimeCheck(): void
+    public function testIntersectionParamDeclUsesObjectWithRuntimeCheck(): void
     {
         $fn = $this->parseFunctionNode('<?php interface A {} interface B {} function demo(A&B $value): void {}');
         $functionDef = $this->invokeMethod('parseFunctionDecl', $fn);
 
-        $this->assertSame('php::Var', $functionDef->argInfoList[0]->type);
+        $this->assertSame('php::Object', $functionDef->argInfoList[0]->type);
         $this->assertNotEmpty($functionDef->argInfoList[0]->typeCheck);
         $this->assertSame('A&B', $functionDef->argInfoList[0]->typeStr);
     }
 
-    public function testIntersectionReturnDeclFallsBackToVarWithRuntimeCheck(): void
+    public function testIntersectionReturnDeclUsesObjectWithRuntimeCheck(): void
     {
         $fn = $this->parseFunctionNode('<?php interface A {} interface B {} function demo(): A&B { throw new \Exception(); }');
         $functionDef = $this->invokeMethod('parseFunctionDecl', $fn);
 
-        $this->assertSame('php::Var', $functionDef->returnType);
+        $this->assertSame('php::Object', $functionDef->returnType);
         $this->assertNotEmpty($functionDef->returnTypeCheck);
         $this->assertSame('A&B', $functionDef->returnTypeStr);
     }

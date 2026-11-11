@@ -9,11 +9,229 @@ namespace TypePhp\Parser;
 
 use TypePhp\Type;
 
+use PhpParser\Node;
 use PhpParser\Node\Expr;
 use PhpParser\NodeAbstract;
 
 trait SelectionExpressionTrait
 {
+    protected function getCoalesceObjectClass(Expr\BinaryOp\Coalesce $expr): string
+    {
+        $common = '';
+        foreach ([$expr->left, $expr->right] as $branch) {
+            if ($this->isNull($branch)) {
+                continue;
+            }
+            $class = $this->detectDeclaredClassOfExpr($branch);
+            if ($class === '') {
+                $property = $this->findReadablePropertyDefinition($branch);
+                if ($property?->type === Type::OBJECT) {
+                    $class = $property->class;
+                }
+            }
+            if ($class === '') {
+                return '';
+            }
+            if ($common === '') {
+                $common = $class;
+            } elseif ($this->isNativeObjectClass($common) || $this->isNativeObjectClass($class)) {
+                if (!$this->isNativeObjectClass($common) || !$this->isNativeObjectClass($class)) {
+                    return '';
+                }
+                $common = $this->getCommonNativeObjectClass($common, $class);
+                if ($common === '') {
+                    return '';
+                }
+            } elseif ($this->isObjectClassStaticallyAssignableTo($class, $common)) {
+                continue;
+            } elseif ($this->isObjectClassStaticallyAssignableTo($common, $class)) {
+                $common = $class;
+            } else {
+                return '';
+            }
+        }
+        return $common;
+    }
+
+    protected function getCoalesceResultType(Expr\BinaryOp\Coalesce $expr): string
+    {
+        if ($this->getCoalesceObjectClass($expr) !== '') {
+            return Type::OBJECT;
+        }
+        $left = $this->getNonNullSelectionType($expr->left);
+        // A normal hop in a nullsafe chain can also be skipped.
+        $right = $this->containsNullsafeChain($expr->right)
+            ? Type::VAR : $this->detectTypeOfExpr($expr->right);
+        if ($this->isNull($expr->left)) {
+            $left = $right;
+        }
+        if ($left !== $right || !in_array($left, [Type::INT, Type::FLOAT, Type::BOOL, Type::STR, Type::ARRAY], true)) {
+            return Type::VAR;
+        }
+        if ($this->varIntTypes && $left === Type::INT) {
+            return Type::VAR;
+        }
+        return $left;
+    }
+
+    /** Read a single nullable contract; heterogeneous unions stay dynamic. */
+    protected function getNonNullSelectionType(Expr $expr): string
+    {
+        if ($expr instanceof Expr\NullsafeMethodCall) {
+            $expr = new Expr\MethodCall($expr->var, $expr->name, $expr->args, $expr->getAttributes());
+        } elseif ($expr instanceof Expr\NullsafePropertyFetch) {
+            $expr = new Expr\PropertyFetch($expr->var, $expr->name, $expr->getAttributes());
+        }
+        $type = $this->detectTypeOfExpr($expr);
+        if ($type !== Type::VAR && $type !== Type::REF) {
+            return $type;
+        }
+        $property = $this->findReadablePropertyDefinition($expr);
+        $check = $property?->typeCheck;
+        if ($property !== null && $property->type !== Type::VAR) {
+            return $property->type;
+        }
+        if ($expr instanceof Expr\MethodCall && $expr->name instanceof Node\Identifier) {
+            $class = $this->detectDeclaredClassOfExpr($expr->var);
+            if ($class !== '' && $this->hasInaccessibleDeclaredMethod($class, $expr->name->toString())) {
+                return Type::VAR;
+            }
+        }
+        $function = $this->resolveCalledFunctionDef($expr);
+        if ($function !== null) {
+            if ($function->returnType !== Type::VAR && $function->returnType !== Type::VOID) {
+                return $function->returnType;
+            }
+            $check = $function->returnTypeCheck;
+        } elseif ($expr instanceof Expr\Variable && is_string($expr->name)) {
+            foreach ($this->functionDef?->argInfoList ?? [] as $argument) {
+                if ($argument->name === $this->parseVariable($expr)) {
+                    $check = $argument->typeCheck;
+                    break;
+                }
+            }
+        }
+        $result = Type::VAR;
+        foreach ($check ?? [] as $entry) {
+            if (($entry['kind'] ?? '') === 'isNull') {
+                continue;
+            }
+            $candidate = match ($entry['kind'] ?? '') {
+                'isInt' => Type::INT, 'isFloat' => Type::FLOAT, 'isBool' => Type::BOOL,
+                'isString' => Type::STR, 'isArray' => Type::ARRAY, default => Type::VAR,
+            };
+            if ($candidate === Type::VAR || ($result !== Type::VAR && $result !== $candidate)) {
+                return Type::VAR;
+            }
+            $result = $candidate;
+        }
+        return $result;
+    }
+
+    protected function parsePropertyPresenceValue(Expr\PropertyFetch $expr): string
+    {
+        $class = $this->detectDeclaredClassOfExpr($expr->var);
+        if ($this->isNativeObjectClass($class)) {
+            return $this->parseIdentifier($expr);
+        }
+        $receiver = $this->parseOrderedOperand($expr->var, false);
+        $this->checkVarMustExist($expr->var, $receiver);
+        $receiverType = $this->getLoweredExpressionType($expr->var) ?? $this->detectTypeOfExpr($expr->var);
+        if ($this->isNativeType($receiverType)) {
+            $receiver = 'php::Var(' . $receiver . ')';
+        }
+        $property = $this->findReadablePropertyDefinition($expr);
+        $name = $expr->name instanceof Node\Identifier
+            ? $this->getLiteralString($expr->name->toString())
+            : $this->parseOrderedOperand($expr->name, false, true);
+        if ($property !== null && $this->isFinalClass($class)
+            && $this->getClass($class)->extends === '' && $property->getter === null
+            && !$this->objectTypeDeclaresMethod($class, '__get')
+            && !$this->objectTypeDeclaresMethod($class, '__isset')) {
+            $resolution = $this->resolveNativeInstanceProperty($expr, $expr->name->toString(), $class);
+            $offset = $this->applyNativePropertyAccessResult($expr, $resolution);
+            $value = $receiver . '.attr(' . $offset . ', php::AttrMode::Isset)';
+        } else {
+            $scope = $this->classDef ? $this->getClassEntryPtr($this->getFullClassName()) : 'nullptr';
+            $value = 'typephp_read_property_scoped(' . $receiver . ', ' . $name
+                . ', ' . $scope . ', php::AttrMode::Isset)';
+        }
+        return '(' . $receiver . '.isObject() ? ' . $value . ' : php::Var{})';
+    }
+
+    protected function parseCoalesceSelection(Expr\BinaryOp\Coalesce $expr, string $type): string
+    {
+        $result = $this->addTmpVar($type);
+        $objectClass = $type === Type::OBJECT ? $this->getCoalesceObjectClass($expr) : '';
+        if ($objectClass !== '') {
+            $this->addObject($result, $objectClass);
+        }
+        $presence = null;
+        [$left, $before, $after] = $this->captureStmtLines(function () use ($expr, &$presence): string {
+            $left = $expr->left;
+            if ($left instanceof Expr\ArrayDimFetch
+                || ($left instanceof Expr\PropertyFetch
+                    && !$this->containsNullsafeChain($left)
+                    && ($left->var instanceof Expr\PropertyFetch || $left->var instanceof Expr\ArrayDimFetch))) {
+                $presence = $this->parseChainedExpr($left, self::OP_ISSET, true);
+                $value = $left->getAttribute('chainOpResult');
+                if ($value !== null) {
+                    return $value;
+                }
+                $presence = null;
+                return $this->parseIdentifier($left);
+            }
+            if ($left instanceof Expr\NullsafePropertyFetch
+                || ($left instanceof Expr\PropertyFetch && $this->containsNullsafeChain($left))) {
+                return $this->parseNullsafeExpr($left, true);
+            }
+            if ($left instanceof Expr\PropertyFetch && !$this->containsNullsafeChain($left)) {
+                return $this->parsePropertyPresenceValue($left);
+            }
+            return $this->parseIdentifier($left);
+        });
+        $this->checkVarMustExist($expr->left, $left);
+        $this->appendCapturedStmtLinesToContext($before);
+        foreach ($after as $line) {
+            $this->addAfterStmtLine($line);
+        }
+        [$right, $rightBefore, $rightAfter] = $this->parseExprWithCapturedStmts($expr->right);
+        $this->checkVarMustExist($expr->right, $right);
+        $format = fn(string $value): string => $type === Type::OBJECT
+            ? 'php::Object(' . $value . ')'
+            : $this->convertExprFromType($type, $value);
+        if (!$expr->left instanceof Expr\PropertyFetch && !$expr->left instanceof Expr\StaticPropertyFetch
+            && !$expr->left instanceof Expr\ArrayDimFetch && !$this->containsNullsafeChain($expr->left)
+            && in_array($this->detectTypeOfExpr($expr->left), [Type::INT, Type::FLOAT, Type::BOOL, Type::STR, Type::ARRAY], true)) {
+            $expr->setAttribute(self::ATTR_LOWERED_TYPE, $type);
+            $this->context->registerMaterializedExpression($expr, $result, $result . ' = ' . $format($left) . ';');
+            return $result;
+        }
+        $probe = $presence !== null || $this->isVarExpr($expr->left)
+            ? $left : $this->addTmpVar($type === Type::OBJECT ? Type::OBJECT : Type::VAR);
+        $selected = $probe;
+        $propertyArray = $this->getTypedArrayPropertyReadDefinition($expr->left);
+        if ($propertyArray !== null) {
+            $selected = $this->convertTypedArrayPropertyValue(
+                $propertyArray['type'], $propertyArray['class'] ?? '', $probe,
+            );
+        }
+        $code = $probe !== $left ? $probe . ' = ' . $left . ';' . PHP_EOL : '';
+        $code .= 'if (' . ($presence ?? 'php::exists(' . $probe . ')') . ') {' . PHP_EOL;
+        $code .= $this->withIndentedBlock(fn() => $this->getIndent() . $result . ' = ' . $format($selected) . ';' . PHP_EOL);
+        $code .= $this->getIndent() . '} else {' . PHP_EOL;
+        $code .= $this->withIndentedBlock(fn() => $this->formatCapturedStmtLines($rightBefore)
+            . $this->getIndent() . $result . ' = ' . $format($right) . ';' . PHP_EOL
+            . $this->formatCapturedStmtLines($rightAfter));
+        $code .= $this->getIndent() . '}';
+        $expr->setAttribute(self::ATTR_LOWERED_TYPE, $type);
+        $this->context->registerMaterializedExpression($expr, $result, $code);
+        if ($probe !== $left) {
+            $this->scheduleTemporaryCleanup($probe);
+        }
+        return $result;
+    }
+
     protected function parseTernary(Expr\Ternary $expr): string
     {
         if ($expr->if === null) {
@@ -162,88 +380,99 @@ trait SelectionExpressionTrait
         }
 
         $code = '[&]() -> ' . $returnType . ' {' . PHP_EOL;
-        $this->indentLevel++;
-        $default = null;
-        foreach ($expr->arms as $arm) {
-            if ($arm->conds === null) {
-                $default = $arm->body;
-                continue;
-            }
-            $matched = $this->genTmpVarName();
-            $code .= $this->getIndent() . 'bool ' . $matched . ' = false;' . PHP_EOL;
-            foreach ($arm->conds as $cond) {
-                if ($this->isMatchExpr($cond)) {
-                    $this->fatalError($arm, 'Match expression cannot be used as a condition');
+        $code .= $this->withIndentedBlock(function () use (
+            $expr, $var, $nativeCondition, $conditionNativeClass,
+            $nativeClass, $nativeSelection, $returnType,
+        ): string {
+            $code = '';
+            $default = null;
+            foreach ($expr->arms as $arm) {
+                if ($arm->conds === null) {
+                    $default = $arm->body;
+                    continue;
                 }
-                $this->assertExprCanBeUsedAsValue($cond, 'match arm condition');
-                [$condValue, $beforeStmts, $afterStmts] = $this->parseExprWithCapturedStmts($cond);
-                $code .= $this->getIndent() . 'if (!' . $matched . ') {' . PHP_EOL;
-                $this->indentLevel++;
-                $code .= $this->formatCapturedStmtLines($beforeStmts);
-                if ($afterStmts) {
-                    $condClass = $this->detectClassOfExpr($cond);
-                    if ($nativeCondition && $this->isNativeObjectClass($condClass)) {
-                        $condTmpVar = $this->genTmpVarName();
-                        $this->addLocalVar($condTmpVar, $this->getNativeObjectPointerType($condClass));
-                        $this->addNativeObject($condTmpVar, $condClass);
-                    } else {
-                        $condTmpVar = $this->addTmpVar(Type::VAR);
+                $matched = $this->genTmpVarName();
+                $code .= $this->getIndent() . 'bool ' . $matched . ' = false;' . PHP_EOL;
+                foreach ($arm->conds as $cond) {
+                    if ($this->isMatchExpr($cond)) {
+                        $this->fatalError($arm, 'Match expression cannot be used as a condition');
                     }
-                    $code .= $this->getIndent() . "{$condTmpVar} = {$condValue};" . PHP_EOL;
-                    $code .= $this->formatCapturedStmtLines($afterStmts);
-                    $condValue = $condTmpVar;
+                    $this->assertExprCanBeUsedAsValue($cond, 'match arm condition');
+                    [$condValue, $beforeStmts, $afterStmts] = $this->parseExprWithCapturedStmts($cond);
+                    $code .= $this->getIndent() . 'if (!' . $matched . ') {' . PHP_EOL;
+                    $code .= $this->withIndentedBlock(function () use (
+                        $cond, $condValue, $beforeStmts, $afterStmts,
+                        $nativeCondition, $conditionNativeClass, $var, $matched,
+                    ): string {
+                        $code = $this->formatCapturedStmtLines($beforeStmts);
+                        if ($afterStmts) {
+                            $condClass = $this->detectClassOfExpr($cond);
+                            if ($nativeCondition && $this->isNativeObjectClass($condClass)) {
+                                $condTmpVar = $this->genTmpVarName();
+                                $this->addLocalVar($condTmpVar, $this->getNativeObjectPointerType($condClass));
+                                $this->addNativeObject($condTmpVar, $condClass);
+                            } else {
+                                $condTmpVar = $this->addTmpVar(Type::VAR);
+                            }
+                            $code .= $this->getIndent() . "{$condTmpVar} = {$condValue};" . PHP_EOL;
+                            $code .= $this->formatCapturedStmtLines($afterStmts);
+                            $condValue = $condTmpVar;
+                        }
+                        if ($nativeCondition) {
+                            $condClass = $this->detectClassOfExpr($cond);
+                            if ($this->isNull($cond)) {
+                                $comparison = $var . ' == nullptr';
+                            } elseif ($this->isNativeObjectClass($condClass)
+                                && ($this->isObjectClassStaticallyAssignableTo($condClass, $conditionNativeClass)
+                                    || $this->isObjectClassStaticallyAssignableTo($conditionNativeClass, $condClass))
+                            ) {
+                                $comparison = $var . ' == ' . $condValue;
+                            } else {
+                                // PHP match uses strict identity. An unrelated Native
+                                // pointer or a Zend value can never be identical, but
+                                // its expression must still be evaluated for effects.
+                                $comparison = '(static_cast<void>(' . $condValue . '), false)';
+                            }
+                            $code .= $this->getIndent() . $matched . ' = (' . $comparison . ');' . PHP_EOL;
+                        } else {
+                            $code .= $this->getIndent() . $matched . ' = php::same(' . $var . ', ' . $condValue . ');' . PHP_EOL;
+                        }
+                        return $code;
+                    });
+                    $code .= $this->getIndent() . '}' . PHP_EOL;
                 }
-                if ($nativeCondition) {
-                    $condClass = $this->detectClassOfExpr($cond);
-                    if ($this->isNull($cond)) {
-                        $comparison = $var . ' == nullptr';
-                    } elseif ($this->isNativeObjectClass($condClass)
-                        && ($this->isObjectClassStaticallyAssignableTo($condClass, $conditionNativeClass)
-                            || $this->isObjectClassStaticallyAssignableTo($conditionNativeClass, $condClass))
-                    ) {
-                        $comparison = $var . ' == ' . $condValue;
-                    } else {
-                        // PHP match uses strict identity. An unrelated Native
-                        // pointer or a Zend value can never be identical, but
-                        // its expression must still be evaluated for effects.
-                        $comparison = '(static_cast<void>(' . $condValue . '), false)';
-                    }
-                    $code .= $this->getIndent() . $matched . ' = (' . $comparison . ');' . PHP_EOL;
-                } else {
-                    $code .= $this->getIndent() . $matched . ' = php::same(' . $var . ', ' . $condValue . ');' . PHP_EOL;
-                }
-                $this->indentLevel--;
+                $code .= $this->getIndent() . 'if (' . $matched . ') {' . PHP_EOL;
+                $code .= $this->withIndentedBlock(
+                    fn() => $this->formatMatchReturn($arm->body, $nativeClass, $returnType),
+                );
                 $code .= $this->getIndent() . '}' . PHP_EOL;
             }
-            $code .= $this->getIndent() . 'if (' . $matched . ') {' . PHP_EOL;
-            $this->indentLevel++;
-            $code .= $this->formatMatchReturn($arm->body, $nativeClass, $returnType);
-            $this->indentLevel--;
-            $code .= $this->getIndent() . '}' . PHP_EOL;
-        }
 
-        if ($default) {
-            $code .= $this->getIndent() . '{' . PHP_EOL;
-            $this->indentLevel++;
-            $code .= $this->formatMatchReturn($default, $nativeClass, $returnType);
-            $this->indentLevel--;
-            $code .= $this->getIndent() . '}' . PHP_EOL;
-        } else {
-            $code .= $this->getIndent() . '{' . PHP_EOL;
-            $this->indentLevel++;
-            if ($nativeSelection) {
-                $code .= $this->getIndent() . 'php::throwException("UnhandledMatchError", "Unhandled match case");' . PHP_EOL
-                    . $this->getIndent() . 'return nullptr;' . PHP_EOL;
-            } elseif ($returnType === Type::VAR) {
-                $code .= $this->getIndent() . 'return php::throwException("UnhandledMatchError", "Unhandled match case");' . PHP_EOL;
+            if ($default) {
+                $code .= $this->getIndent() . '{' . PHP_EOL;
+                $code .= $this->withIndentedBlock(
+                    fn() => $this->formatMatchReturn($default, $nativeClass, $returnType),
+                );
+                $code .= $this->getIndent() . '}' . PHP_EOL;
             } else {
-                $code .= $this->getIndent() . 'php::throwException("UnhandledMatchError", "Unhandled match case");' . PHP_EOL
-                    . $this->getIndent() . 'return {};' . PHP_EOL;
+                $code .= $this->getIndent() . '{' . PHP_EOL;
+                $code .= $this->withIndentedBlock(function () use ($nativeSelection, $returnType): string {
+                    $code = '';
+                    if ($nativeSelection) {
+                        $code .= $this->getIndent() . 'php::throwException("UnhandledMatchError", "Unhandled match case");' . PHP_EOL
+                            . $this->getIndent() . 'return nullptr;' . PHP_EOL;
+                    } elseif ($returnType === Type::VAR) {
+                        $code .= $this->getIndent() . 'return php::throwException("UnhandledMatchError", "Unhandled match case");' . PHP_EOL;
+                    } else {
+                        $code .= $this->getIndent() . 'php::throwException("UnhandledMatchError", "Unhandled match case");' . PHP_EOL
+                            . $this->getIndent() . 'return {};' . PHP_EOL;
+                    }
+                    return $code;
+                });
+                $code .= $this->getIndent() . '}' . PHP_EOL;
             }
-            $this->indentLevel--;
-            $code .= $this->getIndent() . '}' . PHP_EOL;
-        }
-        $this->indentLevel--;
+            return $code;
+        });
         $code .= $this->getIndent() . '}()';
 
         return $code;
@@ -306,6 +535,14 @@ trait SelectionExpressionTrait
         if ($this->isNativeObjectClass($nativeClass)) {
             return $this->parseNativeValueSelection($left, $right, $nativeClass);
         }
+        if ($expr instanceof Expr\BinaryOp\Coalesce) {
+            $type = $this->getCoalesceResultType($expr);
+            $nativeProperty = $left instanceof Expr\PropertyFetch
+                && $this->isNativeObjectClass($this->detectClassOfExpr($left->var));
+            if (!$nativeProperty) {
+                return $this->parseCoalesceSelection($expr, $type);
+            }
+        }
         $nativeArrayAccessLeft = $left instanceof Expr\ArrayDimFetch
             && $this->isNativeObjectClass($this->detectClassOfExpr($left->var));
         // Native ArrayAccess coalesce must let the presence helper evaluate
@@ -316,8 +553,14 @@ trait SelectionExpressionTrait
         }
 
         $leftType = $this->detectTypeOfExpr($left);
+        $propertyArray = $this->getTypedArrayPropertyReadDefinition($left);
+        if ($propertyArray !== null) {
+            $temporary = $this->addTmpVar($propertyArray['type']);
+            $this->materializeStatementTemporary($temporary, $leftExpr);
+            $leftExpr = $temporary;
+        }
         $simpleShorthand = $op === self::OP_NOT_EMPTY
-            && $this->isVarExpr($left)
+            && ($this->isVarExpr($left) || $propertyArray !== null)
             && $leftType !== Type::REF;
         if ($simpleShorthand) {
             // A local variable is already a stable value. Avoid routing it
@@ -375,16 +618,15 @@ trait SelectionExpressionTrait
                 $code .= $this->getIndent() . $tmpVar . ' = ' . $rightExpr . ';' . PHP_EOL;
             }
             $code .= '}';
-            $this->addBeforeStmtLine($code);
         } else {
             // This path materializes a Variant result. Both operands must
             // have that C++ type: Variant and const String (empty_string)
             // otherwise admit conversions in both directions for ?:.
-            $this->addBeforeStmtLine($comment .
-                $tmpVar . ' = ' . $condExpr . ' ? php::Var(' . $leftExpr . ') : php::Var(' . $rightExpr . ');');
+            $code = $comment .
+                $tmpVar . ' = ' . $condExpr . ' ? php::Var(' . $leftExpr . ') : php::Var(' . $rightExpr . ');';
         }
         $expr->setAttribute(self::ATTR_LOWERED_TYPE, Type::VAR);
-        $this->context->materializedExpressions->offsetSet($expr, $tmpVar);
+        $this->context->registerMaterializedExpression($expr, $tmpVar, $code);
 
         return $tmpVar;
     }

@@ -196,7 +196,7 @@ trait TypeCheckGenerator
             $this->fatalError($typeNode, "Type '{$nameLower}' cannot be part of a composite type");
         }
 
-        if ($nameLower === 'mixed') {
+        if ($nameLower === 'mixed' || $nameLower === 'any') {
             return [];
         }
 
@@ -366,6 +366,7 @@ trait TypeCheckGenerator
             return '';
         }
         if ($argInfo->type === Type::OBJECT && $argInfo->nullable
+            && ($argInfo->declaredClass !== '' || $argInfo->class !== '')
             && !$argInfo->variadic && !$argInfo->byRef) {
             // Native calls and Zend wrappers validate dynamic inputs before
             // entering the typed ABI. Rechecking every known Object is wasteful.
@@ -399,6 +400,23 @@ trait TypeCheckGenerator
         $code .= $this->getIndent() . '}' . PHP_EOL;
 
         return $code;
+    }
+
+    /** Preserve a dynamic value until its object ABI family has been validated. */
+    protected function convertCompositeObjectArgument(
+        string $expr,
+        ArgInfo $argInfo,
+        string $callableName,
+        int $argIndex,
+    ): string {
+        $value = 'typephp_object_argument';
+        $parameter = $argInfo->phpName ?: $this->unescapeVarName($argInfo->name);
+        return '([&](php::Var ' . $value . ') -> php::Object {'
+            . ' if (UNEXPECTED(!(' . $value . '.isObject() || ' . $value . '.isNull()))) {'
+            . ' php::throwArgumentTypeError(' . $value . ', ' . $this->getLiteralString($callableName)
+            . ', ' . ($argIndex + 1) . ', ' . $this->getLiteralString($parameter)
+            . ', ' . $this->getLiteralString($argInfo->typeStr) . '); }'
+            . ' return php::Object(' . $value . '); })(' . $expr . ')';
     }
 
     protected function genUnionVariadicParamCheck(ArgInfo $argInfo, int $argIndex): string

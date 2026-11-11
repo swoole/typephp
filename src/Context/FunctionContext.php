@@ -9,6 +9,7 @@
 namespace TypePhp\Context;
 
 use PhpParser\Node;
+use PhpParser\Node\Expr;
 use SplObjectStorage;
 use TypePhp\Analysis\SsaBuilder;
 use TypePhp\Type;
@@ -87,14 +88,23 @@ class FunctionContext
     public array $localVarInitializers = [];
     /**
      * Proven non-escaping local Closure candidates. These are declaration-site
-     * plans only; the generator moves a successfully lowered entry into
-     * nativeLocalClosures when it emits the concrete C++ lambda.
+     * plans only. Keep them after lowering so repeated parses of the same AST
+     * still select the local lambda path; emitted bindings are tracked below.
      *
      * @var array<string, array{assignment: \PhpParser\Node\Expr\Assign, closure: \PhpParser\Node\Expr\Closure|\PhpParser\Node\Expr\ArrowFunction, calls: int}>
      */
-    public array $localClosureCandidates = [];
-    /** @var array<string, true> Local variables already emitted as concrete C++ lambdas. */
-    public array $nativeLocalClosures = [];
+    private array $localClosureCandidates = [];
+    /** @var array<string, array{type: string, class: string}> Result contracts of emitted C++ lambdas. */
+    private array $nativeLocalClosures = [];
+    /** @var array<string, Expr\Assign> */
+    private array $literalArrayCandidates = [];
+    /** Proven immutable local array contents, indexed with PHP's normalized keys. */
+    private array $literalArrayShapes = [];
+    /** Bindings which may be replaced through a reference outside a branch. */
+    private array $unsafeObjectBindings = [];
+    private array $objectBindingWrites = [];
+    /** @var array<string, string> Scoped instanceof upper bounds. */
+    private array $refinedObjectClasses = [];
     /** @var array<string, string> typed-ref local => directly referenced local. */
     public array $typedRefBindings = [];
     /** @var array<string, string> typed-ref local => canonical fixed-storage root. */
@@ -106,20 +116,18 @@ class FunctionContext
     public array $staticVars = [];
     public array $globalVars = [];
 
-    /**
-     * @var array<string, string>
-     */
-    public array $ceWrappers = [];
+    /** @var array<string, string> Class name => Object local used as a static-call carrier. */
+    private array $ceWrappers = [];
     /** @var array<string, string> Process-stable class name => function-local zend_class_entry* variable. */
-    public array $classEntryPtrs = [];
+    private array $classEntryPtrs = [];
     /** Reusable php::CallableScope local, created only when this function performs scoped calls. */
-    public ?string $callableScopeVar = null;
+    private ?string $callableScopeVar = null;
     /** This function reads the late-static-bound class entry. */
-    public bool $needsCalledCe = false;
+    private bool $needsCalledCe = false;
     /** This function reads the late-static-bound class name. */
-    public bool $needsCalledClass = false;
+    private bool $needsCalledClass = false;
     /** This generated body needs a temporary lexical scope on the nearest user-code frame. */
-    public bool $needsUserCodeCallableScope = false;
+    private bool $needsUserCodeCallableScope = false;
     public int $tmpVarIndex = 0;
     public array $arguments = [];
     /** @var array<string, true> Bindings protected by #[Immutable]. */
@@ -155,10 +163,10 @@ class FunctionContext
      *
      * @var SplObjectStorage<Node, string>
      */
-    public SplObjectStorage $materializedExpressions;
+    private SplObjectStorage $materializedExpressions;
     public array $objectProps;
-    /** Map of lazily resolved, function-local static-property zval slots. */
-    public array $staticPropRefs = [];
+    /** @var array<string, array{name: string, accessorName: string, resolver: string}> */
+    private array $staticPropRefs = [];
     public int $scopeLevel = 0;
     /**
      * @var array<int, ScopeContext>
@@ -204,7 +212,6 @@ class FunctionContext
         $this->needsCalledClass = false;
         $this->tmpVarIndex = 0;
         $this->scopeLayouts = [];
-        $this->callableScopeVar = null;
         $this->scopeLevel = 0;
         $this->inLoop = false;
         $this->inContinuableLoop = false;
@@ -217,6 +224,275 @@ class FunctionContext
     public function addLocalVar(string $name, string $type): void
     {
         $this->localVars[$name] = $this->varTypeDegradations[$name] ?? $type;
+    }
+
+    /** Look up only this AST object's result in the current emission scope. */
+    public function getMaterializedExpression(Node $expression): ?string
+    {
+        return $this->materializedExpressions->offsetExists($expression)
+            ? $this->materializedExpressions->offsetGet($expression)
+            : null;
+    }
+
+    /** Publish the assignment and cached result together, after storage exists. */
+    public function registerMaterializedExpression(Node $expression, string $temporary, string $assignment): void
+    {
+        if (!isset($this->localVars[$temporary]) || $assignment === '') {
+            throw new \LogicException('Materialized expressions require local storage and an assignment');
+        }
+        $this->statements->addBefore($assignment);
+        $this->materializedExpressions->offsetSet($expression, $temporary);
+    }
+
+    /** @param callable(): string $allocateName */
+    public function getOrCreateCallableScope(callable $allocateName): string
+    {
+        if ($this->callableScopeVar === null) {
+            $this->callableScopeVar = $allocateName();
+        }
+        return $this->callableScopeVar;
+    }
+
+    /** Inspect declarations without reserving or marking another scope. */
+    public function getCallableScopeVariable(): ?string
+    {
+        return $this->callableScopeVar;
+    }
+
+    /**
+     * Commit the guard requirement only after its declaration is reserved.
+     *
+     * @param callable(): string $allocateName
+     */
+    public function requireUserCodeCallableScope(callable $allocateName): void
+    {
+        $this->getOrCreateCallableScope($allocateName);
+        $this->needsUserCodeCallableScope = true;
+    }
+
+    public function needsUserCodeCallableScope(): bool
+    {
+        return $this->needsUserCodeCallableScope;
+    }
+
+    public function requireCalledCe(): string
+    {
+        $this->needsCalledCe = true;
+        return '_typephp_called_ce';
+    }
+
+    /** The called class name always depends on the called class entry. */
+    public function requireCalledClass(): string
+    {
+        $this->needsCalledCe = true;
+        $this->needsCalledClass = true;
+        return '_typephp_called_class';
+    }
+
+    public function needsCalledCe(): bool
+    {
+        return $this->needsCalledCe;
+    }
+
+    public function needsCalledClass(): bool
+    {
+        return $this->needsCalledClass;
+    }
+
+    /**
+     * Reserve a class-entry name lazily. The caller decides which classes can
+     * be hoisted; these pointers have separate declarations, not Object storage.
+     *
+     * @param callable(): string $allocateName
+     */
+    public function getOrCreateLocalClassEntry(string $className, callable $allocateName): string
+    {
+        if (isset($this->classEntryPtrs[$className])) {
+            return $this->classEntryPtrs[$className];
+        }
+        $entry = $allocateName();
+        $this->classEntryPtrs[$className] = $entry;
+        return $entry;
+    }
+
+    /** @return array<string, string> Entries in first-use declaration order. */
+    public function getLocalClassEntries(): array
+    {
+        return $this->classEntryPtrs;
+    }
+
+    /**
+     * Register the carrier's local storage with its class mapping. Initialization
+     * belongs in the function preamble so it dominates all static-call branches.
+     *
+     * @param callable(): string $allocateName
+     */
+    public function getOrCreateClassWrapper(string $className, callable $allocateName): string
+    {
+        if (isset($this->ceWrappers[$className])) {
+            return $this->ceWrappers[$className];
+        }
+        $object = $allocateName();
+        $this->addLocalVar($object, Type::OBJECT);
+        $this->ceWrappers[$className] = $object;
+        return $object;
+    }
+
+    /** @return array<string, string> Carriers in first-use initialization order. */
+    public function getClassWrappers(): array
+    {
+        return $this->ceWrappers;
+    }
+
+    /**
+     * Install analysis plans before body lowering begins. Keys are PHP source
+     * names, whereas emitted bindings use the caller's escaped C++ names.
+     *
+     * @param array<string, array{assignment: Expr\Assign, closure: Expr\Closure|Expr\ArrowFunction, calls: int}> $candidates
+     */
+    public function setLocalClosureCandidates(array $candidates): void
+    {
+        if ($this->nativeLocalClosures !== []) {
+            throw new \LogicException('Cannot replace local Closure plans after lambda emission');
+        }
+        $this->localClosureCandidates = $candidates;
+    }
+
+    /** @return array{assignment: Expr\Assign, closure: Expr\Closure|Expr\ArrowFunction, calls: int}|null */
+    public function getLocalClosureCandidate(Expr\Assign $assignment): ?array
+    {
+        if (!$assignment->var instanceof Expr\Variable || !is_string($assignment->var->name)) {
+            return null;
+        }
+        $candidate = $this->localClosureCandidates[$assignment->var->name] ?? null;
+        return $candidate !== null && $candidate['assignment'] === $assignment ? $candidate : null;
+    }
+
+    /** Commit storage only after the matched candidate has lowered successfully. */
+    public function registerNativeLocalClosure(
+        string $name,
+        Expr\Assign $assignment,
+        array $result = ['type' => Type::VAR, 'class' => ''],
+    ): void
+    {
+        if ($this->getLocalClosureCandidate($assignment) === null) {
+            throw new \LogicException('Native local Closures require a matching assignment plan');
+        }
+        $this->addLocalVar($name, Type::OBJECT);
+        $this->nativeLocalClosures[$name] = $result;
+    }
+
+    public function isNativeLocalClosure(string $name): bool
+    {
+        return isset($this->nativeLocalClosures[$name]);
+    }
+
+    /** @return array{type: string, class: string} */
+    public function getNativeLocalClosureResult(string $name): array
+    {
+        return $this->nativeLocalClosures[$name] ?? ['type' => Type::VAR, 'class' => ''];
+    }
+
+    public function setLiteralArrayCandidates(array $candidates): void
+    {
+        $this->literalArrayCandidates = $candidates;
+    }
+
+    public function isLiteralArrayCandidate(Expr\Assign $assignment): bool
+    {
+        return $assignment->var instanceof Expr\Variable && is_string($assignment->var->name)
+            && ($this->literalArrayCandidates[$assignment->var->name] ?? null) === $assignment;
+    }
+
+    public function registerLiteralArrayShape(string $name, array $shape): void
+    {
+        $this->literalArrayShapes[$name] = $shape;
+    }
+
+    public function getLiteralArrayShape(string $name): ?array
+    {
+        return $this->literalArrayShapes[$name] ?? null;
+    }
+
+    public function setUnsafeObjectBindings(array $bindings): void
+    {
+        $this->unsafeObjectBindings = $bindings;
+    }
+
+    public function canRefineObjectBinding(string $name): bool
+    {
+        return !isset($this->unsafeObjectBindings['*']) && !isset($this->unsafeObjectBindings[$name]);
+    }
+
+    public function setObjectBindingWrites(array $writes): void
+    {
+        $this->objectBindingWrites = $writes;
+    }
+
+    public function getObjectBindingWriteCount(string $name): int
+    {
+        return isset($this->objectBindingWrites['*']) ? PHP_INT_MAX : ($this->objectBindingWrites[$name] ?? 0);
+    }
+
+    public function getRefinedObjectClass(string $name): string
+    {
+        return $this->refinedObjectClasses[$name] ?? '';
+    }
+
+    /** Restore only refined names, retaining facts for other branch locals. */
+    public function withRefinedObjectClasses(array $bindings, callable $callback): mixed
+    {
+        $objects = $this->objects;
+        $declared = $this->declaredObjects;
+        $stable = $this->stableObjects;
+        $exact = $this->exactObjects;
+        $refined = $this->refinedObjectClasses;
+        foreach ($bindings as $name => $binding) {
+            $this->declaredObjects[$name] = $binding['class'];
+            $this->refinedObjectClasses[$name] = $binding['class'];
+            unset($this->objects[$name], $this->stableObjects[$name], $this->exactObjects[$name]);
+            if ($binding['exact']) {
+                $this->objects[$name] = $binding['class'];
+                $this->stableObjects[$name] = $binding['class'];
+                $this->exactObjects[$name] = $binding['class'];
+            }
+        }
+        try {
+            return $callback();
+        } finally {
+            $this->objects = array_diff_key($this->objects, $bindings) + array_intersect_key($objects, $bindings);
+            $this->declaredObjects = array_diff_key($this->declaredObjects, $bindings) + array_intersect_key($declared, $bindings);
+            $this->stableObjects = array_diff_key($this->stableObjects, $bindings) + array_intersect_key($stable, $bindings);
+            $this->exactObjects = array_diff_key($this->exactObjects, $bindings) + array_intersect_key($exact, $bindings);
+            $this->refinedObjectClasses = $refined;
+        }
+    }
+
+    /**
+     * Register one lazy static-property accessor per semantic key, retaining
+     * its first resolver and declaration order within this function context.
+     * Only the raw Zend slot is cached; each access still reads its live value.
+     */
+    public function registerStaticPropertySlot(string $key, string $resolver): string
+    {
+        if (isset($this->staticPropRefs[$key])) {
+            return $this->staticPropRefs[$key]['accessorName'] . '()';
+        }
+
+        $index = count($this->staticPropRefs);
+        $accessorName = '_typephp_static_property_' . $index;
+        $this->staticPropRefs[$key] = [
+            'name' => '_typephp_static_property_slot_' . $index,
+            'accessorName' => $accessorName,
+            'resolver' => $resolver,
+        ];
+        return $accessorName . '()';
+    }
+
+    /** @return array<string, array{name: string, accessorName: string, resolver: string}> */
+    public function getStaticPropertySlots(): array
+    {
+        return $this->staticPropRefs;
     }
 
     public function getTypedArrayContract(string $name): ?array
@@ -405,10 +681,27 @@ class FunctionContext
         }
     }
 
-    /** Discard only the locals appended while lowering a standalone initializer. */
-    public function discardInitializerLocals(int $originalCount): void
+    /**
+     * Capture a standalone initializer's value, appended locals and statements.
+     * Materialized expressions belong to that helper, never to its caller or
+     * another helper lowering the same AST. Keep temporary numbering monotonic
+     * and retain updates to existing bindings, as this is not analysis rollback.
+     *
+     * @return array{mixed, array<string, string>, list<string>, list<string>}
+     */
+    public function captureInitializer(callable $lower): array
     {
-        $this->localVars = array_slice($this->localVars, 0, $originalCount, true);
+        $originalCount = count($this->localVars);
+        $materializedExpressions = $this->materializedExpressions;
+        $this->materializedExpressions = new SplObjectStorage();
+        try {
+            [$value, $before, $after] = $this->statements->capture($lower);
+            $locals = array_slice($this->localVars, $originalCount, null, true);
+            return [$value, $locals, $before, $after];
+        } finally {
+            $this->localVars = array_slice($this->localVars, 0, $originalCount, true);
+            $this->materializedExpressions = $materializedExpressions;
+        }
     }
 
     /** Object identity implies an immutable binding; weaker facts never erase it. */
@@ -549,6 +842,7 @@ class FunctionContext
 
     private function clearAnalysisTemporaries(): void
     {
+        $this->literalArrayShapes = [];
         $this->localVarInitializers = [];
         $this->localClosureCandidates = [];
         $this->nativeLocalClosures = [];

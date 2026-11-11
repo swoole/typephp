@@ -142,6 +142,7 @@ abstract class CompilerBase implements PropertyAccessContext
     use ImmutableSupportTrait;
     use \TypePhp\Parser\TypedArrayTrait;
     use NativeBuildConfigurationTrait;
+    use \TypePhp\Build\SymbolDependencyTrait;
     use PythonModuleTrait;
     use DeclarationSymbolTrait;
     use NameResolutionTrait;
@@ -507,16 +508,6 @@ abstract class CompilerBase implements PropertyAccessContext
     protected array $internalFunctions = [];
     protected array $internalConstants = [];
 
-    /** @var array<string, string> Canonical symbol key => declaring PHP file. */
-    protected array $symbolDeclInFile = [];
-
-    /**
-     * Stores every function / class-method call. Key is the file name; value is
-     * a list of the functions / class methods called within that file.
-     * @var array<string, array<string>>
-     */
-    protected array $symbolCallInFile = [];
-
     /** @var array<string, string> Canonical PHP file => generated declaration header. */
     protected array $declarationHeaderFiles = [];
 
@@ -675,9 +666,6 @@ abstract class CompilerBase implements PropertyAccessContext
 
     /** @var array<string, array<string, string>> PHP source => global slot => inferred type. */
     protected array $globalVarsInFile = [];
-
-    /** @var array<string, string> Global/static storage name => owning PHP file. */
-    protected array $globalVarDeclInFile = [];
 
     /** @var array<string, string> Global/static Native pointer slot => class name. */
     protected array $nativeGlobalObjects = [];
@@ -1103,8 +1091,9 @@ abstract class CompilerBase implements PropertyAccessContext
 
     public function parseExpr(Node $expr): string
     {
-        if ($this->context->materializedExpressions->offsetExists($expr)) {
-            return $this->context->materializedExpressions->offsetGet($expr);
+        $materialized = $this->context->getMaterializedExpression($expr);
+        if ($materialized !== null) {
+            return $materialized;
         }
         $type = $expr->getType();
         $this->writeLog('Line ' . $this->getLine($expr) . ': ' . $type);
@@ -1887,16 +1876,13 @@ abstract class CompilerBase implements PropertyAccessContext
     /** Return the function-local late-static-bound class entry. */
     protected function getCalledCeExpr(): string
     {
-        $this->context->needsCalledCe = true;
-        return '_typephp_called_ce';
+        return $this->context->requireCalledCe();
     }
 
     /** Return the function-local late-static-bound class name. */
     protected function getCalledClassExpr(): string
     {
-        $this->context->needsCalledCe = true;
-        $this->context->needsCalledClass = true;
-        return '_typephp_called_class';
+        return $this->context->requireCalledClass();
     }
 
     protected function getClassEntryPtr(string $className): string
@@ -1922,13 +1908,7 @@ abstract class CompilerBase implements PropertyAccessContext
         if (!$this->allowLocalClassEntryHoisting || !$this->isProcessStableClass($className)) {
             return $this->getClassEntryPtr($className);
         }
-        if (isset($this->context->classEntryPtrs[$className])) {
-            return $this->context->classEntryPtrs[$className];
-        }
-
-        $entry = $this->genTmpVarName();
-        $this->context->classEntryPtrs[$className] = $entry;
-        return $entry;
+        return $this->context->getOrCreateLocalClassEntry($className, fn() => $this->genTmpVarName());
     }
 
     protected function withoutLocalClassEntryHoisting(callable $callback): mixed
@@ -1948,20 +1928,12 @@ abstract class CompilerBase implements PropertyAccessContext
         if (!$this->classDef || !$this->methodDef) {
             return 'php::CallableScope(nullptr, nullptr, nullptr)';
         }
-        if ($this->context->callableScopeVar === null) {
-            $this->context->callableScopeVar = $this->genTmpVarName();
-        }
-        return $this->context->callableScopeVar;
+        return $this->context->getOrCreateCallableScope(fn() => $this->genTmpVarName());
     }
 
     protected function getCeWrapper(string $className): string
     {
-        if (isset($this->context->ceWrappers[$className])) {
-            return $this->context->ceWrappers[$className];
-        }
-        $object = $this->addTmpVar(Type::OBJECT);
-        $this->context->ceWrappers[$className] = $object;
-        return $object;
+        return $this->context->getOrCreateClassWrapper($className, fn() => $this->genTmpVarName());
     }
 
     protected function getFuncPtr(string $funcName): string
@@ -2115,7 +2087,7 @@ abstract class CompilerBase implements PropertyAccessContext
             $seen[$interfaceNameLower] = true;
             $list[] = $interfaceName;
             if (!$this->isInternalInterface($interfaceName)) {
-                $this->symbolCallInFile[$this->file][] = $this->getClassDependencySymbol($interfaceNameLower);
+                $this->recordSymbolUse($this->file, $this->getClassDependencySymbol($interfaceNameLower));
             }
         }
         return $list;
@@ -2515,11 +2487,15 @@ abstract class CompilerBase implements PropertyAccessContext
                     $this->unsupportedSyntax($v);
                     break;
             }
-            $lines = array_merge($lines, $this->context->statements->takeBefore());
+            foreach ($this->context->statements->takeBefore() as $line) {
+                $lines[] = $line;
+            }
             if ($result) {
                 $lines[] = $result;
             }
-            $lines = array_merge($lines, $this->context->statements->takeAfter());
+            foreach ($this->context->statements->takeAfter() as $line) {
+                $lines[] = $line;
+            }
         }
 
         $code = '';
@@ -2644,7 +2620,16 @@ abstract class CompilerBase implements PropertyAccessContext
 
     protected function detectClassOfExpr(NodeAbstract $expr): string
     {
-        if (($typedArray = $this->getTypedArrayAccessDefinition($expr)) !== null) {
+        if ($expr instanceof Expr\ArrayDimFetch && ($element = $this->getLiteralArrayElement($expr)) !== null) {
+            return $element['class'];
+        }
+        if ($expr instanceof Expr\FuncCall && $expr->name instanceof Expr\Variable && is_string($expr->name->name)) {
+            $result = $this->context->getNativeLocalClosureResult($this->parseVariable($expr->name));
+            if ($result['class'] !== '' && ($this->isFinalClass($result['class']) || $this->isInterface($result['class']))) {
+                return $result['class'];
+            }
+        }
+        if (($typedArray = $this->getTypedArrayReadDefinition($expr)) !== null) {
             return $typedArray['class'] ?? '';
         }
         // Error suppression changes diagnostics only; it must never erase the
@@ -2688,7 +2673,7 @@ abstract class CompilerBase implements PropertyAccessContext
             ));
         }
         if ($expr instanceof Expr\BinaryOp\Coalesce) {
-            return $this->getCommonNativeObjectExpressionClass([$expr->left, $expr->right]);
+            return $this->getCoalesceObjectClass($expr);
         }
         if ($expr instanceof Expr\MethodCall && $this->isNamedMethod($expr->name)) {
             $keywordType = $this->findKeywordMethod($this->parseIdentifier($expr->name));
@@ -2701,6 +2686,11 @@ abstract class CompilerBase implements PropertyAccessContext
             // Shared by the Python probes and the call branch. Detecting it
             // once keeps chain compilation linear (per-site detection was 2^depth).
             $callReceiverClass = $this->detectClassOfExpr($expr->var);
+            if ($callReceiverClass === '' && $this->isVarExpr($expr->var)) {
+                // Interface locals have a declaration but no concrete
+                // dispatch class. Use the contract only for return classes.
+                $callReceiverClass = $this->getDeclaredObjectType($this->parseVariable($expr->var));
+            }
         }
         $pythonOperatorClass = $this->detectPythonOperatorReturnClass($expr);
         if ($pythonOperatorClass !== null) {
@@ -2747,6 +2737,18 @@ abstract class CompilerBase implements PropertyAccessContext
                     && $property->type === Type::OBJECT
                     && $this->isNativeObjectClass($property->class)
                 ) {
+                    return $property->class;
+                }
+            } elseif ($receiverClass !== '') {
+                $property = $this->createPropertyAccessResolver()->findReadableInstanceProperty(
+                    $receiverClass,
+                    $expr->name->toString(),
+                    $this->classDef ? $this->getFullClassName() : '',
+                );
+                // The declaration is an upper bound, including for nullable
+                // objects. Dispatch still decides whether the runtime class
+                // is exact enough for a direct call; reads keep their guards.
+                if ($property !== null && $property->type === Type::OBJECT) {
                     return $property->class;
                 }
             }
@@ -3302,7 +3304,10 @@ abstract class CompilerBase implements PropertyAccessContext
             && $this->compositeTypeRelation($v->expr, $this->functionDef->returnTypeCheck) === self::COMPOSITE_TYPE_MATCH;
         // Preserve the raw null/object until the declared composite return
         // check runs; the Object constructor accepts either validated value.
-        $exprCode = $nullableObjectReturn ? $expr : $this->convertExprType($expr, $returnType, $type);
+        $objectCompositeReturn = !$this->context->inClosure && $returnType === Type::OBJECT
+            && $this->functionDef->returnTypeCheck;
+        $exprCode = $nullableObjectReturn || $objectCompositeReturn
+            ? $expr : $this->convertExprType($expr, $returnType, $type);
         if ($provenObjectReturn && $this->isNullExpr($v->expr)) {
             $exprCode = 'php::Object{}';
         }
@@ -3763,6 +3768,9 @@ abstract class CompilerBase implements PropertyAccessContext
             case 'Expr_BinaryOp_SmallerOrEqual':
             case 'Expr_BinaryOp_Greater':
             case 'Expr_BinaryOp_GreaterOrEqual':
+            case 'Expr_Instanceof':
+            case 'Expr_Isset':
+            case 'Expr_Empty':
                 return Type::BOOL;
             case 'Expr_BitwiseNot':
                 $inner = Type::getReferencedType($this->detectTypeOfExpr($expr->expr));
@@ -3797,6 +3805,8 @@ abstract class CompilerBase implements PropertyAccessContext
                 return Type::ARRAY;
             case 'Expr_BinaryOp_Concat':
             case 'Expr_AssignOp_Concat':
+            case 'Expr_Cast_String':
+            case 'Scalar_InterpolatedString':
                 return Type::STR;
             case 'Expr_Ternary':
                 $ifType = $expr->if === null
@@ -3804,6 +3814,11 @@ abstract class CompilerBase implements PropertyAccessContext
                     : $this->detectTypeOfExpr($expr->if);
                 $elseType = $this->detectTypeOfExpr($expr->else);
                 return $ifType === $elseType ? $ifType : Type::VAR;
+            case 'Expr_BinaryOp_Coalesce':
+                return $this->getCoalesceResultType($expr);
+            case 'Expr_NullsafeMethodCall':
+            case 'Expr_NullsafePropertyFetch':
+                return $this->detectClassOfExpr($expr) !== '' ? Type::OBJECT : Type::VAR;
             case 'Expr_Match':
                 if (empty($expr->arms)) {
                     return Type::VAR;
@@ -3906,6 +3921,10 @@ abstract class CompilerBase implements PropertyAccessContext
                 if ($expr->isFirstClassCallable()) {
                     return Type::OBJECT;
                 }
+                if ($expr->name instanceof Expr\Variable && is_string($expr->name->name)
+                    && $this->context->isNativeLocalClosure($this->parseVariable($expr->name))) {
+                    return $this->context->getNativeLocalClosureResult($this->parseVariable($expr->name))['type'];
+                }
                 if ($this->isNameExpr($expr->name)) {
                     $name = $this->parseIdentifier($expr->name);
                     $functionTarget = $this->resolveStaticFunctionCallTarget($expr->name);
@@ -3948,7 +3967,10 @@ abstract class CompilerBase implements PropertyAccessContext
                         }
                         return $classDef->getMethod($method)->getReturnType();
                     }
-                    if ($classDef === null) {
+                    if ($classDef === null && !$expr->var instanceof Expr\PropertyFetch) {
+                        // An interface property still lowers to a dynamic
+                        // call. Preserve its scalar storage inference while
+                        // detectClassOfExpr() carries object return contracts.
                         $interfaceMethod = $this->resolveInterfaceMethod(
                             $this->detectClassOfExpr($expr->var),
                             $method,
@@ -4067,9 +4089,12 @@ abstract class CompilerBase implements PropertyAccessContext
                 ) {
                     return Type::STR;
                 }
-                break;
+                return $this->detectStaticClassConstantStorageType($expr);
             case 'Expr_ArrayDimFetch':
-                if (($typedArray = $this->getTypedArrayAccessDefinition($expr)) !== null) {
+                if (($element = $this->getLiteralArrayElement($expr)) !== null) {
+                    return $element['type'];
+                }
+                if (($typedArray = $this->getTypedArrayReadDefinition($expr)) !== null) {
                     return $typedArray['type'];
                 }
                 if ($this->isStdArrayExpr($expr)) {
@@ -4398,14 +4423,13 @@ abstract class CompilerBase implements PropertyAccessContext
     /** Reserve one reusable Zend user-code frame for scoped dynamic callbacks. */
     protected function markUserCodeCallableScope(): void
     {
-        if ($this->methodDef) {
+        if ($this->classDef && $this->methodDef) {
             // This state belongs to the generated function body, not to its
             // MethodDef. A method and each nested Closure have independent
             // FunctionContext instances and therefore independent guards.
-            $this->context->needsUserCodeCallableScope = true;
             // Reserve the declaration before the generated function prologue
             // is emitted. The guard itself is inserted after parsing the body.
-            $this->getCallableScopeExpr();
+            $this->context->requireUserCodeCallableScope(fn() => $this->genTmpVarName());
         }
     }
 
@@ -5296,7 +5320,9 @@ abstract class CompilerBase implements PropertyAccessContext
         }
         // The TypePHP compiler disallows operating on undefined variables;
         // in PHP, isset($var) may be used with an undefined $var.
-        $this->checkVarMustExist($node, $this->parseIdentifier($node));
+        if ($this->isVarExpr($node)) {
+            $this->checkVarMustExist($node, $this->parseIdentifier($node));
+        }
         $fn = $this->getChainedFunc($op);
         $expr = $node;
         if ($this->isVarExpr($expr)) {
@@ -5359,6 +5385,12 @@ abstract class CompilerBase implements PropertyAccessContext
                 // resolve a parent private property against the runtime child
                 // class, so isset()/?? could observe a different slot from a
                 // normal native read or write.
+                if ($this->isVarExpr($expr->var) && $this->findReadablePropertyDefinition($expr) !== null) {
+                    $var = in_array($op, [self::OP_ISSET, self::OP_EMPTY, self::OP_NOT_EMPTY], true)
+                        ? $this->parsePropertyPresenceValue($expr)
+                        : $this->parsePropertyFetch($expr);
+                    break;
+                }
                 if ($this->isNativePropertyAccess($expr)) {
                     $var = $this->parsePropertyFetch($expr);
                     break;
@@ -5367,11 +5399,17 @@ abstract class CompilerBase implements PropertyAccessContext
                 $list[] = '{php::PropertyFetch, ' . Type::VAR . '(' . $name . ')}';
             } elseif ($this->isVarExpr($expr)) {
                 $var = $this->parseIdentifier($expr);
+                $this->checkVarMustExist($expr, $var);
                 break;
             } else {
                 $var = $this->genTmpVarName();
                 $this->addLocalVar($var, Type::VAR);
-                $this->addBeforeStmtLine($var . '=' . $this->parseExpr($expr) . ';');
+                $value = $op === self::OP_ISSET && $getValue
+                    && ($expr instanceof Expr\NullsafePropertyFetch || $expr instanceof Expr\PropertyFetch)
+                    && $this->containsNullsafeChain($expr)
+                    ? $this->parseNullsafeExpr($expr, true)
+                    : $this->parseExpr($expr);
+                $this->addBeforeStmtLine($var . '=' . $value . ';');
                 break;
             }
             $expr = $expr->var;
@@ -6106,7 +6144,7 @@ abstract class CompilerBase implements PropertyAccessContext
     {
         $code = '';
         foreach ($localVars as $name => $type) {
-            if (isset($this->context->nativeLocalClosures[$name])) {
+            if ($this->context->isNativeLocalClosure($name)) {
                 continue;
             }
             if (isset($this->context->arguments[$name])) {
@@ -6194,18 +6232,19 @@ abstract class CompilerBase implements PropertyAccessContext
         if ($this->context->hasMultiLevelContinue) {
             $code .= $this->getIndent() . 'int _cnt_flag = 0;' . PHP_EOL;
         }
-        if ($this->context->callableScopeVar !== null) {
+        $callableScopeVar = $this->context->getCallableScopeVariable();
+        if ($callableScopeVar !== null) {
             $code .= $this->getIndent() . 'php::CallableScope '
-                . $this->context->callableScopeVar . ' = php::getCallableScope('
+                . $callableScopeVar . ' = php::getCallableScope('
                 . $this->getMethodPtr($this->getFullClassName(), $this->methodDef->name)
                 . ', this_);' . PHP_EOL;
         }
-        if ($this->context->needsCalledCe) {
+        if ($this->context->needsCalledCe()) {
             $code .= $this->getIndent()
                 . 'zend_class_entry *const _typephp_called_ce = typephp_get_called_ce(this_);'
                 . PHP_EOL;
         }
-        if ($this->context->needsCalledClass) {
+        if ($this->context->needsCalledClass()) {
             $code .= $this->getIndent()
                 . 'const php::Str _typephp_called_class = typephp_get_called_class(_typephp_called_ce);'
                 . PHP_EOL;
@@ -6218,7 +6257,7 @@ abstract class CompilerBase implements PropertyAccessContext
                 . $this->getNativeObjectDescriptorName($promotion['class']) . ');'
                 . PHP_EOL;
         }
-        foreach ($this->context->classEntryPtrs as $className => $entry) {
+        foreach ($this->context->getLocalClassEntries() as $className => $entry) {
             $code .= $this->getIndent() . 'zend_class_entry *' . $entry . ' = '
                 . $this->getClassEntryPtr($className) . ';' . PHP_EOL;
         }
@@ -6248,7 +6287,7 @@ abstract class CompilerBase implements PropertyAccessContext
         // but its initialization must dominate every control-flow branch that
         // may use it. Emitting it at the first call site is unsafe when that
         // site belongs to an if/switch/loop branch that is not executed.
-        foreach ($this->context->ceWrappers as $className => $object) {
+        foreach ($this->context->getClassWrappers() as $className => $object) {
             $code .= $this->getIndent() . 'Z_PTR_P(' . $object . '.ptr()) = '
                 . $this->getClassEntryPtr($className) . ';' . PHP_EOL;
         }
@@ -6266,7 +6305,7 @@ abstract class CompilerBase implements PropertyAccessContext
                 $code .= $this->getIndent() . $info['type'] . ' &' . $name . ' = ' . $info['getter'] . ';' . PHP_EOL;
             }
         }
-        foreach ($this->context->staticPropRefs as $info) {
+        foreach ($this->context->getStaticPropertySlots() as $info) {
             $code .= $this->getIndent() . 'zval *' . $info['name'] . ' = nullptr;' . PHP_EOL;
             $code .= $this->getIndent() . 'const auto ' . $info['accessorName'] . ' = [&]() {'
                 . ' return typephp_get_static_property_cached(' . $info['name'] . ', [&]() {'

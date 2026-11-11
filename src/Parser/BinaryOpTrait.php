@@ -890,6 +890,10 @@ trait BinaryOpTrait
         }
 
         if ($expr instanceof Expr\ArrayDimFetch) {
+            $lowered = $this->getLoweredExpressionType($expr);
+            if ($lowered !== null && $this->usesNativeScalarStorage($lowered)) {
+                return $lowered;
+            }
             return Type::VAR;
         }
 

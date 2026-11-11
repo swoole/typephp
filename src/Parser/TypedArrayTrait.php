@@ -197,12 +197,39 @@ trait TypedArrayTrait
         return $expr instanceof Expr\ArrayDimFetch ? $this->getTypedArrayDefinition($expr->var) : null;
     }
 
+    protected function getTypedArrayPropertyDefinition(NodeAbstract $expr): ?array
+    {
+        if (!$expr instanceof Expr\PropertyFetch && !$expr instanceof Expr\StaticPropertyFetch) {
+            return null;
+        }
+        if ($this->containsNullsafeChain($expr)) {
+            return null;
+        }
+        $property = $this->findReadablePropertyDefinition($expr, true);
+        return $property !== null && $property->getter === null && $property->setter === null
+            ? $property->typedArray : null;
+    }
+
+    protected function getTypedArrayReadDefinition(NodeAbstract $expr): ?array
+    {
+        if (!$expr instanceof Expr\ArrayDimFetch || $expr->dim === null) {
+            return null;
+        }
+        return $this->getTypedArrayAccessDefinition($expr) ?? $this->getTypedArrayPropertyDefinition($expr->var);
+    }
+
+    protected function getTypedArrayPropertyReadDefinition(NodeAbstract $expr): ?array
+    {
+        return $expr instanceof Expr\ArrayDimFetch && $expr->dim !== null
+            ? $this->getTypedArrayPropertyDefinition($expr->var) : null;
+    }
+
     protected function assertTypedArrayReferenceForbidden(NodeAbstract $expr): void
     {
         while ($expr instanceof Expr\ArrayDimFetch) {
             $expr = $expr->var;
         }
-        if ($this->getTypedArrayDefinition($expr) !== null) {
+        if ($this->getTypedArrayDefinition($expr) !== null || $this->getTypedArrayPropertyDefinition($expr) !== null) {
             $this->fatalError($expr, 'Typed arrays cannot escape through std::ref(), toRef(), or element references');
         }
     }
@@ -302,6 +329,76 @@ trait TypedArrayTrait
         return $this->convertExprFromType($def['type'], $code);
     }
 
+    /**
+     * Whole-property replacement and dynamic Zend writes can bypass the
+     * annotation. Check only the element being consumed; no array scan or
+     * trusted contract is attached to a copy of the property.
+     */
+    protected function convertTypedArrayPropertyValue(string $type, string $class, string $code): string
+    {
+        $helper = match ($type) {
+            Type::INT => 'php::toIntExact',
+            Type::FLOAT => 'php::toFloatExact',
+            Type::BOOL => 'php::toBoolExact',
+            Type::STR => 'php::toStringExact',
+            Type::ARRAY => 'php::toArrayExact',
+            Type::OBJECT => 'php::toObjectExact',
+            default => null,
+        };
+        if ($helper === null) {
+            return $code;
+        }
+        $expectedClass = $class !== '' ? ', ' . $this->getClassEntryPtr($class) : '';
+        return $helper . '(' . $code . $expectedClass . ')';
+    }
+
+    protected function parseTypedArrayPropertyRead(Expr\ArrayDimFetch $expr, array $definition): string
+    {
+        $property = $expr->var;
+        $orderedKey = $this->shouldMaterializeOrderedOperand($expr->dim);
+        if ($orderedKey && $property instanceof Expr\PropertyFetch) {
+            $property = $this->stageTypedArrayReadReceiver($property);
+        }
+        $key = $this->guardTypedArrayValue($definition, $expr->dim, $this->parseExprAsValue($expr->dim), true);
+        if ($orderedKey) {
+            $keyVar = $this->addTmpVar($definition['keyType']);
+            $this->materializeStatementTemporary($keyVar, $key);
+            $key = $keyVar;
+        }
+        $array = $this->parseIdentifier($property);
+        $value = $this->parenthesizeOpenOperand($array) . '.offsetGet(' . $key . ')';
+        $expr->setAttribute(self::ATTR_LOWERED_TYPE, $definition['type']);
+        return $this->convertTypedArrayPropertyValue($definition['type'], $definition['class'] ?? '', $value);
+    }
+
+    /**
+     * Stage side effects used to address a property, but leave slot reads
+     * after the outer key. The key may replace any slot along the path.
+     */
+    private function stageTypedArrayReadReceiver(Expr $expr): Expr
+    {
+        if ($expr instanceof Expr\PropertyFetch) {
+            $receiver = $this->stageTypedArrayReadReceiver($expr->var);
+            $member = $expr->name;
+            if ($member instanceof Expr && $this->shouldMaterializeOrderedOperand($member)) {
+                $member = new Expr\Variable($this->parseOrderedOperand($member, false, true));
+            }
+            return new Expr\PropertyFetch($receiver, $member, $expr->getAttributes());
+        }
+        if ($expr instanceof Expr\ArrayDimFetch) {
+            $array = $this->stageTypedArrayReadReceiver($expr->var);
+            $key = $expr->dim;
+            if ($key !== null && $this->shouldMaterializeOrderedOperand($key)) {
+                $key = new Expr\Variable($this->parseOrderedOperand($key, false, true));
+            }
+            return new Expr\ArrayDimFetch($array, $key, $expr->getAttributes());
+        }
+        if ($expr instanceof Expr\StaticPropertyFetch || !$this->shouldMaterializeOrderedOperand($expr)) {
+            return $expr;
+        }
+        return new Expr\Variable($this->parseOrderedOperand($expr, false, true), $expr->getAttributes());
+    }
+
     protected function parseTypedArrayKey(Expr\ArrayDimFetch $expr, bool $write = false): string
     {
         $def = $this->getTypedArrayAccessDefinition($expr);
@@ -380,12 +477,12 @@ trait TypedArrayTrait
         return $values['array'] . '.exists(' . $values['key'] . ')';
     }
 
-    protected function parseTypedArrayForeach(Foreach_ $node, array $def): string
+    protected function parseTypedArrayForeach(Foreach_ $node, array $def, bool $property = false): string
     {
         if ($node->byRef) {
             $this->fatalError($node, 'Typed array elements cannot escape through foreach references');
         }
-        $array = $this->parseIdentifier($node->expr);
+        [$array, $before, $after] = $this->parseExprWithCapturedStmts($node->expr);
         $iterator = $this->genTmpVarName();
         $assignments = '';
         foreach ([[$node->keyVar, $def['keyType'], '', 'key'],
@@ -413,12 +510,17 @@ trait TypedArrayTrait
             }
             // PHP normalizes numeric string keys to integers. Recover the
             // declared key type here, without changing PHPX or array storage.
-            $assignments .= $this->getIndent() . '    ' . $name . ' = '
-                . $this->convertExprFromType($type, $iterator . '.' . $part . '()') . ';' . PHP_EOL;
+            $read = $iterator . '.' . $part . '()';
+            $value = $property && ($part === 'value' || $type === Type::INT)
+                ? $this->convertTypedArrayPropertyValue($type, $class, $read)
+                : $this->convertExprFromType($type, $read);
+            $assignments .= $this->getIndent() . '    ' . $name . ' = ' . $value . ';' . PHP_EOL;
         }
         $scope = $this->class ? $this->getLocalClassEntryPtr($this->getFullClassName()) : 'nullptr';
-        $code = '{' . PHP_EOL . $this->getIndent() . 'php::ForeachIterator ' . $iterator
+        $code = '{' . PHP_EOL . $this->formatCapturedStmtLines($before)
+            . $this->getIndent() . 'php::ForeachIterator ' . $iterator
             . '{' . $array . ', false, ' . $scope . '};' . PHP_EOL
+            . $this->formatCapturedStmtLines($after)
             . $this->getIndent() . 'while (' . $iterator . '.next()) {' . PHP_EOL . $assignments;
         $body = $this->withIndentedBlock(fn() => $this->parseForeachBody($node));
         return $code . $this->parseBeforeStmtLines() . $body . $this->getIndent() . '}' . PHP_EOL

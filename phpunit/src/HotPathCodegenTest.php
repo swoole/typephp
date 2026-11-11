@@ -11,8 +11,8 @@ final class HotPathCodegenTest extends \BaseTest
         self::assertStringContainsString('items.item(0L, true) = value;', $code);
         self::assertStringContainsString('items.appendValue(value);', $code);
         self::assertStringContainsString('items.item(0L, true) += value;', $code);
-        self::assertStringContainsString('items.item(0L, true) += other.get(0L);', $code);
-        self::assertStringContainsString('items.item(2L, true) = other.get(0L);', $code);
+        self::assertStringContainsString('items.item(0L, true) += php::toInt(other.get(0L));', $code);
+        self::assertStringContainsString('items.item(2L, true) = php::toInt(other.get(0L));', $code);
         // Value-producing compound writes must also retain array buckets:
         // offsetSet() would replace an existing referenced element.
         self::assertStringNotContainsString('items.offsetSet(', $code);

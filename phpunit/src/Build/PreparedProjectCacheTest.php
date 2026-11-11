@@ -79,6 +79,30 @@ PHP);
         self::assertNotSame($key, $this->invoke($compiler, 'preparedProjectKey', [$file]));
     }
 
+    public function testDependencyRecordsRoundTripWithoutSerializingTheMembershipIndex(): void
+    {
+        $file = $this->directory . '/source.php';
+        $first = $this->compiler();
+        $key = $this->invoke($first, 'preparedProjectKey', [$file]);
+        $first->prepareFile($file);
+        $this->invoke($first, 'recordSymbolUse', $file, 'constant:Additional');
+        $before = $this->invoke($first, 'getFileSymbolUses', $file);
+        $this->invoke($first, 'storePreparedProject', $key);
+        $cache = file_get_contents($this->invoke($first, 'preparedProjectCacheFile'));
+        $state = unserialize(substr($cache, strlen($key) + 1));
+        self::assertSame($before, $state['symbolCallInFile'][$file]);
+        self::assertArrayHasKey('symbolDeclInFile', $state);
+        self::assertArrayHasKey('globalVarDeclInFile', $state);
+        self::assertArrayNotHasKey('symbolUseIndex', $state);
+        $second = $this->compiler();
+        self::assertTrue($this->invoke($second, 'restorePreparedProject', $key));
+        $this->invoke($second, 'recordSymbolUse', $file, 'constant:Additional');
+        self::assertSame($before, $this->invoke($second, 'getFileSymbolUses', $file));
+        $this->invoke($second, 'recordSymbolUse', $file, 'constant:Later');
+        self::assertSame([...$before, 'constant:Later'], $this->invoke($second, 'getFileSymbolUses', $file));
+        self::assertSame($file, $this->invoke($second, 'getSymbolDeclarationFile', 'class:prepared\\child'));
+    }
+
     public function testCorruptSnapshotFallsBackWithoutInstallingSymbols(): void
     {
         $compiler = $this->compiler();

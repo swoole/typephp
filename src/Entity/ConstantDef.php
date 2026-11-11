@@ -23,6 +23,8 @@ class ConstantDef
     public ?NodeAbstract $valueExpr = null;
     /** True after the declaration AST has been lowered to C++ in convert. */
     public bool $codegenFinalized = false;
+    /** C++ initializer type, retained independently of the initializer AST. */
+    public ?string $loweredType = null;
     /**
      * True when lowering this constant's initializer materialized temporaries
      * (tmp_var_N) into the local scope. Those temporaries only exist inside

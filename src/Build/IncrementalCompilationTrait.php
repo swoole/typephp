@@ -192,10 +192,7 @@ trait IncrementalCompilationTrait
 
     protected function rebuildIncrementalGlobalState(): void
     {
-        foreach ($this->globalVarDeclInFile as $name => $_file) {
-            unset($this->symbolDeclInFile[$this->getGlobalDependencySymbol($name)]);
-        }
-        $this->globalVarDeclInFile = [];
+        $this->clearGlobalDependencyOwners();
         $this->nativeStaticInitializerDeclInFile = [];
         foreach ($this->globalVarsInFile as $file => $globals) {
             ksort($globals, SORT_STRING);
@@ -203,11 +200,7 @@ trait IncrementalCompilationTrait
                 if (!isset($this->nativeGlobalObjects[$name])) {
                     $this->globalVars[$name] = $type;
                 }
-                if (!isset($this->globalVarDeclInFile[$name])) {
-                    $this->globalVarDeclInFile[$name] = $file;
-                    $this->symbolDeclInFile[$this->getGlobalDependencySymbol($name)] = $file;
-                }
-                $this->symbolCallInFile[$file][] = $this->getGlobalDependencySymbol($name);
+                $this->recordGlobalDependencyUsage($file, $name);
             }
         }
         foreach ($this->nativeStaticInitializersInFile as $file => $initializers) {
@@ -257,14 +250,9 @@ trait IncrementalCompilationTrait
             $previous = $this->incrementalFileMetadata[$path]
                 ?? $this->getIncrementalBuildState()->metadata($path)
                 ?? [];
-            $declared = [];
-            foreach ($this->symbolDeclInFile as $symbol => $declaringFile) {
-                if ($declaringFile === $path) {
-                    $declared[] = $symbol;
-                }
-            }
+            $declared = $this->getFileDeclaredSymbols($path);
             sort($declared, SORT_STRING);
-            $used = array_values(array_unique($this->symbolCallInFile[$path] ?? []));
+            $used = $this->getFileSymbolUses($path);
             sort($used, SORT_STRING);
             $dependencies = $this->incrementalDependencies[$path] ?? [];
             sort($dependencies, SORT_STRING);
@@ -333,12 +321,12 @@ trait IncrementalCompilationTrait
         // leave a cached direct call to the base implementation behind.
         // Direct children suffice: dirty propagation walks the whole graph.
         foreach ($this->classSubClasses as $class => $children) {
-            $parentFile = $this->symbolDeclInFile[$this->getClassDependencySymbol($class)] ?? null;
+            $parentFile = $this->getSymbolDeclarationFile($this->getClassDependencySymbol($class));
             if (!is_string($parentFile) || !isset($known[$parentFile])) {
                 continue;
             }
             foreach ($children as $child) {
-                $childFile = $this->symbolDeclInFile[$this->getClassDependencySymbol($child)] ?? null;
+                $childFile = $this->getSymbolDeclarationFile($this->getClassDependencySymbol($child));
                 if (is_string($childFile) && $childFile !== $parentFile && isset($known[$childFile])) {
                     $hierarchyDependencies[$parentFile][$childFile] = true;
                 }
@@ -347,8 +335,8 @@ trait IncrementalCompilationTrait
         $dependencies = [];
         foreach ($files as $file) {
             $requirements = $hierarchyDependencies[$file] ?? [];
-            foreach ($this->symbolCallInFile[$file] ?? [] as $symbol) {
-                $dependency = $this->symbolDeclInFile[$symbol] ?? null;
+            foreach ($this->getFileSymbolUses($file) as $symbol) {
+                $dependency = $this->getSymbolDeclarationFile($symbol);
                 if (is_string($dependency)
                     && $dependency !== $file
                     && isset($known[$dependency])) {
@@ -385,25 +373,25 @@ trait IncrementalCompilationTrait
             }
             foreach ($metadata['symbolsDeclared'] ?? [] as $symbol) {
                 if (is_string($symbol) && str_starts_with($symbol, 'global:')) {
-                    $this->symbolDeclInFile[$symbol] = $file;
+                    $this->registerSymbolDeclaration($file, $symbol);
                 }
             }
         }
         foreach ($files as $file) {
-            foreach ($this->symbolCallInFile[$file] ?? [] as $symbol) {
+            foreach ($this->getFileSymbolUses($file) as $symbol) {
                 if (!str_starts_with($symbol, 'global:')
-                    || isset($this->symbolDeclInFile[$symbol])) {
+                    || $this->getSymbolDeclarationFile($symbol) !== null) {
                     continue;
                 }
                 // A newly introduced global has no previous owner. Assign one
                 // deterministically for this planning pass; conversion will
                 // record the actual first declaration owner in sorted order.
-                $this->symbolDeclInFile[$symbol] = $file;
+                $this->registerSymbolDeclaration($file, $symbol);
             }
         }
-        foreach ($this->symbolDeclInFile as $symbol => $file) {
+        foreach ($this->getSymbolDeclarations() as $symbol => $file) {
             if (str_starts_with($symbol, 'global:') && !isset($knownFiles[$file])) {
-                unset($this->symbolDeclInFile[$symbol]);
+                $this->forgetSymbolDeclaration($symbol);
             }
         }
     }

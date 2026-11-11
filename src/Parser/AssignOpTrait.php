@@ -184,12 +184,18 @@ trait AssignOpTrait
                 return $optimized;
             }
         }
-        return $this->parseAssignFinally(
+        $code = $this->parseAssignFinally(
             $left,
             $right,
             $this->canFoldLocalInitializerIntoDeclaration($v),
             $v->getAttribute(self::ATTR_STATEMENT_EXPRESSION, false),
         );
+        if ($this->context->isLiteralArrayCandidate($v)
+            && !$this->hasArgument($this->parseIdentifier($left))
+            && ($shape = $this->getLiteralArrayShape($right)) !== null) {
+            $this->context->registerLiteralArrayShape($this->parseIdentifier($left), $shape);
+        }
+        return $code;
     }
 
     /**
@@ -279,35 +285,39 @@ trait AssignOpTrait
     {
         $items = $left->items;
         $code  = '{' . PHP_EOL;
-        $this->indentLevel++;
-        $tmpVar = $this->genTmpVarName();
-        $this->addLocalVar($tmpVar, Type::VAR);
-        $code .= $this->getIndent() . $tmpVar . ' = ' . $this->parseExpr($right) . ';' . PHP_EOL;
-        foreach ($items as $k => $item) {
-            if (!$item) {
-                continue;
+        $code .= $this->withIndentedBlock(function () use ($items, $right): string {
+            $tmpVar = $this->genTmpVarName();
+            $this->addLocalVar($tmpVar, Type::VAR);
+            $code = $this->getIndent() . $tmpVar . ' = ' . $this->parseExpr($right) . ';' . PHP_EOL;
+            if (($shape = $this->getLiteralArrayShape($right)) !== null) {
+                $this->context->registerLiteralArrayShape($tmpVar, $shape);
             }
-            if ($item instanceof ArrayItem) {
-                $key = $item->key ?? new Node\Scalar\Int_($k, $item->getAttributes());
-                $itemExpr = new Expr\ArrayDimFetch(
-                    new Variable($tmpVar, $item->getAttributes()),
-                    $key,
-                    $item->getAttributes(),
-                );
-                if ($item->value instanceof Expr\List_) {
-                    $code .= $this->getIndent()
-                        . $this->parseAssignToList($item->value, $itemExpr)
-                        . PHP_EOL;
-                } else {
-                    $code .= $this->getIndent()
-                        . $this->parseDestructuringWrite($item->value, $itemExpr)
-                        . ';' . PHP_EOL;
+            foreach ($items as $k => $item) {
+                if (!$item) {
+                    continue;
                 }
-            } else {
-                $this->unsupportedSyntax($item);
+                if ($item instanceof ArrayItem) {
+                    $key = $item->key ?? new Node\Scalar\Int_($k, $item->getAttributes());
+                    $itemExpr = new Expr\ArrayDimFetch(
+                        new Variable($tmpVar, $item->getAttributes()),
+                        $key,
+                        $item->getAttributes(),
+                    );
+                    if ($item->value instanceof Expr\List_) {
+                        $code .= $this->getIndent()
+                            . $this->parseAssignToList($item->value, $itemExpr)
+                            . PHP_EOL;
+                    } else {
+                        $code .= $this->getIndent()
+                            . $this->parseDestructuringWrite($item->value, $itemExpr)
+                            . ';' . PHP_EOL;
+                    }
+                } else {
+                    $this->unsupportedSyntax($item);
+                }
             }
-        }
-        $this->indentLevel--;
+            return $code;
+        });
 
         return $code . $this->getIndent() . '}';
     }
@@ -496,12 +506,12 @@ trait AssignOpTrait
         if ($left instanceof Expr\PropertyFetch && $this->isIdExpr($left->name)) {
             $receiverClass = $this->detectClassOfExpr($left->var);
             if ($this->isNativeObjectClass($receiverClass)) {
-                $property = $left->name->toString();
+                $propertyName = $left->name->toString();
                 $access = $this->getNativePropertyAccess($left);
                 if ($access === null) {
-                    $resolution = $this->resolveNativeInstanceProperty($left, $property, $receiverClass);
+                    $resolution = $this->resolveNativeInstanceProperty($left, $propertyName, $receiverClass);
                     if ($resolution === null) {
-                        $this->fatalError($left, "Native class `{$receiverClass}` has no property `\${$property}`");
+                        $this->fatalError($left, "Native class `{$receiverClass}` has no property `\${$propertyName}`");
                     }
                     $this->applyNativePropertyAccessResult($left, $resolution);
                     $access = $this->getNativePropertyAccess($left);
@@ -515,13 +525,13 @@ trait AssignOpTrait
                 if ($def->type === Type::OBJECT && $this->isNativeObjectClass($def->class)) {
                     if ($this->isNull($right)) {
                         if (!$def->nullable) {
-                            $this->fatalError($right, "Cannot assign null to native property `{$receiverClass}::\${$property}`");
+                            $this->fatalError($right, "Cannot assign null to native property `{$receiverClass}::\${$propertyName}`");
                         }
                         return $leftExpr . ' = nullptr';
                     }
                     $rightClass = $this->detectClassOfExpr($right);
                     if ($rightClass === '' || !$this->isObjectClassStaticallyAssignableTo($rightClass, $def->class)) {
-                        $this->fatalError($right, "Cannot assign value to native property `{$receiverClass}::\${$property}`");
+                        $this->fatalError($right, "Cannot assign value to native property `{$receiverClass}::\${$propertyName}`");
                     }
                     return $leftExpr . ' = ' . $this->parseExprAsValue($right);
                 }
@@ -701,6 +711,11 @@ trait AssignOpTrait
                 // On first assignment the variable's type is determined. PHP variable scope is function-level, so variables declared in for/while blocks remain usable outside the block
                 if (!$this->hasVar($var)) {
                     $finalVarType = $this->getNormalAssignType($type);
+                    if ($finalVarType === Type::OBJECT && $this->context->getObjectBindingWriteCount($var) > 1) {
+                        // Generic object unions may later be rebound to a
+                        // scalar in PHP. Preserve that local's dynamic slot.
+                        $finalVarType = Type::VAR;
+                    }
                     $finalVarType = $this->isNativeType($finalVarType) ? $this->getNativeType($finalVarType) : $finalVarType;
                     $this->addLocalVar($var, $finalVarType);
                 } else {

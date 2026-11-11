@@ -1077,7 +1077,11 @@ trait MethodCallTrait
         ) || $typedPropertyLexicalPrivateClass !== '';
         $resolvedMethodPtr = false;
         if ($class && $funcName && !$magicMethod) {
-            if ($this->isInternalClass($class) && Reflection::hasMethod($class, $funcName)) {
+            // Reflection exposes Closure::__invoke, but Zend resolves it from
+            // each Closure object instead of its class function table.
+            $closureInvoke = strcasecmp(ltrim($class, '\\'), 'Closure') === 0
+                && strcasecmp($funcName, '__invoke') === 0;
+            if (!$closureInvoke && $this->isInternalClass($class) && Reflection::hasMethod($class, $funcName)) {
                 $methodPtr = $this->getMethodPtr($class, $funcName);
                 $resolvedMethodPtr = true;
             } else {

@@ -6999,6 +6999,7 @@ CODE;
         $this->initializeImmutableFunctionContext();
         $this->prepareReferenceCaptureDegradations($v->stmts, true);
         $this->prepareLiteralArrayShapes($v->stmts);
+        $this->prepareObjectBindingFacts($v->stmts);
 
         if ($this->functionDef->generator) {
             try {

@@ -109,6 +109,15 @@ trait ClosureGenerator
         if ($capturePlan === null) {
             return null;
         }
+        $writes = (new \TypePhp\Analysis\ObjectBindingAnalyzer())->analyze(
+            $expr instanceof Expr\ArrowFunction ? $expr->expr : $expr->stmts, true,
+        );
+        foreach ($capturePlan['bindings'] as $binding) {
+            if ($binding['type'] === Type::OBJECT && $binding['class'] === ''
+                && (isset($writes['*']) || isset($writes[$this->unescapeVarName($binding['name'])]))) {
+                return null;
+            }
+        }
 
         // The local lambda no longer crosses a Zend boundary, but its declared
         // PHP signature remains observable at each direct call.
@@ -132,6 +141,7 @@ trait ClosureGenerator
             $body = $expr instanceof Expr\ArrowFunction ? $expr->expr : $expr->stmts;
             $this->prepareReferenceCaptureDegradations($body);
             $this->prepareLiteralArrayShapes($body);
+            $this->prepareObjectBindingFacts($body);
 
             $returnType = $expr->returnType;
             $returnTypeName = $returnType instanceof Node\Identifier
@@ -238,6 +248,10 @@ trait ClosureGenerator
         $name = $this->parseIdentifier($param->var);
         $storage = $this->getClosureDeclaredStorage($param->type);
         $type = isset($this->context->varTypeDegradations[$name]) ? Type::VAR : $storage['type'];
+        if ($type === Type::OBJECT && $storage['class'] === ''
+            && $this->context->getObjectBindingWriteCount($name) > 0) {
+            $type = Type::VAR;
+        }
         $input = $type === Type::VAR ? $name : $this->genTmpVarName();
         $this->addArgument($name, $type);
         $code = $this->genNativeLocalClosureParamTypeCheck($param, $input, $index);
@@ -259,13 +273,14 @@ trait ClosureGenerator
     private function importCapturedClosureValue(FunctionContext $outer, string $name, string $value, bool $byRef): string
     {
         $type = Type::getReferencedType($outer->localVars[$name] ?? Type::VAR);
+        $class = $outer->declaredObjects[$name] ?? $outer->objects[$name] ?? $outer->stableObjects[$name] ?? '';
         if ($byRef || isset($this->context->varTypeDegradations[$name])
+            || ($type === Type::OBJECT && $class === '' && $this->context->getObjectBindingWriteCount($name) > 0)
             || !in_array($type, [Type::INT, Type::FLOAT, Type::BOOL, Type::STR, Type::ARRAY, Type::OBJECT], true)) {
             $type = Type::VAR;
         }
         $this->addArgument($name, $type);
         if ($type === Type::OBJECT) {
-            $class = $outer->declaredObjects[$name] ?? $outer->objects[$name] ?? $outer->stableObjects[$name] ?? '';
             if ($class !== '') {
                 $this->context->declareObjectClass($name, $class);
                 if ($this->isFinalClass($class)) {
@@ -547,6 +562,7 @@ trait ClosureGenerator
             $body = $expr instanceof Expr\ArrowFunction ? $expr->expr : $expr->stmts;
             $this->prepareReferenceCaptureDegradations($body);
             $this->prepareLiteralArrayShapes($body);
+            $this->prepareObjectBindingFacts($body);
             if (!$isGenerator && $expr->returnType !== null
                 && !($expr->returnType instanceof Node\Identifier
                     && in_array(strtolower($expr->returnType->name), ['void', 'never'], true))) {
@@ -746,6 +762,7 @@ trait ClosureGenerator
             $body = $expr instanceof Expr\ArrowFunction ? $expr->expr : $expr->stmts;
             $this->prepareReferenceCaptureDegradations($body);
             $this->prepareLiteralArrayShapes($body);
+            $this->prepareObjectBindingFacts($body);
 
             foreach ($capturedNames as $i => $capturedName) {
                 if ($outerContext->getTypedArrayContract($capturedName) !== null) {

@@ -711,6 +711,11 @@ trait AssignOpTrait
                 // On first assignment the variable's type is determined. PHP variable scope is function-level, so variables declared in for/while blocks remain usable outside the block
                 if (!$this->hasVar($var)) {
                     $finalVarType = $this->getNormalAssignType($type);
+                    if ($finalVarType === Type::OBJECT && $this->context->getObjectBindingWriteCount($var) > 1) {
+                        // Generic object unions may later be rebound to a
+                        // scalar in PHP. Preserve that local's dynamic slot.
+                        $finalVarType = Type::VAR;
+                    }
                     $finalVarType = $this->isNativeType($finalVarType) ? $this->getNativeType($finalVarType) : $finalVarType;
                     $this->addLocalVar($var, $finalVarType);
                 } else {

@@ -328,6 +328,13 @@ trait MethodCallTrait
             if (isset($this->context->stableObjects[$object])) {
                 $class = $this->context->stableObjects[$object];
             }
+        } elseif (($class = $this->context->getRefinedObjectClass($object)) !== '') {
+            // instanceof proves an upper bound. Only an unoverridable method
+            // can bypass runtime dispatch through a non-final bound.
+            if (!$this->isFinalClass($class)
+                && !($this->getMethodFlags($class, $method) & (Modifiers::FINAL | Modifiers::PRIVATE))) {
+                return false;
+            }
         } else {
             return false;
         }

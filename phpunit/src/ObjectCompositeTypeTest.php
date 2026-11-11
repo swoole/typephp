@@ -24,6 +24,16 @@ final class ObjectCompositeTypeTest extends BaseTest
         self::assertStringContainsString('php::Object value = php::Object(', $code);
     }
 
+    public function testReassignedParametersLocalsAndValueCapturesPreserveDynamicValues(): void
+    {
+        $code = $this->generated();
+        self::assertStringContainsString('php_objectcompositerebind(php::Object __typephp_captured_arg_value)', $code);
+        self::assertStringContainsString('php::Var value = __typephp_captured_arg_value;', $code);
+        self::assertStringContainsString('php::Var value = vars_.get(', $code);
+        self::assertSame(1, preg_match('/php::Var php_objectcompositelocalrebind\(\) \{(.*?)\n\}/s', $code, $matches));
+        self::assertStringContainsString('php::Var value;', $matches[1]);
+    }
+
     private function generated(): string
     {
         global $translator;

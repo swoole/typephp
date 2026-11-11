@@ -42,3 +42,27 @@ final class ObjectCompositeBox
     public ObjectCompositeBoth|ObjectCompositeOther|null $value = null;
     public function __construct(ObjectCompositeBoth|ObjectCompositeOther|null $value = null) { $this->value = $value; }
 }
+
+function objectCompositeRebind(ObjectCompositeBoth|ObjectCompositeOther $value): mixed
+{
+    $value = json_decode('3');
+    return $value;
+}
+function objectCompositeLocalRebind(): mixed
+{
+    $value = objectCompositeUnion(new ObjectCompositeBoth());
+    $value = json_decode('4');
+    return $value;
+}
+function objectCompositeCaptureRebind(ObjectCompositeBoth|ObjectCompositeOther $value): mixed
+{
+    $callback = static function () use ($value): mixed { $value = json_decode('5'); return $value; };
+    return $callback();
+}
+function objectCompositeClosureRebind(): Closure
+{
+    return static function (ObjectCompositeBoth|ObjectCompositeOther $value): mixed {
+        $value = json_decode('6');
+        return $value;
+    };
+}

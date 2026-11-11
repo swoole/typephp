@@ -100,6 +100,11 @@ class FunctionContext
     private array $literalArrayCandidates = [];
     /** Proven immutable local array contents, indexed with PHP's normalized keys. */
     private array $literalArrayShapes = [];
+    /** Bindings which may be replaced through a reference outside a branch. */
+    private array $unsafeObjectBindings = [];
+    private array $objectBindingWrites = [];
+    /** @var array<string, string> Scoped instanceof upper bounds. */
+    private array $refinedObjectClasses = [];
     /** @var array<string, string> typed-ref local => directly referenced local. */
     public array $typedRefBindings = [];
     /** @var array<string, string> typed-ref local => canonical fixed-storage root. */
@@ -407,6 +412,60 @@ class FunctionContext
     public function getLiteralArrayShape(string $name): ?array
     {
         return $this->literalArrayShapes[$name] ?? null;
+    }
+
+    public function setUnsafeObjectBindings(array $bindings): void
+    {
+        $this->unsafeObjectBindings = $bindings;
+    }
+
+    public function canRefineObjectBinding(string $name): bool
+    {
+        return !isset($this->unsafeObjectBindings['*']) && !isset($this->unsafeObjectBindings[$name]);
+    }
+
+    public function setObjectBindingWrites(array $writes): void
+    {
+        $this->objectBindingWrites = $writes;
+    }
+
+    public function getObjectBindingWriteCount(string $name): int
+    {
+        return isset($this->objectBindingWrites['*']) ? PHP_INT_MAX : ($this->objectBindingWrites[$name] ?? 0);
+    }
+
+    public function getRefinedObjectClass(string $name): string
+    {
+        return $this->refinedObjectClasses[$name] ?? '';
+    }
+
+    /** Restore only refined names, retaining facts for other branch locals. */
+    public function withRefinedObjectClasses(array $bindings, callable $callback): mixed
+    {
+        $objects = $this->objects;
+        $declared = $this->declaredObjects;
+        $stable = $this->stableObjects;
+        $exact = $this->exactObjects;
+        $refined = $this->refinedObjectClasses;
+        foreach ($bindings as $name => $binding) {
+            $this->declaredObjects[$name] = $binding['class'];
+            $this->refinedObjectClasses[$name] = $binding['class'];
+            unset($this->objects[$name], $this->stableObjects[$name], $this->exactObjects[$name]);
+            if ($binding['exact']) {
+                $this->objects[$name] = $binding['class'];
+                $this->stableObjects[$name] = $binding['class'];
+                $this->exactObjects[$name] = $binding['class'];
+            }
+        }
+        try {
+            return $callback();
+        } finally {
+            $this->objects = array_diff_key($this->objects, $bindings) + array_intersect_key($objects, $bindings);
+            $this->declaredObjects = array_diff_key($this->declaredObjects, $bindings) + array_intersect_key($declared, $bindings);
+            $this->stableObjects = array_diff_key($this->stableObjects, $bindings) + array_intersect_key($stable, $bindings);
+            $this->exactObjects = array_diff_key($this->exactObjects, $bindings) + array_intersect_key($exact, $bindings);
+            $this->refinedObjectClasses = $refined;
+        }
     }
 
     /**

@@ -48,10 +48,11 @@ final class LocalClosureCodegenTest extends BaseTest
         $code = file_get_contents($generated);
 
         self::assertIsString($code);
-        self::assertStringContainsString(
-            'auto direct = [base = base](php::Var value) mutable -> php::Var {',
+        self::assertMatchesRegularExpression(
+            '/auto direct = \[base = base\]\(php::Var tmp_var_\d+\) mutable -> php::Var \{/',
             $code,
         );
+        self::assertStringContainsString('php::Int value = php::toInt(', $code);
         self::assertStringContainsString('direct(2L)', $code);
         self::assertStringNotContainsString('typephp_call_cached(direct', $code);
 

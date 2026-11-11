@@ -2620,6 +2620,12 @@ abstract class CompilerBase implements PropertyAccessContext
 
     protected function detectClassOfExpr(NodeAbstract $expr): string
     {
+        if ($expr instanceof Expr\FuncCall && $expr->name instanceof Expr\Variable && is_string($expr->name->name)) {
+            $result = $this->context->getNativeLocalClosureResult($this->parseVariable($expr->name));
+            if ($result['class'] !== '' && ($this->isFinalClass($result['class']) || $this->isInterface($result['class']))) {
+                return $result['class'];
+            }
+        }
         if (($typedArray = $this->getTypedArrayReadDefinition($expr)) !== null) {
             return $typedArray['class'] ?? '';
         }
@@ -3908,6 +3914,10 @@ abstract class CompilerBase implements PropertyAccessContext
             case 'Expr_FuncCall':
                 if ($expr->isFirstClassCallable()) {
                     return Type::OBJECT;
+                }
+                if ($expr->name instanceof Expr\Variable && is_string($expr->name->name)
+                    && $this->context->isNativeLocalClosure($this->parseVariable($expr->name))) {
+                    return $this->context->getNativeLocalClosureResult($this->parseVariable($expr->name))['type'];
                 }
                 if ($this->isNameExpr($expr->name)) {
                     $name = $this->parseIdentifier($expr->name);

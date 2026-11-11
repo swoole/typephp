@@ -94,7 +94,7 @@ class FunctionContext
      * @var array<string, array{assignment: \PhpParser\Node\Expr\Assign, closure: \PhpParser\Node\Expr\Closure|\PhpParser\Node\Expr\ArrowFunction, calls: int}>
      */
     private array $localClosureCandidates = [];
-    /** @var array<string, true> Local variables already emitted as concrete C++ lambdas. */
+    /** @var array<string, array{type: string, class: string}> Result contracts of emitted C++ lambdas. */
     private array $nativeLocalClosures = [];
     /** @var array<string, string> typed-ref local => directly referenced local. */
     public array $typedRefBindings = [];
@@ -360,18 +360,28 @@ class FunctionContext
     }
 
     /** Commit storage only after the matched candidate has lowered successfully. */
-    public function registerNativeLocalClosure(string $name, Expr\Assign $assignment): void
+    public function registerNativeLocalClosure(
+        string $name,
+        Expr\Assign $assignment,
+        array $result = ['type' => Type::VAR, 'class' => ''],
+    ): void
     {
         if ($this->getLocalClosureCandidate($assignment) === null) {
             throw new \LogicException('Native local Closures require a matching assignment plan');
         }
         $this->addLocalVar($name, Type::OBJECT);
-        $this->nativeLocalClosures[$name] = true;
+        $this->nativeLocalClosures[$name] = $result;
     }
 
     public function isNativeLocalClosure(string $name): bool
     {
         return isset($this->nativeLocalClosures[$name]);
+    }
+
+    /** @return array{type: string, class: string} */
+    public function getNativeLocalClosureResult(string $name): array
+    {
+        return $this->nativeLocalClosures[$name] ?? ['type' => Type::VAR, 'class' => ''];
     }
 
     /**

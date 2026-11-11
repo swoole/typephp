@@ -196,7 +196,7 @@ trait TypeCheckGenerator
             $this->fatalError($typeNode, "Type '{$nameLower}' cannot be part of a composite type");
         }
 
-        if ($nameLower === 'mixed') {
+        if ($nameLower === 'mixed' || $nameLower === 'any') {
             return [];
         }
 

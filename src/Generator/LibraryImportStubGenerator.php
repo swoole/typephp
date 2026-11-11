@@ -55,8 +55,8 @@ final class LibraryImportStubGenerator
 
             foreach ($ast as $stmt) {
                 if ($stmt instanceof Node\Stmt\Namespace_) {
-                    $namespace = $stmt->name?->toString() ?? '';
-                    $this->appendDeclarations($namespaces, $namespace, $stmt->stmts);
+                    $namespaceName = $stmt->name?->toString() ?? '';
+                    $this->appendDeclarations($namespaces, $namespaceName, $stmt->stmts);
                     continue;
                 }
                 $this->appendDeclarations($namespaces, '', [$stmt]);

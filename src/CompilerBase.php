@@ -2664,7 +2664,7 @@ abstract class CompilerBase implements PropertyAccessContext
             ));
         }
         if ($expr instanceof Expr\BinaryOp\Coalesce) {
-            return $this->getCommonNativeObjectExpressionClass([$expr->left, $expr->right]);
+            return $this->getCoalesceObjectClass($expr);
         }
         if ($expr instanceof Expr\MethodCall && $this->isNamedMethod($expr->name)) {
             $keywordType = $this->findKeywordMethod($this->parseIdentifier($expr->name));
@@ -3797,6 +3797,11 @@ abstract class CompilerBase implements PropertyAccessContext
                     : $this->detectTypeOfExpr($expr->if);
                 $elseType = $this->detectTypeOfExpr($expr->else);
                 return $ifType === $elseType ? $ifType : Type::VAR;
+            case 'Expr_BinaryOp_Coalesce':
+                return $this->getCoalesceResultType($expr);
+            case 'Expr_NullsafeMethodCall':
+            case 'Expr_NullsafePropertyFetch':
+                return $this->detectClassOfExpr($expr) !== '' ? Type::OBJECT : Type::VAR;
             case 'Expr_Match':
                 if (empty($expr->arms)) {
                     return Type::VAR;
@@ -5291,7 +5296,9 @@ abstract class CompilerBase implements PropertyAccessContext
         }
         // The TypePHP compiler disallows operating on undefined variables;
         // in PHP, isset($var) may be used with an undefined $var.
-        $this->checkVarMustExist($node, $this->parseIdentifier($node));
+        if ($this->isVarExpr($node)) {
+            $this->checkVarMustExist($node, $this->parseIdentifier($node));
+        }
         $fn = $this->getChainedFunc($op);
         $expr = $node;
         if ($this->isVarExpr($expr)) {
@@ -5354,6 +5361,12 @@ abstract class CompilerBase implements PropertyAccessContext
                 // resolve a parent private property against the runtime child
                 // class, so isset()/?? could observe a different slot from a
                 // normal native read or write.
+                if ($this->isVarExpr($expr->var) && $this->getSelectionPropertyDef($expr) !== null) {
+                    $var = in_array($op, [self::OP_ISSET, self::OP_EMPTY, self::OP_NOT_EMPTY], true)
+                        ? $this->parsePropertyPresenceValue($expr)
+                        : $this->parsePropertyFetch($expr);
+                    break;
+                }
                 if ($this->isNativePropertyAccess($expr)) {
                     $var = $this->parsePropertyFetch($expr);
                     break;
@@ -5362,11 +5375,17 @@ abstract class CompilerBase implements PropertyAccessContext
                 $list[] = '{php::PropertyFetch, ' . Type::VAR . '(' . $name . ')}';
             } elseif ($this->isVarExpr($expr)) {
                 $var = $this->parseIdentifier($expr);
+                $this->checkVarMustExist($expr, $var);
                 break;
             } else {
                 $var = $this->genTmpVarName();
                 $this->addLocalVar($var, Type::VAR);
-                $this->addBeforeStmtLine($var . '=' . $this->parseExpr($expr) . ';');
+                $value = $op === self::OP_ISSET && $getValue
+                    && ($expr instanceof Expr\NullsafePropertyFetch || $expr instanceof Expr\PropertyFetch)
+                    && $this->containsNullsafeChain($expr)
+                    ? $this->parseNullsafeExpr($expr, true)
+                    : $this->parseExpr($expr);
+                $this->addBeforeStmtLine($var . '=' . $value . ';');
                 break;
             }
             $expr = $expr->var;

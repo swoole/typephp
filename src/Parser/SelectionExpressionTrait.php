@@ -8,12 +8,251 @@
 namespace TypePhp\Parser;
 
 use TypePhp\Type;
+use TypePhp\Entity\PropertyDef;
 
+use PhpParser\Node;
 use PhpParser\Node\Expr;
 use PhpParser\NodeAbstract;
 
 trait SelectionExpressionTrait
 {
+    protected function getCoalesceObjectClass(Expr\BinaryOp\Coalesce $expr): string
+    {
+        $common = '';
+        foreach ([$expr->left, $expr->right] as $branch) {
+            if ($this->isNull($branch)) {
+                continue;
+            }
+            $class = $this->detectDeclaredClassOfExpr($branch);
+            if ($class === '') {
+                $property = $this->getSelectionPropertyDef($branch);
+                if ($property?->type === Type::OBJECT) {
+                    $class = $property->class;
+                }
+            }
+            if ($class === '') {
+                return '';
+            }
+            if ($common === '') {
+                $common = $class;
+            } elseif ($this->isNativeObjectClass($common) || $this->isNativeObjectClass($class)) {
+                if (!$this->isNativeObjectClass($common) || !$this->isNativeObjectClass($class)) {
+                    return '';
+                }
+                $common = $this->getCommonNativeObjectClass($common, $class);
+                if ($common === '') {
+                    return '';
+                }
+            } elseif ($this->isObjectClassStaticallyAssignableTo($class, $common)) {
+                continue;
+            } elseif ($this->isObjectClassStaticallyAssignableTo($common, $class)) {
+                $common = $class;
+            } else {
+                return '';
+            }
+        }
+        return $common;
+    }
+
+    protected function getCoalesceResultType(Expr\BinaryOp\Coalesce $expr): string
+    {
+        if ($this->getCoalesceObjectClass($expr) !== '') {
+            return Type::OBJECT;
+        }
+        $left = $this->getNonNullSelectionType($expr->left);
+        // A normal hop in a nullsafe chain can also be skipped.
+        $right = $this->containsNullsafeChain($expr->right)
+            ? Type::VAR : $this->detectTypeOfExpr($expr->right);
+        if ($this->isNull($expr->left)) {
+            $left = $right;
+        }
+        if ($left !== $right || !in_array($left, [Type::INT, Type::FLOAT, Type::BOOL, Type::STR, Type::ARRAY], true)) {
+            return Type::VAR;
+        }
+        if ($this->varIntTypes && $left === Type::INT) {
+            return Type::VAR;
+        }
+        return $left;
+    }
+
+    protected function getSelectionPropertyDef(Expr $expr): ?PropertyDef
+    {
+        $static = $expr instanceof Expr\StaticPropertyFetch;
+        if (($expr instanceof Expr\PropertyFetch || $expr instanceof Expr\NullsafePropertyFetch)
+            && $expr->name instanceof Node\Identifier) {
+            $class = $this->detectDeclaredClassOfExpr($expr->var);
+        } elseif ($static && $expr->class instanceof Node\Name && $expr->name instanceof Node\VarLikeIdentifier) {
+            $class = $this->parseIdentifier($expr->class);
+            if ($class === 'static' || ($class === 'self' && $this->classDef?->trait)) {
+                return null;
+            }
+            $class = match ($class) {
+                'self' => $this->getFullClassName(),
+                'parent' => $this->classDef?->extends ?? '',
+                default => $this->getNamespacedClassName($class),
+            };
+        } else {
+            return null;
+        }
+        if ($class === '' || $this->isNativeObjectClass($class)) {
+            return null;
+        }
+        return $this->createPropertyAccessResolver()->findReadableProperty(
+            $class, $expr->name->toString(), $this->classDef ? $this->getFullClassName() : '', $static,
+        );
+    }
+
+    /** Read a single nullable contract; heterogeneous unions stay dynamic. */
+    protected function getNonNullSelectionType(Expr $expr): string
+    {
+        if ($expr instanceof Expr\NullsafeMethodCall) {
+            $expr = new Expr\MethodCall($expr->var, $expr->name, $expr->args, $expr->getAttributes());
+        } elseif ($expr instanceof Expr\NullsafePropertyFetch) {
+            $expr = new Expr\PropertyFetch($expr->var, $expr->name, $expr->getAttributes());
+        }
+        $type = $this->detectTypeOfExpr($expr);
+        if ($type !== Type::VAR && $type !== Type::REF) {
+            return $type;
+        }
+        $property = $this->getSelectionPropertyDef($expr);
+        $check = $property?->typeCheck;
+        if ($property !== null && $property->type !== Type::VAR) {
+            return $property->type;
+        }
+        if ($expr instanceof Expr\MethodCall && $expr->name instanceof Node\Identifier) {
+            $class = $this->detectDeclaredClassOfExpr($expr->var);
+            if ($class !== '' && $this->hasInaccessibleDeclaredMethod($class, $expr->name->toString())) {
+                return Type::VAR;
+            }
+        }
+        $function = $this->resolveCalledFunctionDef($expr);
+        if ($function !== null) {
+            if ($function->returnType !== Type::VAR && $function->returnType !== Type::VOID) {
+                return $function->returnType;
+            }
+            $check = $function->returnTypeCheck;
+        } elseif ($expr instanceof Expr\Variable && is_string($expr->name)) {
+            foreach ($this->functionDef?->argInfoList ?? [] as $argument) {
+                if ($argument->name === $this->parseVariable($expr)) {
+                    $check = $argument->typeCheck;
+                    break;
+                }
+            }
+        }
+        $result = Type::VAR;
+        foreach ($check ?? [] as $entry) {
+            if (($entry['kind'] ?? '') === 'isNull') {
+                continue;
+            }
+            $candidate = match ($entry['kind'] ?? '') {
+                'isInt' => Type::INT, 'isFloat' => Type::FLOAT, 'isBool' => Type::BOOL,
+                'isString' => Type::STR, 'isArray' => Type::ARRAY, default => Type::VAR,
+            };
+            if ($candidate === Type::VAR || ($result !== Type::VAR && $result !== $candidate)) {
+                return Type::VAR;
+            }
+            $result = $candidate;
+        }
+        return $result;
+    }
+
+    protected function parsePropertyPresenceValue(Expr\PropertyFetch $expr): string
+    {
+        $class = $this->detectDeclaredClassOfExpr($expr->var);
+        if ($this->isNativeObjectClass($class)) {
+            return $this->parseIdentifier($expr);
+        }
+        $receiver = $this->parseOrderedOperand($expr->var, false);
+        $this->checkVarMustExist($expr->var, $receiver);
+        $receiverType = $this->getLoweredExpressionType($expr->var) ?? $this->detectTypeOfExpr($expr->var);
+        if ($this->isNativeType($receiverType)) {
+            $receiver = 'php::Var(' . $receiver . ')';
+        }
+        $property = $this->getSelectionPropertyDef($expr);
+        $name = $expr->name instanceof Node\Identifier
+            ? $this->getLiteralString($expr->name->toString())
+            : $this->parseOrderedOperand($expr->name, false, true);
+        if ($property !== null && $this->isFinalClass($class)
+            && $this->getClass($class)->extends === '' && $property->getter === null
+            && !$this->objectTypeDeclaresMethod($class, '__get')
+            && !$this->objectTypeDeclaresMethod($class, '__isset')) {
+            $resolution = $this->resolveNativeInstanceProperty($expr, $expr->name->toString(), $class);
+            $offset = $this->applyNativePropertyAccessResult($expr, $resolution);
+            $value = $receiver . '.attr(' . $offset . ', php::AttrMode::Isset)';
+        } else {
+            $scope = $this->classDef ? $this->getClassEntryPtr($this->getFullClassName()) : 'nullptr';
+            $value = 'typephp_read_property_scoped(' . $receiver . ', ' . $name
+                . ', ' . $scope . ', php::AttrMode::Isset)';
+        }
+        return '(' . $receiver . '.isObject() ? ' . $value . ' : php::Var{})';
+    }
+
+    protected function parseCoalesceSelection(Expr\BinaryOp\Coalesce $expr, string $type): string
+    {
+        $result = $this->addTmpVar($type);
+        $objectClass = $type === Type::OBJECT ? $this->getCoalesceObjectClass($expr) : '';
+        if ($objectClass !== '') {
+            $this->addObject($result, $objectClass);
+        }
+        $presence = null;
+        [$left, $before, $after] = $this->captureStmtLines(function () use ($expr, &$presence): string {
+            $left = $expr->left;
+            if ($left instanceof Expr\ArrayDimFetch
+                || ($left instanceof Expr\PropertyFetch
+                    && !$this->containsNullsafeChain($left)
+                    && ($left->var instanceof Expr\PropertyFetch || $left->var instanceof Expr\ArrayDimFetch))) {
+                $presence = $this->parseChainedExpr($left, self::OP_ISSET, true);
+                $value = $left->getAttribute('chainOpResult');
+                if ($value !== null) {
+                    return $value;
+                }
+                $presence = null;
+                return $this->parseIdentifier($left);
+            }
+            if ($left instanceof Expr\NullsafePropertyFetch
+                || ($left instanceof Expr\PropertyFetch && $this->containsNullsafeChain($left))) {
+                return $this->parseNullsafeExpr($left, true);
+            }
+            if ($left instanceof Expr\PropertyFetch && !$this->containsNullsafeChain($left)) {
+                return $this->parsePropertyPresenceValue($left);
+            }
+            return $this->parseIdentifier($left);
+        });
+        $this->checkVarMustExist($expr->left, $left);
+        $this->appendCapturedStmtLinesToContext($before);
+        foreach ($after as $line) {
+            $this->addAfterStmtLine($line);
+        }
+        [$right, $rightBefore, $rightAfter] = $this->parseExprWithCapturedStmts($expr->right);
+        $this->checkVarMustExist($expr->right, $right);
+        $format = fn(string $value): string => $type === Type::OBJECT
+            ? 'php::Object(' . $value . ')'
+            : $this->convertExprFromType($type, $value);
+        if (!$expr->left instanceof Expr\PropertyFetch && !$expr->left instanceof Expr\StaticPropertyFetch
+            && !$expr->left instanceof Expr\ArrayDimFetch && !$this->containsNullsafeChain($expr->left)
+            && in_array($this->detectTypeOfExpr($expr->left), [Type::INT, Type::FLOAT, Type::BOOL, Type::STR, Type::ARRAY], true)) {
+            $expr->setAttribute(self::ATTR_LOWERED_TYPE, $type);
+            $this->context->registerMaterializedExpression($expr, $result, $result . ' = ' . $format($left) . ';');
+            return $result;
+        }
+        $probe = $presence !== null || $this->isVarExpr($expr->left)
+            ? $left : $this->addTmpVar($type === Type::OBJECT ? Type::OBJECT : Type::VAR);
+        $code = $probe !== $left ? $probe . ' = ' . $left . ';' . PHP_EOL : '';
+        $code .= 'if (' . ($presence ?? 'php::exists(' . $probe . ')') . ') {' . PHP_EOL;
+        $code .= $this->withIndentedBlock(fn() => $this->getIndent() . $result . ' = ' . $format($probe) . ';' . PHP_EOL);
+        $code .= $this->getIndent() . '} else {' . PHP_EOL;
+        $code .= $this->withIndentedBlock(fn() => $this->formatCapturedStmtLines($rightBefore)
+            . $this->getIndent() . $result . ' = ' . $format($right) . ';' . PHP_EOL
+            . $this->formatCapturedStmtLines($rightAfter));
+        $code .= $this->getIndent() . '}';
+        $expr->setAttribute(self::ATTR_LOWERED_TYPE, $type);
+        $this->context->registerMaterializedExpression($expr, $result, $code);
+        if ($probe !== $left) {
+            $this->scheduleTemporaryCleanup($probe);
+        }
+        return $result;
+    }
+
     protected function parseTernary(Expr\Ternary $expr): string
     {
         if ($expr->if === null) {
@@ -316,6 +555,14 @@ trait SelectionExpressionTrait
         $nativeClass = $this->detectClassOfExpr($expr);
         if ($this->isNativeObjectClass($nativeClass)) {
             return $this->parseNativeValueSelection($left, $right, $nativeClass);
+        }
+        if ($expr instanceof Expr\BinaryOp\Coalesce) {
+            $type = $this->getCoalesceResultType($expr);
+            $nativeProperty = $left instanceof Expr\PropertyFetch
+                && $this->isNativeObjectClass($this->detectClassOfExpr($left->var));
+            if (!$nativeProperty) {
+                return $this->parseCoalesceSelection($expr, $type);
+            }
         }
         $nativeArrayAccessLeft = $left instanceof Expr\ArrayDimFetch
             && $this->isNativeObjectClass($this->detectClassOfExpr($left->var));

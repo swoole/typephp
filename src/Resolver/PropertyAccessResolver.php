@@ -64,10 +64,15 @@ final class PropertyAccessResolver
      */
     public function findReadableInstanceProperty(string $class, string $property, string $scope): ?PropertyDef
     {
+        return $this->findReadableProperty($class, $property, $scope, false);
+    }
+
+    public function findReadableProperty(string $class, string $property, string $scope, bool $static): ?PropertyDef
+    {
         while (($classDef = $this->compiler->getClassDef($class)) !== null) {
             if ($classDef->hasProperty($property)) {
                 $definition = $classDef->getProperty($property);
-                if ($definition->isStatic()) {
+                if ($definition->isStatic() !== $static) {
                     return null;
                 }
                 if ($definition->isPublic()

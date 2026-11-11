@@ -98,6 +98,14 @@ trait ImmutableSupportTrait
             return false;
         }
         $type = $this->detectTypeOfExpr($expression);
+        // Virtual dispatch may return a Variant despite a scalar contract.
+        if ($expression instanceof Node\Expr\MethodCall || $expression instanceof Node\Expr\NullsafeMethodCall) {
+            $method = $this->immutableCalledMethod($expression);
+            if ($method !== null && !$method->returnTypeUndeclared
+                && !$this->hasInaccessibleDeclaredMethod($method->declaringClass, $expression->name->toString())) {
+                $type = $method->returnType;
+            }
+        }
         // An immutable receiver may produce an ordinary scalar/COW value.
         // Preserve constness only when object identity is possible.
         if ($type !== Type::OBJECT && $type !== Type::VAR && $type !== Type::REF) {

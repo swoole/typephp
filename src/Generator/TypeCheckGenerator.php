@@ -224,6 +224,12 @@ trait TypeCheckGenerator
             ? $typeNode->getAttribute(self::LATE_BOUND_TYPE_ATTRIBUTE, '')
             : '';
         $lateBound = is_string($lateBound) ? $lateBound : '';
+        // Closure storage analysis can precede declaration name lowering.
+        if ($lateBound === '' && $typeNode instanceof Node\Name) {
+            if (in_array($nameLower, ['self', 'parent', 'static'], true)) {
+                $lateBound = $nameLower;
+            }
+        }
         if ($lateBound === 'self') {
             $class = $this->getFullClassLikeName();
         } elseif ($lateBound === 'parent') {

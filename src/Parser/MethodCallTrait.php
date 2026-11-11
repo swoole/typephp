@@ -1075,12 +1075,13 @@ trait MethodCallTrait
             $magicMethod,
             $this->isVarExpr($expr->var) && $this->parseIdentifier($expr->var) === 'this_',
         ) || $typedPropertyLexicalPrivateClass !== '';
+        $closureInvoke = false;
+        if (strcasecmp($funcName, '__invoke') === 0) {
+            $closureClass = $class !== '' ? $class : $receiverClass;
+            $closureInvoke = strcasecmp(ltrim($closureClass, '\\'), 'Closure') === 0;
+        }
         $resolvedMethodPtr = false;
         if ($class && $funcName && !$magicMethod) {
-            // Reflection exposes Closure::__invoke, but Zend resolves it from
-            // each Closure object instead of its class function table.
-            $closureInvoke = strcasecmp(ltrim($class, '\\'), 'Closure') === 0
-                && strcasecmp($funcName, '__invoke') === 0;
             if (!$closureInvoke && $this->isInternalClass($class) && Reflection::hasMethod($class, $funcName)) {
                 $methodPtr = $this->getMethodPtr($class, $funcName);
                 $resolvedMethodPtr = true;
@@ -1092,6 +1093,9 @@ trait MethodCallTrait
         }
 
         if (empty($expr->args)) {
+            if ($closureInvoke) {
+                return 'typephp_call_closure(' . $object . ')';
+            }
             if ($requiresDynamicScope && $this->methodDef) {
                 if (!$resolvedMethodPtr) {
                     if (!$cacheMethod) {
@@ -1130,6 +1134,9 @@ trait MethodCallTrait
                     $funcName,
                     $callArgClass,
                 );
+                if ($closureInvoke) {
+                    return 'typephp_call_closure(' . $object . ', ' . $callArgs . ')';
+                }
                 if ($requiresDynamicScope && $this->methodDef) {
                     if (!$cacheMethod) {
                         return 'php::callScoped(' . $object . ', ' . $methodPtr . ', '

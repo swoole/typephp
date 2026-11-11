@@ -3756,6 +3756,9 @@ abstract class CompilerBase implements PropertyAccessContext
             case 'Expr_BinaryOp_SmallerOrEqual':
             case 'Expr_BinaryOp_Greater':
             case 'Expr_BinaryOp_GreaterOrEqual':
+            case 'Expr_Instanceof':
+            case 'Expr_Isset':
+            case 'Expr_Empty':
                 return Type::BOOL;
             case 'Expr_BitwiseNot':
                 $inner = Type::getReferencedType($this->detectTypeOfExpr($expr->expr));
@@ -3790,6 +3793,8 @@ abstract class CompilerBase implements PropertyAccessContext
                 return Type::ARRAY;
             case 'Expr_BinaryOp_Concat':
             case 'Expr_AssignOp_Concat':
+            case 'Expr_Cast_String':
+            case 'Scalar_InterpolatedString':
                 return Type::STR;
             case 'Expr_Ternary':
                 $ifType = $expr->if === null

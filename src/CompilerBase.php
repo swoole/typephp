@@ -5380,6 +5380,11 @@ abstract class CompilerBase implements PropertyAccessContext
                 $dim = $this->parseIdentifier($expr->dim);
                 $list[] = '{php::ArrayDimFetch, ' . Type::VAR . '(' . $dim . ')}';
             } elseif ($this->isPropertyFetch($expr)) {
+                // A Native C++ member must root the Variant-only tail.
+                if ($this->isNativeObjectClass($this->detectClassOfExpr($expr->var))) {
+                    $var = $this->parsePropertyFetch($expr);
+                    break;
+                }
                 // Start the dynamic tail at a statically resolved property.
                 // Keeping it as a name-based PropertyFetch would make PHPX
                 // resolve a parent private property against the runtime child

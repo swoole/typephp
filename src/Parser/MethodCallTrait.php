@@ -696,7 +696,7 @@ trait MethodCallTrait
             // parseOrderedOperand() types call results as php::Var, dropping the
             // receiver class this expression still proves. Keep it in an object
             // temporary; devirtualization below decides if a direct call is safe.
-            // Interfaces stay typed but are never devirtualized.
+            // Interface types also stay available for guarded dispatch below.
             $object = $this->materializeUserObjectReceiver($expr->var, $receiverClass);
             $class = $receiverClass;
             $materializedUserReceiver = true;
@@ -1098,8 +1098,9 @@ trait MethodCallTrait
                 if (!$cacheMethod) {
                     return $object . '.call(' . $methodPtr . ')';
                 }
-                return 'typephp_call_method_cached(' . $object . ', ' . $methodPtr . ', '
+                $fallback = 'typephp_call_method_cached(' . $object . ', ' . $methodPtr . ', '
                     . $this->getMethodCallCache() . ')';
+                return $this->parseGuardedInterfaceCall($object, $class, $funcName, $fallback) ?? $fallback;
             }
             return $object . '.call(' . $methodPtr . ')';
         }
@@ -1144,6 +1145,73 @@ trait MethodCallTrait
         } catch (PlaceHolder) {
             return $this->genPlaceHolder($this->genArray([$object, $method]));
         }
+    }
+
+    /**
+     * Specialize simple interface calls when the caller's file supplies one
+     * concrete implementation. Keeping the candidate local also keeps its
+     * native symbol and implementation set in the caller's incremental unit.
+     */
+    private function parseGuardedInterfaceCall(string $object, string $interface, string $method, string $fallback): ?string
+    {
+        if ($interface === '' || !$this->hasInterface($interface) || !$this->hasVar($object)) {
+            return null;
+        }
+        $contract = $this->findAotInterfaceMethodFunctionDef($interface, $method);
+        if ($contract === null || $contract->argInfoList !== [] || $contract->returnsByRef
+            || !in_array($contract->returnType, [Type::INT, Type::FLOAT, Type::BOOL, Type::STR], true)) {
+            return null;
+        }
+
+        $candidate = null;
+        foreach ($this->symbols->classes() as $definition) {
+            if ($definition->sourceFile !== $this->file || $definition->trait !== null
+                || $definition->nativeObject || $definition->enum || ($definition->flags & Modifiers::ABSTRACT)) {
+                continue;
+            }
+            foreach ($this->getClassImplementedInterfaces($definition) as $implemented) {
+                if (strcasecmp(ltrim($implemented, '\\'), ltrim($interface, '\\')) !== 0) {
+                    continue;
+                }
+                if ($candidate !== null) {
+                    return null;
+                }
+                $candidate = $definition;
+                break;
+            }
+        }
+        // Skip inherited bodies and classes with potentially custom handlers.
+        if ($candidate === null || $candidate->extends !== '' || !$candidate->hasMethod($method)) {
+            return null;
+        }
+        $implementation = $candidate->getMethod($method);
+        $function = $implementation->functionDef;
+        if (!($implementation->flags & Modifiers::PUBLIC)
+            || ($implementation->flags & (Modifiers::STATIC | Modifiers::ABSTRACT))
+            || $function === null || $function->stub || $function->argInfoList !== []
+            || $function->returnsByRef || $function->generator || $function->hasMultiReturn()
+            || $function->returnType !== $contract->returnType) {
+            return null;
+        }
+        $native = $this->getNativeName($implementation->name, $candidate->namespace, $candidate->name);
+        if (!$this->hasFunction($native)) {
+            return null;
+        }
+
+        $ce = $this->getLocalClassEntryPtr($candidate->getNamespacedName(false));
+        // A Variant receiver needs a named Object for the native reference
+        // parameter. Materialize it only on the matched branch.
+        [$call, $before] = $this->captureStmtLines(fn() => $this->parseNativeMethodCall($object, $native, []));
+        $direct = 'php::Var(' . $call . ')';
+        if ($before !== []) {
+            $direct = '[&]() -> php::Var { ' . implode(' ', $before) . ' return ' . $direct . '; }()';
+        }
+        // The type is an upper bound. Only an exact Zend class match proves
+        // the native body. Keep lazy objects and invalid receivers on Zend's
+        // path so their initialization and errors are handled normally.
+        return '(EXPECTED(' . $object . '.isObject() && ' . $object . '.ce() == ' . $ce
+            . ' && !zend_object_is_lazy(' . $object . '.object()))'
+            . ' ? ' . $direct . ' : ' . $fallback . ')';
     }
 
     private function isDefinitelyObjectReceiver(

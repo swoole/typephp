@@ -3304,7 +3304,10 @@ abstract class CompilerBase implements PropertyAccessContext
             && $this->compositeTypeRelation($v->expr, $this->functionDef->returnTypeCheck) === self::COMPOSITE_TYPE_MATCH;
         // Preserve the raw null/object until the declared composite return
         // check runs; the Object constructor accepts either validated value.
-        $exprCode = $nullableObjectReturn ? $expr : $this->convertExprType($expr, $returnType, $type);
+        $objectCompositeReturn = !$this->context->inClosure && $returnType === Type::OBJECT
+            && $this->functionDef->returnTypeCheck;
+        $exprCode = $nullableObjectReturn || $objectCompositeReturn
+            ? $expr : $this->convertExprType($expr, $returnType, $type);
         if ($provenObjectReturn && $this->isNullExpr($v->expr)) {
             $exprCode = 'php::Object{}';
         }

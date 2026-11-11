@@ -6779,6 +6779,8 @@ CODE;
                         (string) ($k + 1)
                     );
                     $expr = $this->convertExprFromType($argInfo->type, $rawVar);
+                } elseif ($argInfo->type === Type::OBJECT && $declaredClass === '' && $argInfo->typeCheck) {
+                    $expr = $this->convertCompositeObjectArgument($argExpr, $argInfo, $displayName, $k);
                 } elseif ($argInfo->type === Type::OBJECT && $declaredClass !== '') {
                     $expr = $argInfo->nullable
                         ? $this->convertNullableObjectExpr($argExpr, $this->getClassEntryPtr($declaredClass))

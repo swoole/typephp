@@ -195,6 +195,10 @@ trait ClosureGenerator
     /** @return array{type: string, class: string} */
     private function getClosureDeclaredStorage(?NodeAbstract $type): array
     {
+        if (($type instanceof UnionType || $type instanceof IntersectionType || $type instanceof NullableType)
+            && $this->isObjectOnlyTypeNode($type) && $this->getNullableObjectTypeNode($type) === null) {
+            return ['type' => Type::OBJECT, 'class' => ''];
+        }
         if ($type === null || ($type instanceof Node\Identifier
             && in_array(strtolower($type->name), ['void', 'never', 'mixed', 'any'], true))) {
             return ['type' => Type::VAR, 'class' => ''];
@@ -507,7 +511,9 @@ trait ClosureGenerator
                     $param->type,
                     self::DECL_TYPE_OF_PARAM,
                 );
-                if ($paramClass !== '' || in_array($paramType, [
+                if ($paramClass !== '' || (!($param->type instanceof UnionType || $param->type instanceof IntersectionType
+                        || $param->type instanceof NullableType)
+                    && in_array($paramType, [
                     Type::OBJECT,
                     Type::STREAM,
                     Type::BOX,
@@ -515,7 +521,7 @@ trait ClosureGenerator
                     Type::STD_VECTOR,
                     Type::STD_MAP,
                     Type::STD_ORDERED_MAP,
-                ], true)) {
+                ], true))) {
                     $this->fatalError(
                         $param,
                         'References are only supported for int, string, float, bool, array, mixed, or union types',

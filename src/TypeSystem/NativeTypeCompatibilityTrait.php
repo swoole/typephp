@@ -354,6 +354,10 @@ trait NativeTypeCompatibilityTrait
         }
 
         if ($argInfo->type === Type::OBJECT) {
+            if ($declaredClass === '' && $argInfo->typeCheck) {
+                return $type === Type::OBJECT ? 'php::Object(' . $expr . ')'
+                    : $this->convertCompositeObjectArgument($expr, $argInfo, $callableName, $argIndex);
+            }
             if ($argInfo->nullable) {
                 if ($this->isNullExpr($arg->value)) {
                     return 'php::Object{}';

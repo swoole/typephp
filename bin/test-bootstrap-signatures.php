@@ -34,4 +34,4 @@ foreach ([['compile', $command], ['run', [$target]]] as [$phase, $arguments]) {
         throw new RuntimeException('Bootstrap signature regression failed: ' . $log . ' (exit ' . $exit . ')');
     }
 }
-echo "PASS bootstrap signatures: compiled interface, trait self, request-time autoload, diagnostic exception\n";
+echo "PASS bootstrap signatures: compiled interface, trait self, request-time autoload, diagnostic exception, compiled completion callbacks\n";

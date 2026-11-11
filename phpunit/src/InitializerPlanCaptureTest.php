@@ -38,7 +38,7 @@ final class InitializerPlanCaptureTest extends BaseTest
 
     private function assertCompletePlan(ArrayInitPlan $plan): void
     {
-        self::assertStringContainsString('php::Var ' . $plan->expr . ';', $plan->init);
+        self::assertStringContainsString('php::Str ' . $plan->expr . ';', $plan->init);
         self::assertStringContainsString($plan->expr . ' = ', $plan->init);
         self::assertStringContainsString('php::exists(', $plan->init);
         self::assertTrue($plan->requiresRuntimeInit());
@@ -83,7 +83,12 @@ final class InitializerPlanCaptureTest extends BaseTest
         $locals = $this->context->localVars;
         $before = $this->context->statements->peekBefore();
         $counter = $this->context->tmpVarIndex;
+        $after = $this->context->statements->takeAfter();
+        foreach ($after as $line) {
+            $this->context->statements->addAfter($line);
+        }
         $this->context->statements->addAfter('outer_cleanup();');
+        $after[] = 'outer_cleanup();';
         try {
             $this->plan($bad);
             self::fail('Expected the unsupported Closure return diagnostic');
@@ -97,6 +102,6 @@ final class InitializerPlanCaptureTest extends BaseTest
         self::assertSame($before, $this->context->statements->peekBefore());
         $this->assertCompletePlan($this->plan($left));
         self::assertSame($locals, $this->context->localVars);
-        self::assertSame(['outer_cleanup();'], $this->context->statements->takeAfter());
+        self::assertSame($after, $this->context->statements->takeAfter());
     }
 }

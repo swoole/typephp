@@ -2329,8 +2329,8 @@ YAML);
         $dataHeaderFile = $this->testDir . '/php_abi_defaults_data_decl.h';
         $this->compiler->genDataDeclarations($dataHeaderFile);
         $dataHeader = file_get_contents($dataHeaderFile);
-        $this->assertStringContainsString('extern php::Var _const_var_EXPORTED_ABI_INT;', $dataHeader);
-        $this->assertStringContainsString('extern php::Var _const_var_EXPORTED_ABI_STRING;', $dataHeader);
+        $this->assertStringContainsString('extern php::Int _const_var_EXPORTED_ABI_INT;', $dataHeader);
+        $this->assertStringContainsString('extern php::Str _const_var_EXPORTED_ABI_STRING;', $dataHeader);
         $this->assertStringContainsString('extern php::Var _const_var_EXPORTED_ABI_ARRAY;', $dataHeader);
         $this->assertStringContainsString(
             'ZEND_ATTRIBUTE_CONST php::Str &get_str(uint32_t index) noexcept;',
@@ -2358,13 +2358,13 @@ YAML);
 
         $defaults = $this->invokeMethod('getFunction', 'exported_storage_defaults')->argInfoList;
         $this->assertSame(Type::STR, $defaults[0]->defaultType);
-        $this->assertSame(Type::VAR, $defaults[1]->defaultType);
+        $this->assertSame(Type::STR, $defaults[1]->defaultType);
         $this->assertSame(Type::STR, $defaults[2]->defaultType);
         $this->assertSame(Type::STR, $defaults[3]->defaultType);
         $this->assertSame(Type::VAR, $defaults[4]->defaultType);
         $this->assertSame(Type::STR, $defaults[5]->defaultType);
-        $this->assertSame(Type::VAR, $defaults[6]->defaultType);
-        $this->assertStringContainsString('return php::toString(_const_var_EXPORTED_ABI_STRING);', $extension);
+        $this->assertSame(Type::STR, $defaults[6]->defaultType);
+        $this->assertStringContainsString('return _const_var_EXPORTED_ABI_STRING;', $extension);
         $this->assertMatchesRegularExpression(
             '/php::Str php_exported_storage_defaults_arg_2_default_value\(\) \{\s*return php::concat\(/',
             $extension,

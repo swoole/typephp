@@ -9219,7 +9219,7 @@ CODE;
         string $incomingOrigin,
     ): bool {
         if ($existing->flags !== $incoming->flags
-            || $existing->type !== $incoming->type
+            || $existing->declaredType !== $incoming->declaredType
             || $existing->class !== $incoming->class
         ) {
             return false;
@@ -9235,12 +9235,12 @@ CODE;
                 $incoming->valueExpr,
                 $incomingOrigin,
                 $this->classDef,
-                $existing->type,
+                $existing->declaredType,
             );
         }
 
         return $existing->flags === $incoming->flags
-            && $existing->type === $incoming->type
+            && $existing->declaredType === $incoming->declaredType
             && $existing->class === $incoming->class
             && $existing->value === $incoming->value;
     }

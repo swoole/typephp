@@ -16,6 +16,71 @@ use PhpParser\NodeAbstract;
 
 trait ArrayExpressionTrait
 {
+    protected function prepareLiteralArrayShapes(NodeAbstract|array|null $body): void
+    {
+        $candidates = (new \TypePhp\Analysis\LiteralArrayAnalyzer())->analyze(is_array($body) ? $body : []);
+        foreach ($candidates as $name => $_) {
+            if ($this->hasVar($this->escapeVarName($name))) {
+                unset($candidates[$name]);
+            }
+        }
+        $this->context->setLiteralArrayCandidates($candidates);
+    }
+
+    protected function getLiteralArrayShape(NodeAbstract $expr): ?array
+    {
+        if ($this->isVarExpr($expr)) {
+            return $this->context->getLiteralArrayShape($this->parseIdentifier($expr));
+        }
+        if ($expr instanceof Expr\ArrayDimFetch) {
+            return $this->getLiteralArrayElement($expr)['items'] ?? null;
+        }
+        if (!$expr instanceof Expr\Array_) {
+            return null;
+        }
+        $shape = [];
+        foreach ($expr->items as $item) {
+            if ($item === null || $item->unpack || $item->byRef
+                || ($item->key !== null && !$item->key instanceof Node\Scalar\Int_
+                    && !$item->key instanceof Node\Scalar\String_)) {
+                return null;
+            }
+            $type = $this->detectTypeOfExpr($item->value);
+            if ($this->varIntTypes && $type === Type::INT && $this->exprCanOverflowInt($item->value)) {
+                $type = Type::VAR;
+            }
+            if (!in_array($type, [Type::INT, Type::FLOAT, Type::BOOL, Type::STR, Type::ARRAY, Type::OBJECT], true)) {
+                $type = Type::VAR;
+            }
+            $class = $type === Type::OBJECT ? $this->detectClassOfExpr($item->value) : '';
+            // A stored object may have a runtime subclass. Keep dispatch exact
+            // only where the declaration itself excludes overrides.
+            if ($class !== '' && !$this->isFinalClass($class)) {
+                $class = '';
+            }
+            $entry = ['type' => $type, 'class' => $class,
+                'items' => $item->value instanceof Expr\Array_ ? $this->getLiteralArrayShape($item->value) : null];
+            if ($item->key !== null) {
+                $shape[$item->key->value] = $entry;
+            } else {
+                if (array_key_exists(PHP_INT_MAX, $shape)) {
+                    return null;
+                }
+                $shape[] = $entry;
+            }
+        }
+        return $shape;
+    }
+
+    protected function getLiteralArrayElement(Expr\ArrayDimFetch $expr): ?array
+    {
+        if (!$expr->dim instanceof Node\Scalar\Int_ && !$expr->dim instanceof Node\Scalar\String_) {
+            return null;
+        }
+        $shape = $this->getLiteralArrayShape($expr->var);
+        return $shape[$expr->dim->value] ?? null;
+    }
+
     protected function parseArray(Expr\Array_ $node): string
     {
         $items = $node->items;
@@ -214,6 +279,18 @@ trait ArrayExpressionTrait
     }
 
     protected function parseArrayDimFetch(Expr\ArrayDimFetch $node): string
+    {
+        $value = $this->parseArrayDimFetchValue($node);
+        $element = $this->isArrayDimFetchUpdate($node) ? null : $this->getLiteralArrayElement($node);
+        if ($element === null || $element['type'] === Type::VAR) {
+            return $value;
+        }
+        $node->setAttribute(self::ATTR_LOWERED_TYPE, $element['type']);
+        return $element['type'] === Type::OBJECT ? 'php::Object(' . $value . ')'
+            : $this->convertExprFromType($element['type'], $value);
+    }
+
+    private function parseArrayDimFetchValue(Expr\ArrayDimFetch $node): string
     {
         if ($this->getTypedArrayAccessDefinition($node) !== null) {
             if ($this->isArrayDimFetchUpdate($node)) {

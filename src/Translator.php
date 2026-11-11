@@ -6996,6 +6996,7 @@ CODE;
         $stdParameterBindings = $this->initializeStdContainerParameters($this->functionDef);
         $this->initializeImmutableFunctionContext();
         $this->prepareReferenceCaptureDegradations($v->stmts, true);
+        $this->prepareLiteralArrayShapes($v->stmts);
 
         if ($this->functionDef->generator) {
             try {

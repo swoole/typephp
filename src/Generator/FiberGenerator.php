@@ -272,6 +272,8 @@ trait FiberGenerator
 
             $this->prepareReferenceCaptureDegradations($v->stmts);
 
+            $this->prepareLiteralArrayShapes($v->stmts);
+
             foreach ($functionDef->argInfoList as $i => $argInfo) {
                 $code .= $this->getIndent() . Type::VAR . ' ' . $argInfo->name . ' = vars_.get(' . $i . ');' . PHP_EOL;
                 $this->addArgument($argInfo->name, Type::VAR);

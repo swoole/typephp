@@ -184,12 +184,18 @@ trait AssignOpTrait
                 return $optimized;
             }
         }
-        return $this->parseAssignFinally(
+        $code = $this->parseAssignFinally(
             $left,
             $right,
             $this->canFoldLocalInitializerIntoDeclaration($v),
             $v->getAttribute(self::ATTR_STATEMENT_EXPRESSION, false),
         );
+        if ($this->context->isLiteralArrayCandidate($v)
+            && !$this->hasArgument($this->parseIdentifier($left))
+            && ($shape = $this->getLiteralArrayShape($right)) !== null) {
+            $this->context->registerLiteralArrayShape($this->parseIdentifier($left), $shape);
+        }
+        return $code;
     }
 
     /**
@@ -283,6 +289,9 @@ trait AssignOpTrait
             $tmpVar = $this->genTmpVarName();
             $this->addLocalVar($tmpVar, Type::VAR);
             $code = $this->getIndent() . $tmpVar . ' = ' . $this->parseExpr($right) . ';' . PHP_EOL;
+            if (($shape = $this->getLiteralArrayShape($right)) !== null) {
+                $this->context->registerLiteralArrayShape($tmpVar, $shape);
+            }
             foreach ($items as $k => $item) {
                 if (!$item) {
                     continue;

@@ -131,6 +131,7 @@ trait ClosureGenerator
 
             $body = $expr instanceof Expr\ArrowFunction ? $expr->expr : $expr->stmts;
             $this->prepareReferenceCaptureDegradations($body);
+            $this->prepareLiteralArrayShapes($body);
 
             $returnType = $expr->returnType;
             $returnTypeName = $returnType instanceof Node\Identifier
@@ -539,6 +540,7 @@ trait ClosureGenerator
             $this->context->closureMagicName = $closureMagicName;
             $body = $expr instanceof Expr\ArrowFunction ? $expr->expr : $expr->stmts;
             $this->prepareReferenceCaptureDegradations($body);
+            $this->prepareLiteralArrayShapes($body);
             if (!$isGenerator && $expr->returnType !== null
                 && !($expr->returnType instanceof Node\Identifier
                     && in_array(strtolower($expr->returnType->name), ['void', 'never'], true))) {
@@ -737,6 +739,7 @@ trait ClosureGenerator
 
             $body = $expr instanceof Expr\ArrowFunction ? $expr->expr : $expr->stmts;
             $this->prepareReferenceCaptureDegradations($body);
+            $this->prepareLiteralArrayShapes($body);
 
             foreach ($capturedNames as $i => $capturedName) {
                 if ($outerContext->getTypedArrayContract($capturedName) !== null) {

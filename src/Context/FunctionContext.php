@@ -96,6 +96,10 @@ class FunctionContext
     private array $localClosureCandidates = [];
     /** @var array<string, array{type: string, class: string}> Result contracts of emitted C++ lambdas. */
     private array $nativeLocalClosures = [];
+    /** @var array<string, Expr\Assign> */
+    private array $literalArrayCandidates = [];
+    /** Proven immutable local array contents, indexed with PHP's normalized keys. */
+    private array $literalArrayShapes = [];
     /** @var array<string, string> typed-ref local => directly referenced local. */
     public array $typedRefBindings = [];
     /** @var array<string, string> typed-ref local => canonical fixed-storage root. */
@@ -382,6 +386,27 @@ class FunctionContext
     public function getNativeLocalClosureResult(string $name): array
     {
         return $this->nativeLocalClosures[$name] ?? ['type' => Type::VAR, 'class' => ''];
+    }
+
+    public function setLiteralArrayCandidates(array $candidates): void
+    {
+        $this->literalArrayCandidates = $candidates;
+    }
+
+    public function isLiteralArrayCandidate(Expr\Assign $assignment): bool
+    {
+        return $assignment->var instanceof Expr\Variable && is_string($assignment->var->name)
+            && ($this->literalArrayCandidates[$assignment->var->name] ?? null) === $assignment;
+    }
+
+    public function registerLiteralArrayShape(string $name, array $shape): void
+    {
+        $this->literalArrayShapes[$name] = $shape;
+    }
+
+    public function getLiteralArrayShape(string $name): ?array
+    {
+        return $this->literalArrayShapes[$name] ?? null;
     }
 
     /**
@@ -758,6 +783,7 @@ class FunctionContext
 
     private function clearAnalysisTemporaries(): void
     {
+        $this->literalArrayShapes = [];
         $this->localVarInitializers = [];
         $this->localClosureCandidates = [];
         $this->nativeLocalClosures = [];

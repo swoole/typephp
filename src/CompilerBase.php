@@ -2620,6 +2620,9 @@ abstract class CompilerBase implements PropertyAccessContext
 
     protected function detectClassOfExpr(NodeAbstract $expr): string
     {
+        if ($expr instanceof Expr\ArrayDimFetch && ($element = $this->getLiteralArrayElement($expr)) !== null) {
+            return $element['class'];
+        }
         if ($expr instanceof Expr\FuncCall && $expr->name instanceof Expr\Variable && is_string($expr->name->name)) {
             $result = $this->context->getNativeLocalClosureResult($this->parseVariable($expr->name));
             if ($result['class'] !== '' && ($this->isFinalClass($result['class']) || $this->isInterface($result['class']))) {
@@ -4085,6 +4088,9 @@ abstract class CompilerBase implements PropertyAccessContext
                 }
                 return $this->detectStaticClassConstantStorageType($expr);
             case 'Expr_ArrayDimFetch':
+                if (($element = $this->getLiteralArrayElement($expr)) !== null) {
+                    return $element['type'];
+                }
                 if (($typedArray = $this->getTypedArrayReadDefinition($expr)) !== null) {
                     return $typedArray['type'];
                 }

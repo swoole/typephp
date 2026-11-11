@@ -38,4 +38,56 @@ class CompositeStaticTypeTest extends \BaseTest
     {
         $this->compile('composite-external-actual-unknown.php');
     }
+
+    public function testAbstractDeclarationAgainstUnrelatedInterfaceRemainsRuntimeUnknown(): void
+    {
+        $this->compile('composite-abstract-decl-interface-return.php');
+    }
+
+    public function testInterfaceDeclarationAgainstUnrelatedInterfaceRemainsRuntimeUnknown(): void
+    {
+        $this->compile('composite-interface-decl-interface-return.php');
+    }
+
+    public function testPlainBaseClassSubclassImplementingInterfaceIsNotRejected(): void
+    {
+        $this->compile('composite-concrete-base-interface-return.php');
+    }
+
+    public function testExpectedSubclassRelationRemainsRuntime(): void
+    {
+        $this->compile('composite-expected-subclass-return.php');
+    }
+
+    public function testUnrelatedClassesAreStillRejected(): void
+    {
+        $this->exec(
+            'Cannot assign object to return value of type `?CompositeSecondBox`',
+            'composite-unrelated-classes-mismatch.php'
+        );
+    }
+
+    public function testBuiltinFinalClassIsStillRejected(): void
+    {
+        $this->exec(
+            'Cannot assign object to return value of type `?CompositeTickLike`',
+            'composite-builtin-final-class-mismatch.php'
+        );
+    }
+
+    public function testFinalClassAgainstUnrelatedInterfaceIsStillRejected(): void
+    {
+        $this->exec(
+            'Cannot assign object to return value of type `?CompositeIteratorLike`',
+            'composite-concrete-class-interface-mismatch.php'
+        );
+    }
+
+    public function testNewConcreteClassAgainstUnrelatedInterfaceIsStillRejected(): void
+    {
+        $this->exec(
+            'Cannot assign object to return value of type `?CompositeRunnableLike`',
+            'composite-new-concrete-interface-mismatch.php'
+        );
+    }
 }

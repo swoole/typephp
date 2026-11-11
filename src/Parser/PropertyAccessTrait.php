@@ -1445,6 +1445,10 @@ trait PropertyAccessTrait
         $propVar = $this->getObjectPropVarName($objectVar, $propName);
         if ($objectVar === 'this_') {
             if (!$this->canHoistObjectProp($objectVar, $propName, $def)) {
+                if ($def->isReadonly()) {
+                    $this->setNativePropertyValueSource($expr, self::NATIVE_PROPERTY_VALUE_DYNAMIC);
+                    return $this->convertExprFromType($def->type, $getter);
+                }
                 return null;
             }
             if ($def->type === Type::INT) {

@@ -1,4 +1,5 @@
 <?php
+
 /**
  * This file is part of TypePHP(AOT).
  *
@@ -60,6 +61,17 @@ trait ForeachTrait
         }
 
         $keyVar = $this->parseIdentifier($node->keyVar);
+        if ($this->isVarExpr($node->keyVar) && $this->hasVar($keyVar)
+            && $this->getRawVarType($keyVar) !== $defaultType
+        ) {
+            $key = $this->genTmpVarName();
+            $this->addLocalVar($key, $defaultType);
+            return $this->getIndent() . $key . ' = ' . $keyExpr . ';' . PHP_EOL
+                . $this->getIndent() . $this->parseDestructuringWrite(
+                    $node->keyVar,
+                    new Expr\Variable($key, $node->keyVar->getAttributes()),
+                ) . ';' . PHP_EOL;
+        }
         $this->checkVar($node, $keyVar, $defaultType);
         return $this->getIndent() . $keyVar . ' = ' . $keyExpr . ';' . PHP_EOL;
     }
@@ -109,6 +121,20 @@ trait ForeachTrait
         }
 
         if ($this->isVarExpr($node->valueVar)) {
+            if ($this->hasVar($valueVar)
+                && !in_array($this->getRawVarType($valueVar), [Type::VAR, Type::REF], true)
+            ) {
+                // A reused typed local keeps its storage, just like an ordinary
+                // assignment from mixed. Delegate the write to the AST-based
+                // assignment path for conversions and declared-type checks.
+                $value = $this->genTmpVarName();
+                $this->addLocalVar($value, Type::VAR);
+                return $this->getIndent() . $value . ' = ' . $valueExpr . ';' . PHP_EOL
+                    . $this->getIndent() . $this->parseDestructuringWrite(
+                        $node->valueVar,
+                        new Expr\Variable($value, $node->valueVar->getAttributes()),
+                    ) . ';' . PHP_EOL;
+            }
             if (!$this->hasVar($valueVar) || $this->getVarType($valueVar) !== Type::REF) {
                 $this->checkVar($node, $valueVar);
             }

@@ -323,9 +323,12 @@ trait TypeConversionTrait
             && !($type === Type::INT && $this->varIntTypes);
     }
 
-    protected function convertExprFromType(string $type, string $expr): string
+    protected function convertExprFromType(string $type, string $expr, ?string $fromStorage = null): string
     {
         $type = Type::getReferencedType($type);
+        if ($fromStorage === $type && in_array($type, [Type::INT, Type::FLOAT, Type::BOOL, Type::STR, Type::ARRAY], true)) {
+            return $expr;
+        }
         if ($type === Type::FLOAT) {
             return $this->convertFloatExpr($expr);
         }
@@ -346,6 +349,21 @@ trait TypeConversionTrait
         }
 
         return $expr;
+    }
+
+    protected function getNativeCallResultStorageType(\TypePhp\Entity\FunctionDef $function): ?string
+    {
+        if ($function->returnsByRef) {
+            return Type::REF;
+        }
+        $class = $this->getNativeObjectReturnType($function);
+        if ($class !== null) {
+            return $class;
+        }
+        return in_array($function->returnType, [
+            Type::INT, Type::FLOAT, Type::BOOL, Type::STR, Type::ARRAY,
+            Type::OBJECT, Type::VAR, Type::VOID,
+        ], true) ? $function->returnType : null;
     }
 
     /**

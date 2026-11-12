@@ -1234,6 +1234,7 @@ trait PropertyAccessTrait
 
     protected function parsePropertyFetch(Expr\PropertyFetch $expr): string
     {
+        $expr->setAttribute(self::ATTR_LOWERED_TYPE, null);
         if ($this->containsNullsafeChain($expr->var)) {
             return $this->parseNullsafeExpr($expr);
         }
@@ -1339,12 +1340,14 @@ trait PropertyAccessTrait
                 $getProperty,
             );
             if ($typedFetch !== null) {
+                $expr->setAttribute(self::ATTR_LOWERED_TYPE, $def->type);
                 return $typedFetch;
             }
         }
         if ($def) {
             $this->setNativePropertyValueSource($expr, self::NATIVE_PROPERTY_VALUE_DYNAMIC);
         }
+        $expr->setAttribute(self::ATTR_LOWERED_TYPE, Type::VAR);
         return $getProperty;
     }
 

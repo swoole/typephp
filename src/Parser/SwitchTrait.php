@@ -33,6 +33,12 @@ trait SwitchTrait
             $this->requireVar($v, $this->parseIdentifier($cond));
         }
         [$condExpr, $condBeforeStmts, $condAfterStmts] = $this->parseExprWithCapturedStmts($cond);
+        if (($type === Type::INT || $type === Type::BOOL)
+            && $this->getLoweredExpressionType($cond) !== $type) {
+            // A declared scalar may still be returned through Zend as Var.
+            // Do not coerce it merely to make a native switch compilable.
+            $type = Type::VAR;
+        }
         $var_def = '';
         $var_def .= $this->formatCapturedStmtLines($condBeforeStmts);
         $var_def .= $type . ' ' . $tmp_var . ' = ' . $condExpr . ';' . PHP_EOL;
@@ -44,33 +50,36 @@ trait SwitchTrait
             // Check all labels before lowering any bodies. C++ requires integer
             // labels; for bool subjects, only 0 and 1 preserve PHP comparison.
             $nativeCaseValues = [];
-            foreach ($v->cases as $case) {
+            $caseValues = [];
+            foreach ($v->cases as $index => $case) {
                 $caseCond = $case->cond;
                 if ($caseCond === null) {
                     continue;
                 }
-                if (!$caseCond instanceof Node\Scalar\Int_
-                    || ($type === Type::BOOL && $caseCond->value !== 0 && $caseCond->value !== 1)
+                $value = $this->nativeSwitchCaseValue($caseCond);
+                if ($value === null
+                    || ($type === Type::BOOL && $value !== 0 && $value !== 1)
                 ) {
                     goto _fail;
                 }
-                if (isset($nativeCaseValues[$caseCond->value])) {
+                if (isset($nativeCaseValues[$value])) {
                     // PHP permits duplicate case values and selects the first
                     // matching label, while C++ rejects duplicate case labels.
                     goto _fail;
                 }
-                $nativeCaseValues[$caseCond->value] = true;
+                $nativeCaseValues[$value] = true;
+                $caseValues[$index] = $value;
             }
             $code .= 'do {' . PHP_EOL;
-            $code .= $this->withIndentedBlock(function () use ($tmp_var, $v): string {
+            $code .= $this->withIndentedBlock(function () use ($tmp_var, $v, $caseValues): string {
                 $code = $this->getIndent() . 'switch (' . $tmp_var . ') {' . PHP_EOL;
-                $code .= $this->withIndentedBlock(function () use ($v): string {
+                $code .= $this->withIndentedBlock(function () use ($v, $caseValues): string {
                     $code = '';
-                    foreach ($v->cases as $case) {
+                    foreach ($v->cases as $index => $case) {
                         if (empty($case->cond)) {
                             $code .= $this->getIndent() . 'default: {' . PHP_EOL;
                         } else {
-                            $code .= $this->getIndent() . 'case ' . $this->parseScalar($case->cond) . ': {' . PHP_EOL;
+                            $code .= $this->getIndent() . 'case ' . $this->genIntegerLiteral($caseValues[$index]) . ': {' . PHP_EOL;
                         }
                         $code .= $this->parseBlockStmts($case->stmts);
                         $code .= $this->getIndent() . '}' . PHP_EOL;
@@ -91,6 +100,24 @@ trait SwitchTrait
         $code .= $this->getIndent() . '} while (0);';
 
         return $var_def . $code;
+    }
+
+    private function nativeSwitchCaseValue(Node\Expr $condition): ?int
+    {
+        if ($condition instanceof Node\Scalar\Int_) {
+            return $this->bigintTypes ? null : $condition->value;
+        }
+        if (!$condition instanceof Node\Expr\ClassConstFetch || !$this->isHoistSafeClassConstFetch($condition)) {
+            return null;
+        }
+        [, $before, $after] = $this->captureStmtLines(fn() => $this->parseClassConstFetch($condition));
+        if ($before !== [] || $after !== [] || $this->getLoweredExpressionType($condition) !== Type::INT) {
+            return null;
+        }
+        $constant = $condition->getAttribute('nativeConst');
+        // Reuse the side-effect-free numeric evaluator. Constants requiring
+        // class/namespace lookup or other runtime work remain on the fallback.
+        return $constant?->valueExpr !== null ? $this->constantIntValue($constant->valueExpr) : null;
     }
 
     private function parseDynamicSwitchCases(Node\Stmt\Switch_ $v, string $tmp_var, string $type): string

@@ -29,6 +29,7 @@ final class AbsTypeInferenceTest extends BaseTest
         self::assertSame(3, substr_count($code, 'php::Int result = 0;'));
         self::assertSame(1, substr_count($code, 'php::Float result = 0;'));
         self::assertSame(2, substr_count($code, 'php::Var result;'));
-        self::assertSame(5, substr_count($code, 'php::fn::abs('));
+        self::assertSame(4, substr_count($code, 'php::fn::abs('));
+        self::assertStringContainsString('get_function_resolution_cache(', $code);
     }
 }

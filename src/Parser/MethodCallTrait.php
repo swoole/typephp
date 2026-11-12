@@ -986,7 +986,9 @@ trait MethodCallTrait
                         if ($this->shouldUseDynamicCallForNativeArgs($nativeFunc, $expr->args)) {
                             return $this->genRuntimeObjectMethodCall($object, $this->getMethodPtr($class, $methodName), $expr->args, $methodName, $class);
                         }
-                        return $this->parseNativeMethodCall($object, $nativeFunc, $expr->args);
+                        $call = $this->parseNativeMethodCall($object, $nativeFunc, $expr->args);
+                        $expr->setAttribute(self::ATTR_LOWERED_TYPE, $this->getNativeCallResultStorageType($this->getFunction($nativeFunc)));
+                        return $call;
                     } catch (PlaceHolder) {
                         return $this->genPlaceHolder($this->genArray([$object, $method]));
                     }

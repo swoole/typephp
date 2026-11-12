@@ -40,7 +40,7 @@ class TernaryStorageTypeTest extends BaseTest
         // mixing php::Variant (attribute read) with const php::String, which
         // no C++ compiler accepts.
         $this->assertStringContainsString('php::toString(this_.attr(', $code);
-        $this->assertStringContainsString('php::toString(php::empty_string)', $code);
+        $this->assertStringNotContainsString('php::toString(php::empty_string)', $code);
         $this->assertStringNotContainsString('? (this_.attr(', $code);
         $this->assertStringNotContainsString('? (_typephp_static_property_', $code);
     }

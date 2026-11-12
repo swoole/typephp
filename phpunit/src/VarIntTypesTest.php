@@ -56,17 +56,15 @@ final class VarIntTypesTest extends BaseTest
         self::assertStringNotContainsString('php::Var integer = 42L;', $defaultCode);
     }
 
-    public function testNativeIntegerCannotBeReusedAsForeachKey(): void
+    public function testNativeIntegerReusedAsForeachKeyKeepsNativeStorage(): void
     {
-        $this->expectException(TestError::class);
-        $this->expectExceptionMessage(
-            'Cannot assign value to variable $index of type php::Int with type php::Var',
-        );
-
-        $this->compileSource(
+        $code = $this->compileSource(
             $this->createCompiler(),
             TYPEPHP_ROOT_PATH . '/phpunit/code/foreach-key-native-reuse.php',
         );
+        self::assertMatchesRegularExpression('/php::Int index = php::toInt\(100L{1,2}\);/', $code);
+        self::assertMatchesRegularExpression('/index = php::toInt\(tmp_var_\d+\);/', $code);
+        self::assertSame(1, substr_count($code, '.key()'));
     }
 
     public function testVarIntAndExplicitAnyCanBeReusedAsForeachKeys(): void

@@ -8,6 +8,9 @@
 
 namespace KeyExistsOptimization;
 
+use function array_key_exists;
+use function key_exists;
+
 function check(array $array, int $integer, string $string, mixed $mixed, bool $boolean, float $float): void
 {
     array_key_exists($integer, $array);

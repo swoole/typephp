@@ -1214,10 +1214,28 @@ abstract class CompilerBase implements PropertyAccessContext
 
         if ($expr instanceof Expr\Array_) {
             $expr->setAttribute(self::ATTR_LOWERED_TYPE, Type::ARRAY);
+        } elseif ($expr instanceof Expr\Instanceof_ || $expr instanceof Expr\BooleanNot
+            || $expr instanceof Expr\Isset_ || $expr instanceof Expr\Empty_
+            || $expr instanceof Expr\Cast\Bool_) {
+            $expr->setAttribute(self::ATTR_LOWERED_TYPE, Type::BOOL);
+        } elseif ($expr instanceof Expr\Cast\Int_) {
+            $expr->setAttribute(self::ATTR_LOWERED_TYPE, Type::INT);
+        } elseif ($expr instanceof Expr\Cast\Double) {
+            $expr->setAttribute(self::ATTR_LOWERED_TYPE, Type::FLOAT);
         } elseif ($expr instanceof Expr\BinaryOp\Concat) {
             $expr->setAttribute(self::ATTR_LOWERED_TYPE, Type::STR);
         } elseif ($expr instanceof Expr\BinaryOp && !$expr instanceof Expr\BinaryOp\Coalesce) {
             $type = $this->detectTypeOfExpr($expr);
+            if (!$this->varIntTypes && ($type === Type::INT || $type === Type::FLOAT)
+                && !$expr instanceof Expr\BinaryOp\Pow
+                && $this->isNativeType($this->getLoweredExpressionType($expr->left) ?? '')
+                && $this->isNativeType($this->getLoweredExpressionType($expr->right) ?? '')) {
+                // Both emitted operands have native scalar storage. Ordinary
+                // native arithmetic cannot produce a boxed result or widen
+                // through PHP's overflow rules in this mode.
+                $expr->setAttribute(self::ATTR_LOWERED_TYPE, $type);
+                return $code;
+            }
             // Dynamic arithmetic returns Variant; comparisons return bool.
             // Big arithmetic keeps its payload type even though it is boxed.
             // Native arithmetic can widen during folding, so leave its C++
@@ -2066,7 +2084,13 @@ abstract class CompilerBase implements PropertyAccessContext
         if ($this->isSuperGlobal($expr->name)) {
             return $this->parseSuperGlobalVar($expr->name);
         }
-        return $this->escapeVarName($expr->name);
+        $name = $this->escapeVarName($expr->name);
+        // This is the allocated local/parameter storage, not its PHP type
+        // annotation. In particular, varint locals and Zend references stay
+        // boxed even when flow analysis knows their current scalar value.
+        $expr->setAttribute(self::ATTR_LOWERED_TYPE,
+            isset($this->context) && $this->hasVar($name) ? $this->getVarType($name) : null);
+        return $name;
     }
 
     protected function parseImplements(array $implements): array
@@ -4266,6 +4290,7 @@ abstract class CompilerBase implements PropertyAccessContext
      */
     protected function findNativeFunction(string $funcName): string|false
     {
+        $runtimeNamespaceFallback = false;
         // Absolutely-qualified function name.
         if ($funcName[0] == '\\') {
             $funcName = ltrim($funcName, '\\');
@@ -4283,6 +4308,7 @@ abstract class CompilerBase implements PropertyAccessContext
             } else {
                 $possibleFunctionNames = [];
                 if ($this->namespace) {
+                    $runtimeNamespaceFallback = true;
                     $possibleFunctionNames[] = $this->escapeNamespace($this->namespace)
                         . self::NAMESPACE_SEPARATOR . $this->escapeName($funcName);
                 }
@@ -4296,6 +4322,15 @@ abstract class CompilerBase implements PropertyAccessContext
             }
             $this->checkFunction($nativeFunc);
             if ($this->hasFunction($nativeFunc) && !$this->getFunction($nativeFunc)->method) {
+                // An ordinary global function does not prove the target of an
+                // unqualified namespaced call. Native stubs and Native-only
+                // ABI functions have no Zend callable representation and
+                // retain static binding.
+                if ($runtimeNamespaceFallback && $nativeFunc === $this->escapeName($funcName)
+                    && !$this->getFunction($nativeFunc)->stub
+                    && !$this->functionRequiresNativeAbi($this->getFunction($nativeFunc))) {
+                    continue;
+                }
                 return $nativeFunc;
             }
         }

@@ -274,8 +274,8 @@ trait SelectionExpressionTrait
             $else = 'php::Var(' . $else . ')';
         } elseif (!$hasBranchStmts && !$nativeSelection && $ifType === $elseType
             && $ifType === Type::STR && $ifStorageType !== $elseStorageType) {
-            $if = $this->convertExprFromType(Type::STR, $if);
-            $else = $this->convertExprFromType(Type::STR, $else);
+            $if = $this->convertExprFromType(Type::STR, $if, $ifStorageType);
+            $else = $this->convertExprFromType(Type::STR, $else, $elseStorageType);
             $expr->setAttribute(self::ATTR_LOWERED_TYPE, Type::STR);
         }
         if ($hasBranchStmts) {
@@ -332,7 +332,7 @@ trait SelectionExpressionTrait
         // boundary; a PHP object cast would replace it with stdClass.
         if ($nativeClass === '' && $returnType !== Type::VAR && $returnType !== Type::OBJECT
             && ($beforeStmts || $afterStmts || $this->getLoweredExpressionType($valueExpr) !== $returnType)) {
-            $value = $this->convertExprFromType($returnType, $value);
+            $value = $this->convertExprFromType($returnType, $value, $this->getLoweredExpressionType($valueExpr));
         }
         if ($afterStmts || $returnsReference) {
             if ($nativeClass !== '') {

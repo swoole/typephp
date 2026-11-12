@@ -138,6 +138,106 @@ trait FunctionCallTrait
             . $this->getCalledClassExpr() . '); })()';
     }
 
+    /**
+     * Resolve before evaluating arguments and retain PHP's first-call choice
+     * for this request. Neither the signature nor the return type of a runtime
+     * namespace shadow is constrained by the global function's signature.
+     */
+    private function parseRuntimeNamespacedFunctionCall(Expr\FuncCall $expr, string $name): string
+    {
+        $namespaced = $this->getLiteralString($this->namespace . '\\' . $name);
+        $global = $this->getLiteralString($name);
+        $resolution = $this->getFunctionResolutionCache();
+        $this->compilationStatistics->record(CompilationStatistics::DIRECT_FUNCTIONS, 'function_exists');
+        $this->compilationStatistics->record(CompilationStatistics::RUNTIME_FUNCTIONS, strtolower($name));
+        $this->addBeforeStmtLine('if (' . $resolution . ' == 0) { ' . $resolution
+            . ' = php::fn::function_exists(' . $namespaced . ') ? 1 : 2; }');
+        $target = '(' . $resolution . ' == 1 ? ' . $namespaced . ' : ' . $global . ')';
+        if ($expr->isFirstClassCallable()) {
+            return $this->genPlaceHolder($target);
+        }
+
+        $function = $this->genTmpVarName();
+        $this->addLocalVar($function, 'zend_function *');
+        $this->addBeforeStmtLine($function . ' = ' . $resolution . ' == 1 ? '
+            . $this->getFuncPtr($this->namespace . '\\' . $name) . ' : ' . $this->getFuncPtr($name) . ';');
+        $expr->setAttribute(self::ATTR_LOWERED_TYPE, Type::VAR);
+        $signature = $this->escapeName($name);
+        $needsReferenceBridge = false;
+        foreach ($expr->args as $index => $arg) {
+            if ($arg->unpack) {
+                continue;
+            }
+            $byRef = $arg->name !== null
+                ? $this->isReferenceNamedArgument($signature, '', $arg->name->name)
+                : $this->isReferenceArgument($signature, '', $index);
+            if (!$byRef || $this->isReferenceWrapperCall($arg->value)) {
+                continue;
+            }
+            if (!$this->isVarExpr($arg->value) && !$this->isPropertyFetch($arg->value)
+                && !$this->isStaticPropertyFetch($arg->value) && !$this->isArrayDimFetch($arg->value)) {
+                // A shadow can accept a value where the global function needs
+                // a reference. Let the selected Zend function validate it.
+                return $this->genRuntimeFunctionCall($function, $expr->args);
+            }
+            $needsReferenceBridge = true;
+        }
+        if ($needsReferenceBridge) {
+            // Do not impose the global function's reference contract on a
+            // namespace shadow. Prepare and commit bridges only on its branch.
+            $globalArgs = array_map(static fn(Node\Arg $arg): Node\Arg => clone $arg, $expr->args);
+            [$globalCall, $globalBefore, $globalAfter] = $this->captureStmtLines(
+                fn() => $this->genRuntimeFunctionCall($function, $globalArgs, $signature),
+            );
+            // A known by-reference fallback can introduce an output variable
+            // (preg_match's $matches, for example). Publish its local storage
+            // before lowering the shadow branch, without executing its bridge.
+            [$shadowCall, $shadowBefore, $shadowAfter] = $this->captureStmtLines(
+                fn() => $this->genRuntimeFunctionCall($function, $expr->args),
+            );
+            return '[&]() -> php::Var {' . PHP_EOL . 'if (' . $resolution . ' == 1) {' . PHP_EOL
+                . $this->formatNamespacedCallReturn($shadowCall, $shadowBefore, $shadowAfter) . '}' . PHP_EOL
+                . $this->formatNamespacedCallReturn($globalCall, $globalBefore, $globalAfter) . '}()';
+        }
+        return $this->genRuntimeFunctionCall($function, $expr->args);
+    }
+
+    private function formatNamespacedCallReturn(string $call, array $before, array $after): string
+    {
+        $code = $this->formatCapturedStmtLines($before);
+        if ($after === []) {
+            return $code . 'return ' . $call . ';' . PHP_EOL;
+        }
+        $result = $this->genTmpVarName();
+        return $code . 'php::Var ' . $result . ' = ' . $call . ';' . PHP_EOL
+            . $this->formatCapturedStmtLines($after) . 'return ' . $result . ';' . PHP_EOL;
+    }
+
+    private function hasNativeBuiltinOperand(string $name, Expr\FuncCall $expr): bool
+    {
+        $config = $this->getFuncCallConfig()[$name] ?? null;
+        if (!is_array($config) || $expr->isFirstClassCallable()) {
+            return false;
+        }
+        foreach ($expr->args as $index => $arg) {
+            if ($arg->unpack) {
+                continue;
+            }
+            if ((isset($config['conversion']) || ($index === 0 && ($config['nativeReceiver'] ?? false)))
+                && $this->isNativeObjectClass($this->detectClassOfExpr($arg->value))) {
+                return true;
+            }
+        }
+        $receiver = $expr->args[0]->value ?? null;
+        if ($name !== 'count' || $receiver === null) {
+            return false;
+        }
+        if ($receiver instanceof Expr\Variable) {
+            return $this->isStdContainer($this->parseIdentifier($receiver));
+        }
+        return $receiver instanceof Expr\ArrayDimFetch && $this->isStdContainerExpr($receiver);
+    }
+
     protected function parsePipeOperator(Expr\BinaryOp\Pipe $expr): string
     {
         $this->assertExprCanBeUsedAsValue($expr->left, 'pipe left operand');
@@ -283,7 +383,11 @@ trait FunctionCallTrait
                     $callee = $expr->getAttribute(self::ATTR_MULTI_RETURN_IMPL, false)
                         ? $this->getMultiReturnImplName($nativeFn)
                         : self::PREFIX . $nativeFn;
-                    return $callee . '(' . $this->parseNativeCallArgs($expr->args, $nativeFn) . ')';
+                    $call = $callee . '(' . $this->parseNativeCallArgs($expr->args, $nativeFn) . ')';
+                    if (!$expr->getAttribute(self::ATTR_MULTI_RETURN_IMPL, false)) {
+                        $expr->setAttribute(self::ATTR_LOWERED_TYPE, $this->getNativeCallResultStorageType($functionDef));
+                    }
+                    return $call;
                 } catch (PlaceHolder) {
                     return $this->genPlaceHolder($this->getLiteralString($resolvedTarget));
                 }
@@ -335,7 +439,7 @@ trait FunctionCallTrait
             if ($functionTarget['definitelyGlobal']) {
                 $name = strtolower($name);
             }
-            if ($mayCallGlobalBuiltin && !$isNamespacedGetCalledClassFallback) {
+            if ($functionTarget['definitelyGlobal']) {
                 $this->checkInternalFunctionArgCount($name, $expr);
             }
             if ($functionTarget['definitelyGlobal']
@@ -358,8 +462,16 @@ trait FunctionCallTrait
                     $this->namespace . '\\' . ltrim($functionTarget['source'], '\\'),
                 );
             }
-            $canOptimizeBuiltinFallback = $functionTarget['definitelyGlobal']
-                || ($functionTarget['namespacedFallback'] && $globalName !== 'get_called_class');
+            $nativeBuiltin = false;
+            if ($functionTarget['namespacedFallback']) {
+                // Native pointers and std containers cannot enter Zend. Their
+                // keyword operations retain the same static ABI as Native stubs.
+                $nativeBuiltin = $this->hasNativeBuiltinOperand($globalName, $expr);
+                if (!$nativeBuiltin) {
+                    return $this->parseRuntimeNamespacedFunctionCall($expr, $functionTarget['source']);
+                }
+            }
+            $canOptimizeBuiltinFallback = $functionTarget['definitelyGlobal'] || $nativeBuiltin;
             if ($canOptimizeBuiltinFallback && in_array($globalName, ['array_key_exists', 'key_exists'], true)) {
                 $typedKeyExists = $this->parseTypedArrayKeyExistsCall($expr);
                 if ($typedKeyExists !== null) {

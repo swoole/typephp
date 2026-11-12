@@ -63,7 +63,7 @@ final class FuncCallOptimizerTest extends BaseTest
         self::assertStringContainsString('php::fn::round(1.25)', $code);
     }
 
-    public function testNamespacedBuiltinFallbackUsesDirectOptimizerPaths(): void
+    public function testNamespacedBuiltinFallbackResolvesRuntimeShadows(): void
     {
         global $translator;
 
@@ -76,10 +76,12 @@ final class FuncCallOptimizerTest extends BaseTest
         $code = file_get_contents($generated);
 
         self::assertIsString($code);
-        self::assertSame(1, substr_count($code, 'php::fn::count('));
-        self::assertSame(1, substr_count($code, 'php::fn::in_array('));
-        self::assertSame(1, substr_count($code, 'php::fn::str_contains('));
+        self::assertStringContainsString('get_function_resolution_cache(', $code);
+        self::assertStringContainsString('php::fn::function_exists(', $code);
+        self::assertStringNotContainsString('php::fn::count(', $code);
+        self::assertStringNotContainsString('php::fn::in_array(', $code);
+        self::assertStringNotContainsString('php::fn::str_contains(', $code);
         self::assertStringContainsString('php_namespacedbuiltinfallback__strlen(', $code);
-        self::assertStringNotContainsString('php::call(', $code);
+        self::assertStringContainsString('php::call(', $code);
     }
 }

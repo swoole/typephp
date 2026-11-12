@@ -163,10 +163,15 @@ trait FunctionCallTrait
             . $this->getFuncPtr($this->namespace . '\\' . $name) . ' : ' . $this->getFuncPtr($name) . ';');
         $expr->setAttribute(self::ATTR_LOWERED_TYPE, Type::VAR);
         $signature = $this->escapeName($name);
-        $needsReferenceBridge = false;
+        $needsGlobalArgumentHandling = false;
         foreach ($expr->args as $index => $arg) {
             if ($arg->unpack) {
                 continue;
+            }
+            if ($arg->value instanceof Expr\ConstFetch
+                && $this->callArgumentAcceptsCallable($signature, '', $index, $arg->name?->name)
+                && $this->normalizeBareFunctionCallableArgument($arg, true) !== $arg) {
+                $needsGlobalArgumentHandling = true;
             }
             $byRef = $arg->name !== null
                 ? $this->isReferenceNamedArgument($signature, '', $arg->name->name)
@@ -180,11 +185,11 @@ trait FunctionCallTrait
                 // a reference. Let the selected Zend function validate it.
                 return $this->genRuntimeFunctionCall($function, $expr->args);
             }
-            $needsReferenceBridge = true;
+            $needsGlobalArgumentHandling = true;
         }
-        if ($needsReferenceBridge) {
-            // Do not impose the global function's reference contract on a
-            // namespace shadow. Prepare and commit bridges only on its branch.
+        if ($needsGlobalArgumentHandling) {
+            // Only the global branch has a known signature. Keep its reference
+            // bridges and bare callable conversions off the shadow branch.
             $globalArgs = array_map(static fn(Node\Arg $arg): Node\Arg => clone $arg, $expr->args);
             [$globalCall, $globalBefore, $globalAfter] = $this->captureStmtLines(
                 fn() => $this->genRuntimeFunctionCall($function, $globalArgs, $signature),

@@ -668,6 +668,7 @@ trait UniversalMethodCall
             }
         }
         $this->validateUniversalMethodArgs($expr, $method, $def, $isVar);
+        $args = $this->normalizeUniversalNamedArgs($expr, $method, $def);
 
         if ($this->getTypedArrayDefinition($expr->var) !== null && in_array($method, ['keyExists', 'get'], true)) {
             $argument = $expr->args[0];
@@ -680,23 +681,23 @@ trait UniversalMethodCall
         }
         if (in_array($def['handler'], ['php_fn', 'php_fn_ref'], true)) {
             $position = $def['receiver_pos'] ?? 0;
-            foreach ($expr->args as $index => $argument) {
+            foreach ($args as $index => $argument) {
                 $parameterIndex = $position === 0 || $index >= $position - 1 ? $index + 1 : $index;
                 $this->validateTypedArrayDynamicArgument($argument, $def['fn'], '', $parameterIndex);
             }
         }
 
         return match ($def['handler']) {
-            'calc_op'              => $this->genUniversalCalcOp($receiver, $def['op'], $expr->args),
+            'calc_op'              => $this->genUniversalCalcOp($receiver, $def['op'], $args),
             'calc_inc'             => '(' . $receiver . ' + 1)',
             'calc_dec'             => '(' . $receiver . ' - 1)',
-            'direct_method'        => $this->genUniversalDirectMethod($receiver, $def['method'], $expr->args, $def['int_cast_args'] ?? []),
-            'direct_method_mutate' => $this->genUniversalMutatingMethod($receiver, $def['method'], $expr->args),
+            'direct_method'        => $this->genUniversalDirectMethod($receiver, $def['method'], $args, $def['int_cast_args'] ?? []),
+            'direct_method_mutate' => $this->genUniversalMutatingMethod($receiver, $def['method'], $args),
             'convert_fn'           => $this->genUniversalConvertFn($receiver, $def['fn']),
-            'php_fn'               => $this->genUniversalPhpFn($receiver, $def['fn'], $expr->args, $def['receiver_pos'] ?? 0, $def['const_args'] ?? []),
-            'php_fn_ref'           => $this->genUniversalPhpFnRef($receiver, $def['fn'], $expr->args, $def['return_type']),
-            'cpp_fn'               => $this->genUniversalCppFn($receiver, $def['fn'], $expr->args, $def['receiver_pos'] ?? 0),
-            'provider_extension'   => $this->genProviderExtensionCall($receiver, $def, $expr->args),
+            'php_fn'               => $this->genUniversalPhpFn($receiver, $def['fn'], $args, $def['receiver_pos'] ?? 0, $def['const_args'] ?? []),
+            'php_fn_ref'           => $this->genUniversalPhpFnRef($receiver, $def['fn'], $args, $def['return_type']),
+            'cpp_fn'               => $this->genUniversalCppFn($receiver, $def['fn'], $args, $def['receiver_pos'] ?? 0),
+            'provider_extension'   => $this->genProviderExtensionCall($receiver, $def, $args),
             default                => null,
         };
     }
@@ -716,16 +717,17 @@ trait UniversalMethodCall
     protected function genStreamNullGuard(Node\Expr\MethodCall $expr, string $receiver, string $method, array $def): string
     {
         $this->validateUniversalMethodArgs($expr, $method, $def, false);
+        $args = $this->normalizeUniversalNamedArgs($expr, $method, $def);
 
         // Evaluate receiver into temp var to avoid double evaluation
         $streamVar = $this->addTmpVar(Type::VAR);
         $this->addBeforeStmtLine($streamVar . ' = ' . $receiver . ';');
 
         $methodCall = match ($def['handler']) {
-            'php_fn'        => $this->genUniversalPhpFn('php::toStream(' . $streamVar . ')', $def['fn'], $expr->args, $def['receiver_pos'] ?? 0, $def['const_args'] ?? []),
-            'direct_method' => $this->genUniversalDirectMethod('php::toStream(' . $streamVar . ')', $def['method'], $expr->args, $def['int_cast_args'] ?? []),
-            'cpp_fn'        => $this->genUniversalCppFn('php::toStream(' . $streamVar . ')', $def['fn'], $expr->args, $def['receiver_pos'] ?? 0),
-            'provider_extension' => $this->genProviderExtensionCall('php::toStream(' . $streamVar . ')', $def, $expr->args),
+            'php_fn'        => $this->genUniversalPhpFn('php::toStream(' . $streamVar . ')', $def['fn'], $args, $def['receiver_pos'] ?? 0, $def['const_args'] ?? []),
+            'direct_method' => $this->genUniversalDirectMethod('php::toStream(' . $streamVar . ')', $def['method'], $args, $def['int_cast_args'] ?? []),
+            'cpp_fn'        => $this->genUniversalCppFn('php::toStream(' . $streamVar . ')', $def['fn'], $args, $def['receiver_pos'] ?? 0),
+            'provider_extension' => $this->genProviderExtensionCall('php::toStream(' . $streamVar . ')', $def, $args),
             default         => null,
         };
 
@@ -774,6 +776,153 @@ trait UniversalMethodCall
         if (!$isVar && in_array($def['handler'], self::MUTATING_HANDLERS, true)) {
             $this->fatalError($expr, 'Cannot call mutating method `' . $method . '()` on a non-variable expression');
         }
+
+        $this->assertUniversalArgumentForms($expr, $method, $def);
+    }
+
+    /**
+     * Builtin universal methods map onto fixed native or PHP functions, so only
+     * plain positional arguments are meaningful. Named arguments are accepted
+     * solely for handlers backed by a real PHP function, whose parameter names
+     * are stable.
+     */
+    protected function assertUniversalArgumentForms(Node\Expr\MethodCall $expr, string $method, array $def): void
+    {
+        if ($def['handler'] === 'provider_extension') {
+            return;
+        }
+        $allowsNamed = in_array($def['handler'], ['php_fn', 'php_fn_ref'], true);
+        foreach ($expr->args as $argument) {
+            if (!$argument instanceof Node\Arg) {
+                continue;
+            }
+            if ($argument->unpack) {
+                $this->fatalError($argument, "Method `{$method}()` does not support argument unpacking");
+            }
+            if ($argument->byRef) {
+                $this->fatalError($argument, "Method `{$method}()` does not support by-reference arguments");
+            }
+            if ($argument->name !== null && !$allowsNamed) {
+                $this->fatalError($argument, "Method `{$method}()` does not support named arguments");
+            }
+        }
+    }
+
+    /**
+     * Rewrites named arguments of a php_fn/php_fn_ref universal method into the
+     * positional user arguments expected by the code generators. The receiver
+     * and constant arguments occupy fixed slots of the underlying PHP function.
+     * Source order is kept in the `universal_source_order` attribute so operands
+     * are still lowered in the order they were written.
+     *
+     * @param array<int, Node\Arg|Node\VariadicPlaceholder> $args
+     * @return array<int, Node\Arg|Node\VariadicPlaceholder>
+     */
+    protected function normalizeUniversalNamedArgs(Node\Expr\MethodCall $expr, string $method, array $def): array
+    {
+        $args = $expr->args;
+        $hasNamed = false;
+        foreach ($args as $argument) {
+            if ($argument instanceof Node\Arg && $argument->name !== null) {
+                $hasNamed = true;
+                break;
+            }
+        }
+        if (!$hasNamed || !in_array($def['handler'], ['php_fn', 'php_fn_ref'], true)) {
+            return $args;
+        }
+
+        $receiverPos = $def['handler'] === 'php_fn' ? ($def['receiver_pos'] ?? 0) : 0;
+        $constArgs = $def['handler'] === 'php_fn' ? ($def['const_args'] ?? []) : [];
+        if ($receiverPos > 0 && $constArgs) {
+            $this->fatalError($expr, "Method `{$method}()` does not support named arguments");
+        }
+        $reflection = Reflection::getFunction($def['fn']);
+        if ($reflection === null) {
+            $this->fatalError($expr, "Method `{$method}()` does not support named arguments");
+        }
+        $parameters = $reflection->getParameters();
+        $nameIndex = [];
+        foreach ($parameters as $index => $parameter) {
+            if (!$parameter->isVariadic()) {
+                $nameIndex[$parameter->getName()] = $index;
+            }
+        }
+
+        $receiverIndex = max($receiverPos - 1, 0);
+        $reserved = [$receiverIndex => true];
+        foreach ($constArgs as $position => $_) {
+            $reserved[$position] = true;
+        }
+
+        $slots = [];
+        $nextSlot = 0;
+        $seenNamed = false;
+        foreach (array_values($args) as $order => $argument) {
+            if (!$argument instanceof Node\Arg) {
+                continue;
+            }
+            $argument = clone $argument;
+            $argument->setAttribute('universal_source_order', $order);
+            if ($argument->name === null) {
+                if ($seenNamed) {
+                    $this->fatalError($argument, 'Cannot use positional argument after named argument');
+                }
+                while (isset($reserved[$nextSlot])) {
+                    $nextSlot++;
+                }
+                $slots[$nextSlot++] = $argument;
+                continue;
+            }
+            $seenNamed = true;
+            $name = $argument->name->name;
+            if (!isset($nameIndex[$name])) {
+                $this->fatalError($argument, "Unknown named argument `{$name}` for method `{$method}()`");
+            }
+            $slot = $nameIndex[$name];
+            if (isset($reserved[$slot])) {
+                $this->fatalError($argument, "Named argument `{$name}` targets the receiver or a fixed argument of `{$method}()`");
+            }
+            if (isset($slots[$slot])) {
+                $this->fatalError($argument, "Named argument `{$name}` overwrites an earlier argument");
+            }
+            $argument->name = null;
+            $slots[$slot] = $argument;
+        }
+
+        $last = max(array_keys($slots) ?: [0]);
+        $normalized = [];
+        for ($slot = 0; $slot <= max($last, $receiverIndex - 1); $slot++) {
+            if (isset($reserved[$slot])) {
+                continue;
+            }
+            if (isset($slots[$slot])) {
+                $normalized[] = $slots[$slot];
+                continue;
+            }
+            $parameter = $parameters[$slot] ?? null;
+            if ($parameter === null || !$parameter->isDefaultValueAvailable()) {
+                $this->fatalError($expr, "Method `{$method}()` is missing required argument `" . ($parameter?->getName() ?? (string) $slot) . '`');
+            }
+            $normalized[] = new Node\Arg(
+                \PhpParser\BuilderHelpers::normalizeValue($parameter->getDefaultValue()),
+                false,
+                false,
+                $expr->getAttributes(),
+            );
+        }
+
+        return $normalized;
+    }
+
+    /** @return array<int, int> Argument indexes in the order they must be lowered. */
+    private function universalArgLoweringOrder(array $args): array
+    {
+        $order = array_keys($args);
+        usort($order, static fn(int $a, int $b): int =>
+            ($args[$a]->getAttribute('universal_source_order', PHP_INT_MAX)
+                <=> $args[$b]->getAttribute('universal_source_order', PHP_INT_MAX)) ?: $a <=> $b);
+        return $order;
     }
 
     protected function genUniversalCalcOp(string $object, string $op, array $args): string
@@ -918,9 +1067,10 @@ trait UniversalMethodCall
     protected function buildReceiverArgs(string $receiver, array $args, int $receiverPos): array
     {
         $userArgs = [];
-        foreach ($args as $arg) {
-            $userArgs[] = $this->parseOrderedOperand($arg->value, false);
+        foreach ($this->universalArgLoweringOrder($args) as $index) {
+            $userArgs[$index] = $this->parseOrderedOperand($args[$index]->value, false);
         }
+        ksort($userArgs);
 
         if ($receiverPos === 0) {
             $argExprs = [$receiver];
@@ -948,9 +1098,12 @@ trait UniversalMethodCall
         $tmpRef = $this->addTmpVar(Type::REF);
         $tmpVar = $this->addTmpVar(Type::VAR);
         $argExprs = ['&' . $tmpRef];
-        foreach ($args as $arg) {
-            $argExprs[] = $this->parseExpr($arg->value);
+        $lowered = [];
+        foreach ($this->universalArgLoweringOrder($args) as $index) {
+            $lowered[$index] = $this->parseExpr($args[$index]->value);
         }
+        ksort($lowered);
+        array_push($argExprs, ...$lowered);
         $this->addBeforeStmtLine($tmpRef . ' = ' . $receiver . '.toReference();');
         $this->addBeforeStmtLine($tmpVar . ' = php::call(' . $this->getFuncPtr($phpFunc) . ', php::ArgList{' . implode(', ', $argExprs) . '});');
         return $tmpVar;

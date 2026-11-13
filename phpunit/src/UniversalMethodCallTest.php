@@ -40,4 +40,48 @@ class UniversalMethodCallTest extends \BaseTest
         self::assertStringContainsString('php::toBigFloat(php::toInt(1L))', $code);
     }
 
+    public function testArgumentUnpackingIsRejected(): void
+    {
+        $this->exec('Method `add()` does not support argument unpacking', 'universal-method-arg-unpack.php');
+    }
+
+    public function testNamedArgumentsAreRejectedForNativeMethods(): void
+    {
+        $this->exec('Method `add()` does not support named arguments', 'universal-method-arg-named-native.php');
+    }
+
+    public function testNamedArgumentsMapToPhpFunctionParameters(): void
+    {
+        global $translator;
+        $compiler = \TypePhp\CompilerTest::create(TYPEPHP_ROOT_PATH);
+        $translator = $compiler;
+        $source = TYPEPHP_ROOT_PATH . '/phpunit/code/universal-method-named-args.php';
+        $compiler->addFiles([$source]);
+        $compiler->prepareFile($source);
+        $code = file_get_contents($compiler->convertFile($source));
+
+        self::assertIsString($code);
+        // The skipped pad_string is filled with its default and pad_type follows it.
+        self::assertMatchesRegularExpression('/ArgList\{s, 6L, [^}]*0L\}/', $code);
+    }
+
+    public function testUnknownNamedArgumentIsRejected(): void
+    {
+        $this->exec('Unknown named argument `nope` for method `pad()`', 'universal-method-named-unknown.php');
+    }
+
+    public function testNamedArgumentCannotTargetReceiver(): void
+    {
+        $this->exec('Named argument `string` targets the receiver', 'universal-method-named-receiver.php');
+    }
+
+    public function testPositionalArgumentAfterNamedIsRejected(): void
+    {
+        $this->exec('Cannot use positional argument after named argument', 'universal-method-named-positional-after.php');
+    }
+
+    public function testNamedArgumentCannotOverwritePositional(): void
+    {
+        $this->exec('Named argument `length` overwrites an earlier argument', 'universal-method-named-overwrite.php');
+    }
 }

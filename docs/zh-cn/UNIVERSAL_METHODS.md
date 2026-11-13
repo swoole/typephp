@@ -80,6 +80,17 @@ echo $big->mul(2)->toString();  // → "24691357802469135780"
 | `php_fn_ref` | 调用 PHP 函数并通过引用修改原值（仅 Array） | `$arr->push(1)` → `array_push($arr, 1)` |
 | `direct_method_mutate` | 调用 Variant 的变异成员方法 | `$arr->set(0, 1)` → `arr.set(0, 1)` |
 
+### 2.3 参数形式
+
+内置通用方法只接受位置参数，唯一例外是 handler 为 `php_fn` / `php_fn_ref` 的方法：
+它们对应真实的 PHP 函数，支持使用该函数形参名的**命名参数**，例如
+`$s->replace(replace: '+', search: '-')`、`$s->pad(8, pad_type: STR_PAD_LEFT)`。
+
+- 接收者占用底层函数自己的一个形参，不能被命名。
+- 被跳过的可选参数使用函数的默认值补齐。
+- 各操作数仍按源码书写顺序求值，与 PHP 一致。
+- 参数展开（`...$args`）以及其他 handler 上的命名参数会导致编译错误。
+
 ---
 
 ## 3. 支持的类型一览

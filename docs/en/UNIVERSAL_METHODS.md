@@ -80,6 +80,18 @@ The universal methods system supports five internal handlers, each suited to dif
 | `php_fn_ref` | Calls a PHP function and modifies the original value by reference (Array only) | `$arr->push(1)` → `array_push($arr, 1)` |
 | `direct_method_mutate` | Calls a mutating Variant member method | `$arr->set(0, 1)` → `arr.set(0, 1)` |
 
+### 2.3 Argument Forms
+
+Builtin universal methods accept positional arguments only, with one exception:
+methods whose handler is `php_fn` or `php_fn_ref` map onto a real PHP function
+and accept **named arguments** using that function's parameter names, for
+example `$s->replace(replace: '+', search: '-')` or `$s->pad(8, pad_type: STR_PAD_LEFT)`.
+
+- The receiver occupies its own parameter of the underlying function and cannot be named.
+- Skipped optional parameters are filled with the function's default values.
+- Operands are still evaluated in source order, as in PHP.
+- Argument unpacking (`...$args`) and named arguments on other handlers are compile errors.
+
 ---
 
 ## 3. Supported Types Overview

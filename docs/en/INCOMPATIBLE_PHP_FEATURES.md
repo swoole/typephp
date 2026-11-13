@@ -173,6 +173,11 @@ incompatible with or more restrictive than standard PHP.
   preserve keys and order, and keep the left value for duplicate keys.
   Potentially valid combinations such as `array + mixed` retain runtime checks;
   array comparisons and logical operations remain supported.
+- Arithmetic on native `int`/`float` (operators and universal methods such as
+  `div()`/`mod()`) uses C++ semantics: integer division or modulo by zero
+  raises SIGFPE, signed overflow is not promoted to float, and float division by
+  zero yields `inf`/`nan` rather than `DivisionByZeroError`. Use `var int` /
+  `var float` to get PHP semantics.
 - Dynamic dimension writes use PHPX's array/object/string abstractions. Exact
   ZendVM behavior is not promised when a key expression, `ArrayAccess` callback,
   or right-hand side rebinds the container or key between the read and write

@@ -31,10 +31,11 @@ final class CallCacheCodegenTest extends BaseTest
         self::assertSame(9, substr_count($code, 'php::VarList{'));
         self::assertStringNotContainsString('std::array<php::Variant', $code);
         self::assertStringNotContainsString('php::ArgList{', $code);
-        self::assertSame(2, substr_count($code, 'typephp_call_method_cached('));
-        self::assertSame(0, substr_count($code, 'typephp_call_method_scoped_cached('));
-        self::assertSame(1, substr_count($code, 'php::callScoped('));
-        self::assertSame(2, substr_count($code, '.call(method'));
+        self::assertSame(4, substr_count($code, 'typephp_call_method_cached('));
+        self::assertSame(1, substr_count($code, 'typephp_call_method_scoped_cached('));
+        self::assertSame(3, substr_count($code, 'php::MethodCallCacheSlot::uncached()'));
+        self::assertSame(0, substr_count($code, 'php::callScoped('));
+        self::assertSame(0, substr_count($code, '.call(method'));
         self::assertStringContainsString('.call(get_persistent_method(', $code);
 
         self::assertStringContainsString('php::FunctionCallCacheSlot function_call_cache_map[1]', $extension);

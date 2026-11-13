@@ -22,6 +22,9 @@ use TypePhp\Transform\PropertyHookLowering;
 
 trait MethodCallTrait
 {
+    /** Non-caching slot that still resolves runtime method names with PHP method-call semantics. */
+    protected const string UNCACHED_METHOD_CALL_SLOT = 'php::MethodCallCacheSlot::uncached()';
+
     private function parseParentPropertyHookCall(Expr\StaticCall $expr): ?string
     {
         if (!$expr->class instanceof Expr\StaticPropertyFetch
@@ -1110,8 +1113,8 @@ trait MethodCallTrait
             if ($requiresDynamicScope && $this->methodDef) {
                 if (!$resolvedMethodPtr) {
                     if (!$cacheMethod) {
-                        return 'php::callScoped(' . $object . ', ' . $methodPtr . ', '
-                            . $this->getCallableScopeExpr() . ')';
+                        return 'typephp_call_method_scoped_cached(' . $object . ', ' . $methodPtr . ', '
+                            . $this->getCallableScopeExpr() . ', ' . self::UNCACHED_METHOD_CALL_SLOT . ')';
                     }
                     return 'typephp_call_method_scoped_cached(' . $object . ', ' . $methodPtr . ', '
                         . $this->getCallableScopeExpr() . ', ' . $this->getMethodCallCache() . ')';
@@ -1122,7 +1125,8 @@ trait MethodCallTrait
             }
             if (!$resolvedMethodPtr) {
                 if (!$cacheMethod) {
-                    return $object . '.call(' . $methodPtr . ')';
+                    return 'typephp_call_method_cached(' . $object . ', ' . $methodPtr . ', '
+                        . self::UNCACHED_METHOD_CALL_SLOT . ')';
                 }
                 $fallback = 'typephp_call_method_cached(' . $object . ', ' . $methodPtr . ', '
                     . $this->getMethodCallCache() . ')';
@@ -1150,15 +1154,17 @@ trait MethodCallTrait
                 }
                 if ($requiresDynamicScope && $this->methodDef) {
                     if (!$cacheMethod) {
-                        return 'php::callScoped(' . $object . ', ' . $methodPtr . ', '
-                            . $this->getCallableScopeExpr() . ', ' . $callArgs . ')';
+                        return 'typephp_call_method_scoped_cached(' . $object . ', ' . $methodPtr . ', '
+                            . $this->getCallableScopeExpr() . ', ' . self::UNCACHED_METHOD_CALL_SLOT . ', '
+                            . $callArgs . ')';
                     }
                     return 'typephp_call_method_scoped_cached(' . $object . ', ' . $methodPtr . ', '
                         . $this->getCallableScopeExpr() . ', ' . $this->getMethodCallCache() . ', '
                         . $callArgs . ')';
                 }
                 if (!$cacheMethod) {
-                    return $object . '.call(' . $methodPtr . ', ' . $callArgs . ')';
+                    return 'typephp_call_method_cached(' . $object . ', ' . $methodPtr . ', '
+                        . self::UNCACHED_METHOD_CALL_SLOT . ', ' . $callArgs . ')';
                 }
                 return 'typephp_call_method_cached(' . $object . ', ' . $methodPtr . ', '
                     . $this->getMethodCallCache() . ', ' . $callArgs . ')';

@@ -80,6 +80,9 @@
 - 静态类型明确为 `array` 时，PHP 不支持的算术、位运算及其复合赋值会在编译阶段报错，
   包括 `array + int/float/bool/string/null/resource/object`、`array * array` 等。
   `array + array` 与 `array += array` 使用 PHP 并集规则：保留原有键和顺序，重复键采用左侧值。
+- native `int`/`float` 的算术（运算符及 `div()`/`mod()` 等通用方法）使用 C++ 语义：
+  整数除零/取模零触发 SIGFPE，有符号溢出不会提升为 float，float 除零得到 `inf`/`nan`
+  而不是抛出 `DivisionByZeroError`。需要 PHP 语义时请使用 `var int` / `var float`。
   `array + mixed` 等可能合法的组合仍在运行时检查；数组比较和逻辑运算不受此限制。
 - 动态维度写入使用 PHPX 的 array/object/string 抽象。当 key 表达式、
   `ArrayAccess` 回调或右值在读写阶段之间重新绑定 container/key 时，不承诺

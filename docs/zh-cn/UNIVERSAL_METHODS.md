@@ -122,6 +122,8 @@ $a = 100;
 $b = $a->add(50);  // $a 变为 150，$b 也是 150（返回新值）
 ```
 
+> **原生语义**：native `int`/`float` 的算术直接编译为 C++ 运算符，**不遵循 PHP 规则**。例如 `int` 的 `div(0)`/`mod(0)` 会触发 SIGFPE，`int` 溢出按 C++ 处理（有符号溢出为未定义行为），不会提升为 float；`float` 除零得到 `inf`/`nan`，不会抛出 `DivisionByZeroError`。需要 PHP 语义（抛异常、溢出提升）时，请使用 `var int`（或 `var float`）。
+
 ### 4.2 数学函数
 
 ```php

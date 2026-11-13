@@ -243,7 +243,7 @@ final class PythonModuleTest extends TestCase
         $this->assertStringContainsString('php::Object _php__var__int;', $cpp);
         $this->assertStringContainsString('php::Object object;', $cpp);
         $this->assertStringContainsString('php::Object bytes;', $cpp);
-        $this->assertStringContainsString('scalar = php::toInt(', $cpp);
+        $this->assertStringContainsString('scalar = php::toInt(typephp_keyword_to_int(', $cpp);
         $this->assertSame(8, substr_count($cpp, 'php::python::construct('));
         $this->assertStringNotContainsString('php::newObject(', $cpp);
         $this->assertStringNotContainsString('php::call(get_persistent_class(get_str(', $cpp);
@@ -325,7 +325,7 @@ final class PythonModuleTest extends TestCase
         $this->assertStringNotContainsString('.attr(', $cpp);
         $this->assertStringContainsString('.item(', $cpp);
         $this->assertStringContainsString('php::ForeachIterator', $cpp);
-        $this->assertStringContainsString('integer = php::toInt(object);', $cpp);
+        $this->assertStringContainsString('integer = php::toInt(typephp_keyword_to_int(object));', $cpp);
         $this->assertStringContainsString('iadd', $extension);
         $this->assertStringNotContainsString('phpy::', $cpp);
     }

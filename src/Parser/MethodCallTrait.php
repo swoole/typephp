@@ -873,12 +873,22 @@ trait MethodCallTrait
                 }
                 // A class-declared keyword method (same signature as the
                 // keyword, enforced at declaration) takes precedence and is
-                // called as an ordinary method. This applies only to TypePHP-compiled
-                // classes; dynamic (mixed) receivers and null keep the default conversion.
+                // called as an ordinary method. Dynamic (mixed/object) receivers
+                // look the method up at runtime for objects only; every other
+                // value keeps the direct default conversion.
                 $useDeclaredMethod = isset(self::KEYWORD_METHOD_CUSTOMIZABLE[$methodName])
                     && $receiverClass !== ''
                     && $this->compiledTypeDeclaresMethod($receiverClass, $methodName);
                 if (!$useDeclaredMethod) {
+                    $dynamicFn = [
+                        'toInt' => 'typephp_keyword_to_int',
+                        'toFloat' => 'typephp_keyword_to_float',
+                        'toString' => 'typephp_keyword_to_string',
+                        'toBool' => 'typephp_keyword_to_bool',
+                    ][$methodName] ?? null;
+                    if ($dynamicFn !== null && in_array($receiverType, [Type::VAR, Type::OBJECT], true)) {
+                        return $dynamicFn . '(' . $object . ')';
+                    }
                     return $this->genToConvertCall($object, $methodName, $receiverType);
                 }
             }

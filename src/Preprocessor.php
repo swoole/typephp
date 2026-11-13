@@ -3248,10 +3248,18 @@ abstract class Preprocessor extends CompilerBase
         bool $nativeClass,
     ): void {
         $normalized = strtolower($name);
-        if (!in_array($normalized, ['toany', 'toref', 'instanceof'], true)) {
+        // toInt/toFloat/toString/toBool/toArray may be implemented by a class
+        // with the exact keyword signature (assertCustomKeywordMethod).
+        if (!in_array($normalized, [
+            'toany', 'toref', 'instanceof', 'toobject', 'tostdlist', 'tostddict',
+            'tostream', 'tobigint', 'tobigfloat', 'todecimal',
+        ], true)) {
             return;
         }
-        if ($nativeClass && $normalized === 'toany') {
+        // A Native class supplies the explicit conversion for these keywords
+        // (resolved and validated at the call site).
+        $nativeConversions = $normalized !== 'toref' && $normalized !== 'instanceof';
+        if ($nativeClass && $nativeConversions) {
             return;
         }
 

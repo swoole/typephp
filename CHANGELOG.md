@@ -19,14 +19,11 @@ the call is an ordinary method call and takes precedence over the built-in
 conversion. For `toString()` the order is `toString()`, `__toString()`, then
 the default conversion.
 
-Dynamic object method dispatch (`mixed` receivers) is still undecided and under discussion.
+For `mixed`/`any`/`object` receivers, `toInt`/`toFloat`/`toString`/`toBool` check at runtime (new phpx `typephp_keyword_to_*`): only an object whose class declares the method is dispatched to it, with its signature checked; every other value, including `null`, uses the direct Zend conversion. `php::toInt()` and casts such as `(int)$obj` are unchanged.
 
-Limits: only TypePHP-compiled classes are considered. `mixed` receivers, `null`
-and PHP-internal classes keep the default conversion; `toAny`, `toRef`,
-`toObject`, `instanceOf`, `toStdList`, `toStdDict`, `toStream`, `toBigInt`,
-`toBigFloat` and `toDecimal` stay reserved. Code that already declared one of
-the five names with a different signature must now match the keyword contract
-or rename the method.
+`php::toArray()` uses the same shared signature check. The names `toStream`, `toBigInt`, `toBigFloat`, `toDecimal`, `toObject`, `toStdList` and `toStdDict` can no longer be declared by ordinary classes (compile error; Native classes keep their explicit conversion methods). A class loaded at runtime that declares them is silently ignored by the dynamic path.
+
+`toAny`, `toRef` and `instanceOf` stay reserved as before. Code that already declared one of the five customizable names with a different signature must now match the keyword contract or rename the method.
 
 ---
 
@@ -140,12 +137,11 @@ class 也同样校验，且不区分大小写）。当接收者的静态类声�
 方法处理，优先于内置转换。`toString()` 的顺序为 `toString()`、`__toString()`、
 默认转换。
 
-动态对象方法调用（`mixed` 接收者）暂无方案，仍在讨论中。
+对 `mixed`/`any`/`object` 接收者，`toInt`/`toFloat`/`toString`/`toBool` 在运行时检查（phpx 新增 `typephp_keyword_to_*`）：仅当对象的类声明了同名方法才调用并校验签名；其他值（含 `null`）仍直接走 Zend 转换。`php::toInt()` 及 `(int)$obj` 等强制转换不变。
 
-限制：仅考虑由 TypePHP 编译的 class；`mixed` 接收者、`null` 和 PHP 内置类仍使用
-默认转换；`toAny`、`toRef`、`toObject`、`instanceOf`、`toStdList`、`toStdDict`、
-`toStream`、`toBigInt`、`toBigFloat`、`toDecimal` 仍为保留名。已用不同签名声明这五个
-名称的代码，需改为符合关键词契约或重命名。
+`php::toArray()` 与其共用同一段签名检查。`toStream`、`toBigInt`、`toBigFloat`、`toDecimal`、`toObject`、`toStdList`、`toStdDict` 现在不允许普通 class 声明（编译报错；Native class 的显式转换方法不受影响）；运行时加载的类若声明了这些名称，动态路径会静默忽略。
+
+`toAny`、`toRef`、`instanceOf` 仍为保留名。已用不同签名声明这五个可自定义名称的代码，需改为符合关键词契约或重命名。
 
 ---
 

@@ -117,4 +117,9 @@ class UniversalMethodCallTest extends \BaseTest
     {
         $this->exec('Conversion method `Convertible::toInt()` must return exactly `int`', 'keyword-method-custom-interface.php');
     }
+
+    public function testReservedKeywordMethodNameCannotBeDeclared(): void
+    {
+        $this->exec('Method name `toBigInt()` is reserved for a TypePHP keyword method', 'keyword-method-reserved-name.php');
+    }
 }

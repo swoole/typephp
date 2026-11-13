@@ -76,6 +76,17 @@ function main(): void
 
     echo (new Legacy())->toString(), "\n";
     echo (new Both())->toString(), "\n";
+
+    $dyn = std::any(new Money());
+    echo $dyn->toInt(), ' ', $dyn->toString(), ' ', var_export($dyn->toBool(), true), "\n";
+    $dyn = std::any(new Discount());
+    echo $dyn->toInt(), "\n";
+    $dyn = std::any('42');
+    echo $dyn->toInt() + 1, ' ', $dyn->toFloat(), "\n";
+    $dyn = std::any(null);
+    echo $dyn->toInt(), '|', $dyn->toString(), '|', var_export($dyn->toBool(), true), "\n";
+    $dyn = std::any(new Legacy());
+    echo $dyn->toString(), "\n";
 }
 ?>
 --EXPECT--
@@ -87,3 +98,8 @@ true
 -1 USD 1250
 legacy
 keyword
+1250 USD 1250 true
+-1
+43 42
+0||false
+legacy

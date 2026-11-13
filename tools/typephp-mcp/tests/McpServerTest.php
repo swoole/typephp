@@ -473,7 +473,7 @@ final class McpServerTest extends TestCase
     public function testGetChangelogReturnsLatestAndSpecificSections(): void
     {
         $text = $this->toolText('get_changelog', []);
-        self::assertStringContainsString('## 0.8.0', $text);
+        self::assertStringContainsString('## 0.10.0', $text);
 
         $text = $this->toolText('get_changelog', ['version' => '0.8']);
         self::assertStringContainsString('native scalar storage', $text);

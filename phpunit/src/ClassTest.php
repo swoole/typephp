@@ -275,7 +275,9 @@ class ClassTest extends \BaseTest
         $this->assertNotFalse($arrayableStart);
         $printerCode = substr($code, $printerStart, $arrayableStart - $printerStart);
         $arrayableCode = substr($code, $arrayableStart);
-        $this->assertSame(4, substr_count($printerCode, 'php::toString('));
+        $this->assertSame(3, substr_count($printerCode, 'php::toString('));
+        // The mixed field dispatches to a user-declared toString() at runtime.
+        $this->assertSame(1, substr_count($printerCode, 'typephp_keyword_to_string('));
         $this->assertStringNotContainsString('php::toString(', $arrayableCode);
     }
 

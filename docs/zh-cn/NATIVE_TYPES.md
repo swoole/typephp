@@ -2,7 +2,7 @@
 
 ## ⚠️ 重要提示
 
-**编译器强依赖**：当前 TypePHP 编译器对 `toArray`、`toInt`、`toFloat` 等关键词方法是强依赖，只有依靠这些方法才能建立类型系统，因此它们**无法被 PHP 代码层覆盖**。典型例子：编译器看到 `toArray()` 就知道表达式一定是 `php::Array` 类型；若被 PHP 用户代码覆盖，结果类型就变成未知。
+**编译器强依赖**：当前 TypePHP 编译器对 `toArray`、`toInt`、`toFloat` 等关键词方法是强依赖，只有依靠这些方法才能建立类型系统，因此它们的**类型契约无法被 PHP 代码层更改**。典型例子：编译器看到 `toArray()` 就知道表达式一定是 `php::Array` 类型。class 可以自行实现 `toInt`/`toFloat`/`toString`/`toBool`/`toArray`，但签名必须与关键词完全一致，详见 [通用方法](UNIVERSAL_METHODS.md)。
 
 **AOT 编译器支持 6 种原生/高精度类型**:
 

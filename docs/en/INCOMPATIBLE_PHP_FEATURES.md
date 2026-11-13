@@ -140,8 +140,10 @@ incompatible with or more restrictive than standard PHP.
 ## Object model
 
 - Reserved keyword methods such as `toInt()`, `toString()`, and `toArray()` are
-  resolved before ordinary object methods; an application method of the same
-  name that takes arguments is not called with ordinary object-method semantics.
+  resolved before ordinary object methods, except that a TypePHP-compiled class
+  declaring `toInt/toFloat/toString/toBool/toArray` with the exact keyword
+  signature (public, non-static, no parameters, exact non-nullable return type)
+  has its method called instead. Any other signature is a compile error.
 - `toAny()` and `toRef()` are non-overridable TypePHP keyword methods, and
   ordinary class-like declarations must not define methods with these names
   (method names are case-insensitive, per PHP rules). A Native class may only

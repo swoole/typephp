@@ -3085,15 +3085,8 @@ abstract class Preprocessor extends CompilerBase
                 Type::VAR,
                 true,
             );
-        } elseif ($normalizedMethod === 'toarray') {
-            $this->assertKeywordConversionMethodSignature(
-                $v,
-                $this->classDef->getNamespacedName(false),
-                $name,
-                $this->methodDef->functionDef,
-                Type::ARRAY,
-                $this->classDef->nativeObject,
-            );
+        } else {
+            $this->assertCustomKeywordMethod($v, $this->classDef->getNamespacedName(false), $name, $flags, $this->methodDef->functionDef, $this->classDef->nativeObject);
         }
 
         $fullClassName = $this->getFullClassName();
@@ -3214,6 +3207,39 @@ abstract class Preprocessor extends CompilerBase
             }
             $this->collectComposedTraitMethodNames($traitDef, $methods, $visitedTraits);
         }
+    }
+
+    /**
+     * A class may implement a keyword conversion method itself, but never
+     * change its contract: public, non-static, no parameters and the exact
+     * return type of the keyword.
+     */
+    private function assertCustomKeywordMethod(
+        Node\Stmt\ClassMethod $method,
+        string $class,
+        string $name,
+        int $flags,
+        FunctionDef $function,
+        bool $nativeClass,
+    ): void {
+        $keyword = KeywordMethodNameNormalizer::canonicalName($name);
+        if ($keyword === null || !isset(self::KEYWORD_METHOD_CUSTOMIZABLE[$keyword])) {
+            return;
+        }
+        if ($flags & Modifiers::STATIC) {
+            $this->fatalError($method, "Keyword method `{$class}::{$name}()` must not be static");
+        }
+        if (!($flags & Modifiers::PUBLIC)) {
+            $this->fatalError($method, "Keyword method `{$class}::{$name}()` must be public");
+        }
+        $this->assertKeywordConversionMethodSignature(
+            $method,
+            $class,
+            $name,
+            $function,
+            self::KEYWORD_METHOD_MAP[$keyword],
+            $nativeClass,
+        );
     }
 
     private function assertKeywordMethodMayBeDeclared(
@@ -3367,16 +3393,14 @@ abstract class Preprocessor extends CompilerBase
                 $methodDef->node = $stmt;
                 $methodDef->functionDef = $this->parseFunctionDecl($stmt);
                 $methodDef->functionDef->method = true;
-                if (strtolower($methodName) === 'toarray') {
-                    $this->assertKeywordConversionMethodSignature(
-                        $stmt,
-                        $this->interfaceDef->getNamespacedName(false),
-                        $methodName,
-                        $methodDef->functionDef,
-                        Type::ARRAY,
-                        false,
-                    );
-                }
+                $this->assertCustomKeywordMethod(
+                    $stmt,
+                    $this->interfaceDef->getNamespacedName(false),
+                    $methodName,
+                    $methodDef->flags,
+                    $methodDef->functionDef,
+                    false,
+                );
                 $this->interfaceDef->addMethod($methodDef);
                 $this->resetMethod();
                 $this->resetFunction();

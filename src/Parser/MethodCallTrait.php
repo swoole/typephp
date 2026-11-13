@@ -871,13 +871,14 @@ trait MethodCallTrait
                 if ($receiverClass === '' && !$this->isVarExpr($expr->var)) {
                     $receiverClass = $this->detectClassOfExpr($expr->var);
                 }
-                // A declared conversion method is called directly. Otherwise
-                // php::toArray() applies the PHP-compatible object-property
-                // fallback (and invokes a real toArray() method when present).
-                $useDeclaredToArray = $methodName === 'toArray'
+                // A class-declared keyword method (same signature as the
+                // keyword, enforced at declaration) takes precedence and is
+                // called as an ordinary method. This applies only to TypePHP-compiled
+                // classes; dynamic (mixed) receivers and null keep the default conversion.
+                $useDeclaredMethod = isset(self::KEYWORD_METHOD_CUSTOMIZABLE[$methodName])
                     && $receiverClass !== ''
-                    && $this->objectTypeDeclaresMethod($receiverClass, $methodName);
-                if (!$useDeclaredToArray) {
+                    && $this->compiledTypeDeclaresMethod($receiverClass, $methodName);
+                if (!$useDeclaredMethod) {
                     return $this->genToConvertCall($object, $methodName, $receiverType);
                 }
             }

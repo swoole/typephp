@@ -571,8 +571,14 @@ trait UniversalMethodCall
         return $this->classOrInterfaceDeclaresMethod($class, $method, []);
     }
 
+    /** Like objectTypeDeclaresMethod(), but only for TypePHP-compiled classes and interfaces. */
+    protected function compiledTypeDeclaresMethod(string $class, string $method): bool
+    {
+        return $this->classOrInterfaceDeclaresMethod($class, $method, [], false);
+    }
+
     /** @param array<string, true> $visited */
-    private function classOrInterfaceDeclaresMethod(string $type, string $method, array $visited): bool
+    private function classOrInterfaceDeclaresMethod(string $type, string $method, array $visited, bool $includeReflection = true): bool
     {
         $type = ltrim($type, '\\');
         $key = strtolower($type);
@@ -587,12 +593,12 @@ trait UniversalMethodCall
                 return true;
             }
             foreach ($classDef->implements as $interface) {
-                if ($this->classOrInterfaceDeclaresMethod($interface, $method, $visited)) {
+                if ($this->classOrInterfaceDeclaresMethod($interface, $method, $visited, $includeReflection)) {
                     return true;
                 }
             }
             return $classDef->extends !== ''
-                && $this->classOrInterfaceDeclaresMethod($classDef->extends, $method, $visited);
+                && $this->classOrInterfaceDeclaresMethod($classDef->extends, $method, $visited, $includeReflection);
         }
 
         if ($this->hasInterface($type)) {
@@ -601,13 +607,16 @@ trait UniversalMethodCall
                 return true;
             }
             foreach ($interfaceDef->extendsList ?: ($interfaceDef->extends ? [$interfaceDef->extends] : []) as $parent) {
-                if ($this->classOrInterfaceDeclaresMethod($parent, $method, $visited)) {
+                if ($this->classOrInterfaceDeclaresMethod($parent, $method, $visited, $includeReflection)) {
                     return true;
                 }
             }
             return false;
         }
 
+        if (!$includeReflection) {
+            return false;
+        }
         $reflection = Reflection::getClass($type);
         return $reflection?->hasMethod($method) ?? false;
     }

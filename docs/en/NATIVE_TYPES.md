@@ -2,7 +2,7 @@
 
 ## ⚠️ Important Notice
 
-**Compiler hard dependency**: the TypePHP compiler depends strongly on the keyword methods such as `toArray`, `toInt` and `toFloat`. The type system can only be established through these methods, so they **cannot be overridden at the PHP code level**. For example, when the compiler sees `toArray()` it knows the expression is always `php::Array`; if user PHP code could override it, the result type would become unknown.
+**Compiler hard dependency**: the TypePHP compiler depends strongly on the keyword methods such as `toArray`, `toInt` and `toFloat`. The type system can only be established through these methods, so **their type contract cannot be changed at the PHP code level**. For example, when the compiler sees `toArray()` it knows the expression is always `php::Array`. A class may implement `toInt`/`toFloat`/`toString`/`toBool`/`toArray` itself only with the exact keyword signature; see [Universal Methods](UNIVERSAL_METHODS.md).
 
 **The AOT compiler supports 6 native/high-precision types**:
 

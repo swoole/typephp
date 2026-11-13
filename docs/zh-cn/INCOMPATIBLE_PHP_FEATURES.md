@@ -68,8 +68,8 @@
 
 ## 对象模型
 
-- `toInt()`、`toString()`、`toArray()` 等保留关键词方法先于普通对象方法解析；需要参数的同名业务方法不按普通对象方法语义调用。
-- `toAny()` 和 `toRef()` 是不可覆盖的 TypePHP 关键词方法，普通 class-like 声明不得定义同名方法（方法名按 PHP 规则大小写不敏感）。Native class 仅可显式定义返回 `mixed/any` 的 `toAny()` 转换方法，不提供隐式转换；Native class 不支持 `toRef()`。
+- `toInt()`、`toString()`、`toArray()` 等保留关键词方法先于普通对象方法解析；例外：由 TypePHP 编译的 class 若以与关键词完全一致的签名（public、非 static、无参数、返回类型完全一致且不可为 nullable）声明了 `toInt/toFloat/toString/toBool/toArray`，则调用该类自己的方法；其他签名一律编译报错。
+- `toAny()` 和 `toRef()` 是不可覆盖的 TypePHP 关键词方法，普通 class-like 声明不得定义同名方法；`toInt/toFloat/toString/toBool/toArray` 允许 class 自行实现，但签名必须与关键词完全一致（方法名按 PHP 规则大小写不敏感）。Native class 仅可显式定义返回 `mixed/any` 的 `toAny()` 转换方法，不提供隐式转换；Native class 不支持 `toRef()`。
 - 固定值类型属性未显式初始化时使用类型零值，不保留 ZendPHP 的完整 uninitialized 状态；因此 `??` 等依赖 uninitialized 状态的表达式可能不同。
 - 禁止子类用同名 `private` 属性隐藏父类私有属性；`public` / `protected` 同名声明视为同一个继承 property slot，仍须满足类型、可见性和 `readonly` 兼容性要求。
 - typed property 的动态写入路径仍执行 strict type check；右值类型在编译期无法确定时会保留运行时检查，而不会退化为 Zend 弱类型标量转换。

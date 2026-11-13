@@ -92,4 +92,29 @@ class UniversalMethodCallTest extends \BaseTest
             'universal-method-keyword-extension-builtin-name.php',
         );
     }
+
+    public function testCustomKeywordMethodCannotChangeReturnType(): void
+    {
+        $this->exec('Conversion method `BadToInt::toInt()` must return exactly `int`', 'keyword-method-custom-bad-return.php');
+    }
+
+    public function testCustomKeywordMethodCannotAcceptParameters(): void
+    {
+        $this->exec('Conversion method `ParamToString::toString()` must not accept arguments', 'keyword-method-custom-params.php');
+    }
+
+    public function testCustomKeywordMethodCannotBeStatic(): void
+    {
+        $this->exec('Keyword method `StaticToBool::toBool()` must not be static', 'keyword-method-custom-static.php');
+    }
+
+    public function testCustomKeywordMethodCannotBeNullable(): void
+    {
+        $this->exec('Conversion method `NullableToFloat::toFloat()` must return exactly `float`', 'keyword-method-custom-nullable.php');
+    }
+
+    public function testInterfaceKeywordMethodCannotChangeReturnType(): void
+    {
+        $this->exec('Conversion method `Convertible::toInt()` must return exactly `int`', 'keyword-method-custom-interface.php');
+    }
 }

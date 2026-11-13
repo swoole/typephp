@@ -2,7 +2,9 @@
 
 本教程全面介绍 AOT 编译器的**通用方法（Universal Methods）**系统——一种在原生类型上通过 `$value->method()` 语法进行零开销方法调用的机制。
 
-> ⚠️ **编译器强依赖**：当前 TypePHP 编译器对 `toArray`、`toInt`、`toFloat` 等关键词方法是强依赖，只有依靠这些方法才能建立类型系统，因此它们由编译器内置，**无法在 PHP 代码层被覆盖或替换**。典型例子：编译器看到 `toArray()` 就知道表达式一定是 `php::Array` 类型；若被 PHP 用户代码覆盖，结果类型就变成未知。
+> ⚠️ **编译器强依赖**：当前 TypePHP 编译器对 `toArray`、`toInt`、`toFloat` 等关键词方法是强依赖，只有依靠这些方法才能建立类型系统，因此它们由编译器内置，**其类型契约无法在 PHP 代码层被更改**。典型例子：编译器看到 `toArray()` 就知道表达式一定是 `php::Array` 类型。
+>
+> 由 TypePHP 编译的 class 仍可自行实现 `toInt`、`toFloat`、`toString`、`toBool`、`toArray`，但声明必须是 `public`、非 static、无参数，且返回类型与关键词完全一致（不可为 nullable、不可按引用返回），否则编译报错（interface、trait 同样适用）。当接收者的静态类（或其父类/接口）声明了此类方法时，调用按普通方法处理，优先于内置转换；`toString()` 的顺序为 `toString()`、`__toString()`、默认转换。`mixed` 接收者、`null` 以及 PHP 内置类仍使用默认转换。其余关键词方法（`toAny`、`toRef`、`toObject`、`instanceOf`、`toStdList`、`toStdDict`、`toStream`、`toBigInt`、`toBigFloat`、`toDecimal`）仍为保留名。
 
 ## 目录
 

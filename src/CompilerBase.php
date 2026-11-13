@@ -218,6 +218,19 @@ abstract class CompilerBase implements PropertyAccessContext
         'instanceOf'   => Type::BOOL,
     ];
 
+    /**
+     * Keyword methods a class may implement itself. The declaration must repeat
+     * the keyword's exact signature, so the type contract the compiler relies
+     * on cannot change; only the implementation is customizable.
+     */
+    public const array KEYWORD_METHOD_CUSTOMIZABLE = [
+        'toInt' => true,
+        'toFloat' => true,
+        'toString' => true,
+        'toBool' => true,
+        'toArray' => true,
+    ];
+
     /** Keyword methods not listed here accept no arguments. */
     public const array KEYWORD_METHOD_WITH_ARGUMENTS = [
         'toObject' => true,

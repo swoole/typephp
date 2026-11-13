@@ -3210,7 +3210,7 @@ abstract class Preprocessor extends CompilerBase
         bool $nativeClass,
     ): void {
         $normalized = strtolower($name);
-        if ($normalized !== 'toany' && $normalized !== 'toref') {
+        if (!in_array($normalized, ['toany', 'toref', 'instanceof'], true)) {
             return;
         }
         if ($nativeClass && $normalized === 'toany') {

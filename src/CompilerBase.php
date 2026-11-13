@@ -197,7 +197,7 @@ abstract class CompilerBase implements PropertyAccessContext
     protected const string ATTR_LOWERED_TYPE = 'aotLoweredType';
 
     /**
-     * Keyword methods (to* builtins) with mandated return types.
+     * Built-in keyword methods with mandated return types.
      * Use findKeywordMethod() for unified lookup including keyword extension methods.
      */
     public const array KEYWORD_METHOD_MAP = [
@@ -215,6 +215,7 @@ abstract class CompilerBase implements PropertyAccessContext
         'toObject'     => Type::OBJECT,
         'toAny'        => Type::VAR,
         'toRef'        => Type::REF,
+        'instanceOf'   => Type::BOOL,
     ];
 
     /** Keyword methods not listed here accept no arguments. */
@@ -222,6 +223,7 @@ abstract class CompilerBase implements PropertyAccessContext
         'toObject' => true,
         'toStdList' => true,
         'toStdDict' => true,
+        'instanceOf' => true,
     ];
 
     private const array STREAM_FUNCTIONS = [

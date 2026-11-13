@@ -11,6 +11,7 @@ use TypePhp\Type;
 
 use PhpParser\Modifiers;
 use PhpParser\Node;
+use PhpParser\NodeAbstract;
 use PhpParser\Node\Expr;
 use PhpParser\Node\Expr\CallLike;
 use TypePhp\Exception\DynamicCall;
@@ -637,6 +638,14 @@ trait MethodCallTrait
 
     protected function parseMethodCall(Expr\MethodCall $expr): string
     {
+        if ($this->isInstanceofKeywordCall($expr)) {
+            if ($this->containsNullsafeChain($expr->var)) {
+                return $this->parseNullsafeExpr($expr);
+            }
+            $code = $this->parseInstanceof($this->createInstanceofKeywordExpression($expr));
+            $expr->setAttribute(self::ATTR_LOWERED_TYPE, Type::BOOL);
+            return $code;
+        }
         $this->validateImmutableCall($expr);
         if ($this->containsNullsafeChain($expr->var)) {
             return $this->parseNullsafeExpr($expr);
@@ -1165,6 +1174,40 @@ trait MethodCallTrait
         } catch (PlaceHolder) {
             return $this->genPlaceHolder($this->genArray([$object, $method]));
         }
+    }
+
+    protected function isInstanceofKeywordCall(NodeAbstract $expr): bool
+    {
+        return $expr instanceof Expr\MethodCall && $expr->name instanceof Node\Identifier
+            && strcasecmp($expr->name->toString(), 'instanceOf') === 0;
+    }
+
+    protected function createInstanceofKeywordExpression(Expr\MethodCall $expr): Expr\Instanceof_
+    {
+        if ($expr->isFirstClassCallable()) {
+            $this->fatalError($expr, 'The instanceOf keyword method cannot be converted to a callable');
+        }
+        if (count($expr->args) !== 1 || !$expr->args[0] instanceof Node\Arg || $expr->args[0]->unpack) {
+            $this->fatalError($expr, 'The instanceOf method expects exactly one non-unpacked class argument');
+        }
+        $argument = $expr->args[0];
+        if ($argument->name !== null && $argument->name->toString() !== 'class') {
+            $this->fatalError($argument, 'Unknown named parameter $' . $argument->name->toString() . ' for instanceOf()');
+        }
+        $target = $argument->value;
+        if ($target instanceof Expr\ClassConstFetch && $target->class instanceof Node\Name
+            && $target->name instanceof Node\Identifier && strcasecmp($target->name->toString(), 'class') === 0) {
+            $class = $this->resolveCompileTimeInstanceofClass($target->class);
+            if ($this->isNativeObjectClass($this->detectClassOfExpr($expr->var))
+                || ($class !== null && $class !== ''
+                    && ($this->hasClass($class) || $this->isInterface($class) || $this->isInternalClass($class)))) {
+                // A known class literal has the same class entry and branch
+                // refinement as the named instanceof operator, without lookup
+                // by string or boxing a Native pointer.
+                $target = clone $target->class;
+            }
+        }
+        return new Expr\Instanceof_($expr->var, $target, $expr->getAttributes());
     }
 
     /**

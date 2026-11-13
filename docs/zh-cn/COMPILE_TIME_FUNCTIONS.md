@@ -13,13 +13,14 @@ TypePHP 不再为编译器指令保留任何全局函数名。编译期 API 最�
 
 ## 关键词方法
 
-当前内置关键词方法共 12 个。
+当前内置关键词方法共 13 个。
 
 | 名称 | 等价行为 | 说明 |
 | --- | --- | --- |
 | `toAny()` | `std::any($receiver)` | 返回接收者本身，但类型降级为 `mixed/any`。 |
 | `toRef()` | `std::ref($receiver)` | 返回接收者引用；参数限制与 `std::ref()` 一致。 |
 | `toObject()` | `php::toObject($receiver)` | 可带目标类参数，执行对象转换/检查。 |
+| `instanceOf($class)` | `$receiver instanceof $class` | 检查对象所属类型，返回 bool；适用于 typed object、普通 object 和 mixed 中的对象。 |
 | `toInt()` | `php::toInt($receiver)` | 转为 native int 表达式。 |
 | `toFloat()` | `php::toFloat($receiver)` | 转为 native float 表达式。 |
 | `toString()` | `php::toString($receiver)` | 转为字符串表达式。 |
@@ -35,6 +36,27 @@ TypePHP 不再为编译器指令保留任何全局函数名。编译期 API 最�
 - `toAny()`、`toRef()` 不接受参数。
 - `toRef()` 只适用于可取引用的接收者。
 - 关键词方法优先于普通方法和 universal method 分派。
+
+`instanceOf()` 接受一个类名参数，支持类名字符串、动态类名表达式和 `ClassName::class`，
+也支持命名参数 `class:`。方法名不区分大小写，不能被用户类、接口或 Trait 重新声明，
+也不能通过 first-class callable 语法导出。它复用 `instanceof` 运算符的 lowering，
+不会调用对象的实际方法或 `__call()`。
+
+```php
+$typed->instanceOf(User::class);
+$object->instanceOf($className);
+$nullable->instanceOf(User::class);  // 接收者为 null 时返回 false
+$nullable?->instanceOf(User::class); // 接收者为 null 时返回 null，且不计算参数
+
+if ($value->instanceOf(User::class)) {
+    // 已知类的正向分支沿用 instanceof 的静态类型收窄。
+    $value->method();
+}
+```
+
+接收者和类名表达式各计算一次，并保留从左到右的求值顺序。Native Class 沿用现有
+`instanceof` 的静态解析限制，使用 `ClassName::class` 时可在编译期判断类型关系；
+不会把 Native 指针传入 Zend。
 
 ## `std::` 编译期入口
 

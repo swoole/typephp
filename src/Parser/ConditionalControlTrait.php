@@ -86,6 +86,9 @@ trait ConditionalControlTrait
             return $this->getInstanceofBranchBindings($condition->left)
                 + $this->getInstanceofBranchBindings($condition->right);
         }
+        if ($this->isInstanceofKeywordCall($condition)) {
+            $condition = $this->createInstanceofKeywordExpression($condition);
+        }
         if (!$condition instanceof Node\Expr\Instanceof_ || !$condition->expr instanceof Node\Expr\Variable
             || !is_string($condition->expr->name) || !$condition->class instanceof Node\Name
             || strtolower($condition->class->toString()) === 'static') {

@@ -612,6 +612,9 @@ trait UniversalMethodCall
      */
     protected function findKeywordMethod(string $method): ?string
     {
+        if (strcasecmp($method, 'instanceOf') === 0) {
+            return Type::BOOL;
+        }
         if (isset(CompilerBase::KEYWORD_METHOD_MAP[$method])) {
             return CompilerBase::KEYWORD_METHOD_MAP[$method];
         }

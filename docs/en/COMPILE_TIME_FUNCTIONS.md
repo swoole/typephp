@@ -16,13 +16,14 @@ names remain case-sensitive.
 
 ## Keyword methods
 
-There are currently 12 built-in keyword methods.
+There are currently 13 built-in keyword methods.
 
 | Name | Equivalent behavior | Description |
 | --- | --- | --- |
 | `toAny()` | `std::any($receiver)` | Returns the receiver itself, but with the type degraded to `mixed/any`. |
 | `toRef()` | `std::ref($receiver)` | Returns a reference to the receiver; parameter restrictions are the same as `std::ref()`. |
 | `toObject()` | `php::toObject($receiver)` | May take a target-class parameter, performing object conversion/checking. |
+| `instanceOf($class)` | `$receiver instanceof $class` | Returns bool; available to typed objects, ordinary objects, and objects held in mixed values. |
 | `toInt()` | `php::toInt($receiver)` | Converts to a native int expression. |
 | `toFloat()` | `php::toFloat($receiver)` | Converts to a native float expression. |
 | `toString()` | `php::toString($receiver)` | Converts to a string expression. |
@@ -38,6 +39,29 @@ Constraints:
 - `toAny()` and `toRef()` accept no parameters.
 - `toRef()` only applies to receivers that can take references.
 - Keyword methods take precedence over ordinary methods and universal method dispatch.
+
+`instanceOf()` accepts one class-name argument: a string, a dynamic class-name
+expression, or `ClassName::class`. The named argument `class:` is supported.
+Its name is case-insensitive and reserved in user classes, interfaces, and
+traits; it cannot be exported as a first-class callable. It reuses the
+`instanceof` operator lowering without calling an object method or `__call()`.
+
+```php
+$typed->instanceOf(User::class);
+$object->instanceOf($className);
+$nullable->instanceOf(User::class);  // false when the receiver is null
+$nullable?->instanceOf(User::class); // null when the receiver is null; arguments are skipped
+
+if ($value->instanceOf(User::class)) {
+    // Known class literals retain instanceof's positive-branch type narrowing.
+    $value->method();
+}
+```
+
+The receiver and class-name expression are each evaluated once, from left to
+right. Native Classes retain the existing static-resolution restrictions of
+`instanceof`; `ClassName::class` allows compile-time type checks without passing
+Native pointers to Zend.
 
 ## `std::` compile-time entry points
 

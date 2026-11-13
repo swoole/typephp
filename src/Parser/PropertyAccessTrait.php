@@ -1332,13 +1332,22 @@ trait PropertyAccessTrait
         // Resolve the declaration before the hoisting path runs. Without this,
         // an ordinary variable receiver has no definition here and skips
         // hoisting entirely, which turns a stable slot reference into a fresh
-        // offset lookup on every read. Only the scalar types the typed
-        // accessors can read are resolved here, so bool and string properties
-        // keep their previous lowering.
+        // offset lookup on every read.
+        //
+        // Only a plain int/float declaration qualifies. Bool and string keep
+        // their previous lowering, and a readonly or hooked property keeps its
+        // own path: the readonly branch reads through the dynamic value source,
+        // so materializing its result as a native scalar while the temporary
+        // stays a Variant would drop the conversion the surrounding expression
+        // still needs.
         $scalarDef = $def;
         if ($scalarDef === null && $property instanceof Node\Identifier) {
             $declared = $this->findReadablePropertyDefinition($expr);
             if ($declared !== null
+                && !$declared->isReadonly()
+                && $declared->getter === null
+                && $declared->setter === null
+                && !$declared->virtual
                 && ($declared->type === Type::INT || $declared->type === Type::FLOAT)) {
                 $scalarDef = $declared;
             }
@@ -1354,7 +1363,13 @@ trait PropertyAccessTrait
                 $getProperty,
             );
             if ($typedFetch !== null) {
-                $expr->setAttribute(self::ATTR_LOWERED_TYPE, $scalarDef->type);
+                // A readonly read keeps the dynamic value source and is
+                // materialized as a Variant, so advertising a native scalar
+                // type would strip the conversion the surrounding expression
+                // still needs.
+                if (!$scalarDef->isReadonly()) {
+                    $expr->setAttribute(self::ATTR_LOWERED_TYPE, $scalarDef->type);
+                }
                 return $typedFetch;
             }
         }

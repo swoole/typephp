@@ -125,6 +125,22 @@ class DeclaredScalarPropertyReadTest extends BaseTest
         $this->assertStringNotContainsString('attrInt(get_persistent_prop(', $code);
     }
 
+    public function testReadonlyPropertyKeepsTheConversionOnArithmetic(): void
+    {
+        try {
+            $outputFile = $this->compileCode('declared-scalar-property-read-readonly-arith.php');
+        } catch (TestError $e) {
+            $this->fail($e->getMessage());
+        }
+
+        $code = file_get_contents($outputFile);
+        // The read is materialized as a Variant, so the division still has to
+        // be converted instead of being treated as an already native float.
+        $this->assertStringContainsString('typephp_read_property_scoped(', $code);
+        $this->assertStringContainsString('php::toFloat(((tmp_var_', $code);
+        $this->assertStringNotContainsString('attrFloat(get_persistent_prop(', $code);
+    }
+
     public function testNarrowedMixedReceiverKeepsVariantRead(): void
     {
         try {

@@ -84,4 +84,12 @@ class UniversalMethodCallTest extends \BaseTest
     {
         $this->exec('Named argument `length` overwrites an earlier argument', 'universal-method-named-overwrite.php');
     }
+
+    public function testKeywordExtensionCannotUseBuiltinKeywordName(): void
+    {
+        $this->exec(
+            'Keyword extension method *::TOINT() conflicts with the builtin keyword method toInt()',
+            'universal-method-keyword-extension-builtin-name.php',
+        );
+    }
 }

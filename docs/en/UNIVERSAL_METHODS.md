@@ -66,7 +66,7 @@ Each universal method call goes through the following steps at compile time:
 3. **Argument validation**: Check that the number of arguments is within the `min_args` ~ `max_args` range
 4. **Code generation**: Generate the corresponding C/C++ call code based on the handler type
 
-As in PHP, method names are case-insensitive: `$x->TOARRAY()` is the keyword method `toArray()`, `$s->STARTSWITH('a')` is `startsWith()`, and `MethodsFor` extension methods (including `*` keyword extensions) are matched the same way. A statically written name is canonicalized before lookup; a dynamic name (`$x->$name()`) is a runtime call and never resolves to a keyword method.
+As in PHP, method names are case-insensitive: `$x->TOARRAY()` is the keyword method `toArray()`, `$s->STARTSWITH('a')` is `startsWith()`, and `MethodsFor` extension methods (including `*` keyword extensions) are matched the same way. A `MethodsFor('*')` provider cannot declare a public method whose name matches a builtin keyword method (`toInt`, `toArray`, `instanceOf`, …); this is a compile error. A statically written name is canonicalized before lookup; a dynamic name (`$x->$name()`) is a runtime call and never resolves to a keyword method.
 
 ### 2.2 Handler Types
 

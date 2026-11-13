@@ -6,6 +6,7 @@ use TypePhp\Analysis\CompilationStatistics;
 use TypePhp\Type;
 
 use TypePhp\CompilerBase;
+use TypePhp\Transform\KeywordMethodNameNormalizer;
 use TypePhp\Resolver\Reflection;
 
 use PhpParser\Node;
@@ -418,6 +419,12 @@ trait UniversalMethodCall
                 }
                 $targetKey = strtolower(ltrim($target, '\\'));
                 $methodKey = strtolower($method->name);
+                if ($target === '*' && KeywordMethodNameNormalizer::canonicalName($method->name) !== null) {
+                    $this->error(
+                        "Keyword extension method *::{$method->name}() conflicts with the builtin keyword method "
+                        . KeywordMethodNameNormalizer::canonicalName($method->name) . '()'
+                    );
+                }
                 if (isset($registry[$targetKey][$methodKey])) {
                     $this->error("Duplicate extension method {$target}::{$method->name}()");
                 }

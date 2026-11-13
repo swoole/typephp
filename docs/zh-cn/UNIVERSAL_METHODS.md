@@ -66,7 +66,7 @@ echo $big->mul(2)->toString();  // → "24691357802469135780"
 3. **参数校验**：检查参数个数是否在 `min_args` ~ `max_args` 范围内
 4. **代码生成**：根据 handler 类型生成对应的 C/C++ 调用代码
 
-与 PHP 一致，方法名不区分大小写：`$x->TOARRAY()` 就是关键词方法 `toArray()`，`$s->STARTSWITH('a')` 就是 `startsWith()`，`MethodsFor` 扩展方法（包括 `*` 关键词扩展）也按同样规则匹配。静态书写的方法名会在查找前被规范化；动态方法名（`$x->$name()`）是运行时调用，不会解析为关键词方法。
+与 PHP 一致，方法名不区分大小写：`$x->TOARRAY()` 就是关键词方法 `toArray()`，`$s->STARTSWITH('a')` 就是 `startsWith()`，`MethodsFor` 扩展方法（包括 `*` 关键词扩展）也按同样规则匹配。`MethodsFor('*')` 提供者不能声明与内置关键词方法同名（`toInt`、`toArray`、`instanceOf` 等）的 public 方法，否则编译报错。静态书写的方法名会在查找前被规范化；动态方法名（`$x->$name()`）是运行时调用，不会解析为关键词方法。
 
 ### 2.2 Handler 类型
 

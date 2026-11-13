@@ -2986,6 +2986,16 @@ abstract class Preprocessor extends CompilerBase
         $this->assertNativeMagicMethodSupported($v, $name);
         $this->assertEnumMayIncludeMethod($v, $name);
         $flags = $this->parseModifiers($v->flags);
+        $keywordName = KeywordMethodNameNormalizer::canonicalName($name);
+        if ($this->classDef->methodsForTarget === '*'
+            && ($flags & Modifiers::PUBLIC)
+            && $keywordName !== null
+        ) {
+            $this->fatalError(
+                $v,
+                "Keyword extension method *::{$name}() conflicts with the builtin keyword method {$keywordName}()",
+            );
+        }
         $abstract = $flags & Modifiers::ABSTRACT;
         if ($class instanceof Node\Stmt\Enum_ && $abstract) {
             $enumName = $this->classDef->getNamespacedName(false);

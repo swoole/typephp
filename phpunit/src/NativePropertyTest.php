@@ -164,7 +164,9 @@ class NativePropertyTest extends BaseTest
 
         $code = file_get_contents($outputFile);
         $this->assertStringNotContainsString('_object_prop_object__value', $code);
-        $this->assertStringContainsString('object.attr(', $code);
+        // The receiver is unstable, so the slot is re-read through the typed
+        // accessor instead of being hoisted into a long-lived reference.
+        $this->assertStringContainsString('object.attrInt(', $code);
         $this->assertStringContainsString('php_nativemethodunsetkeepsoptimization__read(object)', $code);
     }
 
@@ -252,20 +254,20 @@ class NativePropertyTest extends BaseTest
         }
 
         $code = file_get_contents($outputFile);
-        $this->assertStringContainsString('_object_prop_this___number += (php::toInt(', $code);
-        $this->assertStringContainsString('_object_prop_this___amount += (php::toFloat(', $code);
-        $this->assertStringContainsString('typephp_static_int_ref(_typephp_static_property_0().direct_ptr()) += (php::toInt(', $code);
-        $this->assertStringContainsString('typephp_static_float_ref(_typephp_static_property_1().direct_ptr()) += (php::toFloat(', $code);
+        $this->assertStringContainsString('_object_prop_this___number += (source.attrInt(', $code);
+        $this->assertStringContainsString('_object_prop_this___amount += (source.attrFloat(', $code);
+        $this->assertStringContainsString('typephp_static_int_ref(_typephp_static_property_0().direct_ptr()) += (source.attrInt(', $code);
+        $this->assertStringContainsString('typephp_static_float_ref(_typephp_static_property_1().direct_ptr()) += (source.attrFloat(', $code);
         $this->assertStringContainsString('typephp_static_int_ref(_typephp_static_property_0().direct_ptr()) *= (1.5);', $code);
         $this->assertStringContainsString('typephp_static_int_ref(_typephp_static_property_0().direct_ptr()) /= (0.5);', $code);
-        $this->assertStringContainsString('typephp_static_int_ref(_typephp_static_property_0().direct_ptr()) *= (php::toFloat(', $code);
-        $this->assertStringContainsString('typephp_static_int_ref(_typephp_static_property_0().direct_ptr()) /= (php::toFloat(', $code);
+        $this->assertStringContainsString('typephp_static_int_ref(_typephp_static_property_0().direct_ptr()) *= (source.attrFloat(', $code);
+        $this->assertStringContainsString('typephp_static_int_ref(_typephp_static_property_0().direct_ptr()) /= (source.attrFloat(', $code);
         $this->assertStringNotContainsString('php::toInt(1.5)', $code);
         $this->assertStringNotContainsString('php::toInt(0.5)', $code);
-        $this->assertMatchesRegularExpression('/_object_prop_this___number = php::toInt\(\(\(tmp_var_\d+\) \+ \(1L+\)\)\);/', $code);
-        $this->assertMatchesRegularExpression('/_object_prop_this___amount = php::toFloat\(\(\(tmp_var_\d+\) \+ \(0\.5\)\)\);/', $code);
-        $this->assertStringContainsString('_object_prop_this___number = php::toInt(-(source.attr(', $code);
-        $this->assertMatchesRegularExpression('/_object_prop_this___number = php::toInt\(\(php::toBool\(cond\)\) \? \(source\.attr\(.+?\) : \(0L+\)\);/', $code);
+        $this->assertMatchesRegularExpression('/_object_prop_this___number = \(\(tmp_var_\d+\) \+ \(1L+\)\);/', $code);
+        $this->assertMatchesRegularExpression('/_object_prop_this___amount = \(\(tmp_var_\d+\) \+ \(0\.5\)\);/', $code);
+        $this->assertStringContainsString('_object_prop_this___number = -(source.attrInt(', $code);
+        $this->assertMatchesRegularExpression('/_object_prop_this___number = \(php::toBool\(cond\)\) \? \(source\.attrInt\(.+?\)\) : \(0L+\);/', $code);
         $this->assertMatchesRegularExpression('/_object_prop_this___number = php::toInt\(tmp_var_\d+\);/', $code);
     }
 

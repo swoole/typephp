@@ -1329,32 +1329,49 @@ trait PropertyAccessTrait
                 $def = $declared;
             }
         }
-        if ($property instanceof Node\Identifier) {
-            $scalarRead = $this->emitDeclaredScalarPropertyRead(
-                $expr,
-                $objectVar,
-                $objectName,
-                $this->parseIdentifier($property),
-                $def,
-                $update,
-            );
-            if ($scalarRead !== null) {
-                return $scalarRead;
+        // Resolve the declaration before the hoisting path runs. Without this,
+        // an ordinary variable receiver has no definition here and skips
+        // hoisting entirely, which turns a stable slot reference into a fresh
+        // offset lookup on every read. Only the scalar types the typed
+        // accessors can read are resolved here, so bool and string properties
+        // keep their previous lowering.
+        $scalarDef = $def;
+        if ($scalarDef === null && $property instanceof Node\Identifier) {
+            $declared = $this->findReadablePropertyDefinition($expr);
+            if ($declared !== null
+                && ($declared->type === Type::INT || $declared->type === Type::FLOAT)) {
+                $scalarDef = $declared;
             }
         }
-        if ($def && $this->usesNativeScalarStorage($def->type)) {
+        if ($scalarDef && $this->usesNativeScalarStorage($scalarDef->type)) {
             $propName = $this->parseIdentifier($property);
             $typedFetch = $this->emitNativeInstancePropertyTypedFetch(
                 $expr,
                 $objectVar,
                 $propName,
                 $id,
-                $def,
+                $scalarDef,
                 $getProperty,
             );
             if ($typedFetch !== null) {
-                $expr->setAttribute(self::ATTR_LOWERED_TYPE, $def->type);
+                $expr->setAttribute(self::ATTR_LOWERED_TYPE, $scalarDef->type);
                 return $typedFetch;
+            }
+        }
+        // Falls back after the hoisting path: a hoisted slot reference is
+        // cheaper than re-resolving the offset on every read, so the typed
+        // fetch must get the first chance to claim a stable receiver.
+        if ($property instanceof Node\Identifier) {
+            $scalarRead = $this->emitDeclaredScalarPropertyRead(
+                $expr,
+                $objectVar,
+                $objectName,
+                $this->parseIdentifier($property),
+                $scalarDef,
+                $update,
+            );
+            if ($scalarRead !== null) {
+                return $scalarRead;
             }
         }
         if ($def) {
@@ -1458,12 +1475,12 @@ trait PropertyAccessTrait
      * property is stored as a plain zval scalar, the typed accessor reads the
      * same slot without boxing, which removes that cost from hot loops.
      *
-     * The receiver must be an exact class so the persistent property offset
-     * cannot move when a subclass redeclares the property: `$this` in a final
-     * class, or a typed object variable whose declared class is final.
-     * Readonly properties keep the Zend initialization check, nullable
-     * properties may hold null (which the typed accessors reject), and hooks
-     * require their own lowering, so all three keep the existing path.
+     * The receiver's property offset must not move across the inheritance
+     * chain, which `isPropertyOffsetStable()` proves; both `$this` and typed
+     * object variables qualify. Readonly properties keep the Zend
+     * initialization check, nullable properties may hold null (which the typed
+     * accessors reject), and hooks require their own lowering, so all three
+     * keep the existing path.
      */
     private function emitDeclaredScalarPropertyRead(
         Expr\PropertyFetch $expr,
@@ -1480,7 +1497,6 @@ trait PropertyAccessTrait
             || $update
             || $def->isReadonly()
             || $def->nullable
-            || !$def->isPublic()
             || $def->isStatic()
             || $def->getter !== null
             || $def->setter !== null
@@ -1494,6 +1510,11 @@ trait PropertyAccessTrait
             return null;
         }
         if ($objectVar === 'this_') {
+            // A trait method compiles before it knows the using class, so the
+            // offset cannot be resolved for `$this` there.
+            if ($this->classDef?->trait) {
+                return null;
+            }
             $receiverClass = $this->getFullClassName();
         } elseif ($this->isTypedObject($objectName)) {
             // A proven runtime class does not imply object storage: a `mixed`
@@ -1508,7 +1529,7 @@ trait PropertyAccessTrait
         }
         if ($receiverClass === ''
             || $this->isNativeObjectClass($receiverClass)
-            || !$this->isFinalClass($receiverClass)) {
+            || !$this->isPropertyOffsetStable($receiverClass, $propName)) {
             return null;
         }
         $accessor = $def->type === Type::INT ? 'attrInt' : 'attrFloat';
@@ -1516,6 +1537,46 @@ trait PropertyAccessTrait
         $expr->setAttribute(self::ATTR_LOWERED_TYPE, $def->type);
         return $objectVar . '.' . $accessor
             . '(' . $this->getPropertyOffset($receiverClass, $propName) . ')';
+    }
+
+    /**
+     * Prove that `$class::$prop` keeps one zval slot for every subclass.
+     *
+     * Zend reuses the parent's slot when a child redeclares a non-private
+     * property, so the declaring class offset stays valid for subclass
+     * instances. A child that adds a property hook the parent does not have is
+     * the exception: Zend resets the parent slot to IS_UNDEF and moves the
+     * child to a fresh offset, which would make the parent offset read the
+     * wrong slot. Unknown classes stay on the Variant path.
+     */
+    private function isPropertyOffsetStable(string $class, string $prop): bool
+    {
+        if (!$this->hasClass($class)) {
+            return false;
+        }
+        if ($this->isFinalClass($class)) {
+            return true;
+        }
+        $pending = $this->classSubClasses[strtolower(ltrim($class, '\\'))] ?? [];
+        $visited = [];
+        while ($pending !== []) {
+            $sub = array_shift($pending);
+            if (isset($visited[$sub])) {
+                continue;
+            }
+            $visited[$sub] = true;
+            $subDef = $this->getClassDef($sub);
+            if ($subDef !== null && $subDef->hasProperty($prop)) {
+                $property = $subDef->getProperty($prop);
+                if ($property->getter !== null || $property->setter !== null || $property->virtual) {
+                    return false;
+                }
+            }
+            foreach ($this->classSubClasses[$sub] ?? [] as $grandChild) {
+                $pending[] = $grandChild;
+            }
+        }
+        return true;
     }
 
     private function emitNativeInstancePropertyTypedFetch(

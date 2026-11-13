@@ -1,5 +1,5 @@
 --TEST--
-non-final receivers keep the name-based read when a subclass redeclares the property
+a subclass redeclaring a scalar property reuses the parent slot
 --FILE--
 <?php
 class BaseScalarBox

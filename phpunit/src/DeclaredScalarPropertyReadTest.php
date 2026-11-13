@@ -45,7 +45,7 @@ class DeclaredScalarPropertyReadTest extends BaseTest
         $this->assertStringNotContainsString('attr(get_persistent_prop(', $code);
     }
 
-    public function testNonFinalReceiverKeepsVariantRead(): void
+    public function testNonFinalReceiverWithoutSubclassesUsesTypedOffsetRead(): void
     {
         try {
             $outputFile = $this->compileCode('declared-scalar-property-read-open.php');
@@ -54,9 +54,49 @@ class DeclaredScalarPropertyReadTest extends BaseTest
         }
 
         $code = file_get_contents($outputFile);
+        $this->assertStringContainsString('attrInt(get_persistent_prop(', $code);
+        $this->assertStringNotContainsString('attr(get_persistent_prop(', $code);
+    }
+
+    public function testSubclassRedeclaringThePropertyKeepsTypedOffsetRead(): void
+    {
+        try {
+            $outputFile = $this->compileCode('declared-scalar-property-read-subclass.php');
+        } catch (TestError $e) {
+            $this->fail($e->getMessage());
+        }
+
+        $code = file_get_contents($outputFile);
+        $this->assertStringContainsString('attrInt(get_persistent_prop(', $code);
+        $this->assertStringNotContainsString('attr(get_persistent_prop(', $code);
+    }
+
+    public function testSubclassAddingAPropertyHookFallsBackToVariantRead(): void
+    {
+        try {
+            $outputFile = $this->compileCode('declared-scalar-property-read-hooked-subclass.php');
+        } catch (TestError $e) {
+            $this->fail($e->getMessage());
+        }
+
+        $code = file_get_contents($outputFile);
         $this->assertStringContainsString('attr(get_persistent_prop(', $code);
         $this->assertStringNotContainsString('attrInt(get_persistent_prop(', $code);
-        $this->assertStringNotContainsString('attrFloat(get_persistent_prop(', $code);
+    }
+
+    public function testLoopReadHoistsBeforeTheTypedOffsetFallback(): void
+    {
+        try {
+            $outputFile = $this->compileCode('declared-scalar-property-read-loop.php');
+        } catch (TestError $e) {
+            $this->fail($e->getMessage());
+        }
+
+        $code = file_get_contents($outputFile);
+        $this->assertStringContainsString(
+            'php::Int &_object_prop_this___count = this_.attrInt(',
+            $code
+        );
     }
 
     public function testNullablePropertyKeepsVariantRead(): void

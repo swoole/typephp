@@ -2,6 +2,8 @@
 
 This tutorial comprehensively introduces the AOT compiler's **Universal Methods** system—a mechanism for zero-overhead method calls on native types using the `$value->method()` syntax.
 
+> ⚠️ **Compiler hard dependency**: the TypePHP compiler depends strongly on the keyword methods such as `toArray`, `toInt` and `toFloat`. The type system can only be established through these methods, so they are built into the compiler and **cannot be overridden or replaced at the PHP code level**. For example, when the compiler sees `toArray()` it knows the expression is always `php::Array`; if user PHP code could override it, the result type would become unknown.
+
 ## Table of Contents
 
 1. [What Are Universal Methods](#1-what-are-universal-methods)

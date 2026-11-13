@@ -218,7 +218,7 @@ trait ExceptionControlFlowTrait
             if ($this->isNameExpr($type) or $this->isFullNameExpr($type)) {
                 $class = $this->getNamespacedClassName($this->parseIdentifier($type));
                 $ce = $this->getClassEntryPtr($class);
-                $conditions[] = Symbol::instanceOf() . '(' . $exVar . ', ' . $ce . ')';
+                $conditions[] = Symbol::instanceOf_() . '(' . $exVar . ', ' . $ce . ')';
             } else {
                 $this->fatalError($type, 'Unsupported catch type');
             }

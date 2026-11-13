@@ -8,6 +8,18 @@ use TypePhp\Type;
 
 final class ObjectInstanceofMethodTest extends BaseTest
 {
+    public function testCompilerSymbolClassCanBeCompiledWithTheReservedKeyword(): void
+    {
+        global $translator;
+        $compiler = CompilerTest::create(TYPEPHP_ROOT_PATH);
+        $translator = $compiler;
+        $file = TYPEPHP_ROOT_PATH . '/src/Generator/Symbol.php';
+        $compiler->addFiles([$file]);
+        $compiler->prepareFile($file);
+        $code = file_get_contents($compiler->convertFile($file));
+        self::assertStringContainsString('php_typephp__generator__symbol__instanceof_(', $code);
+    }
+
     public function testObjectReceiversUseTheOperatorAndPreserveNativeBranchRefinement(): void
     {
         global $translator;

@@ -25,7 +25,7 @@ class Symbol
         return 'php::setStaticProperty';
     }
 
-    public static function instanceOf(): string
+    public static function instanceOf_(): string
     {
         return 'php::instanceOf';
     }

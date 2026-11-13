@@ -19,7 +19,7 @@ class SymbolTest extends TestCase
 
     public function testInstanceOf(): void
     {
-        $this->assertEquals('php::instanceOf', Symbol::instanceOf());
+        $this->assertEquals('php::instanceOf', Symbol::instanceOf_());
     }
 
     public function testConcat(): void

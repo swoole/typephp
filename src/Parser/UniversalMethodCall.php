@@ -348,14 +348,35 @@ trait UniversalMethodCall
         ],
     ];
 
+    /** @var array<string, string>|null Lowercase method name => declared spelling. */
+    private static ?array $universalMethodNames = null;
+
+    /**
+     * PHP method names are case-insensitive, so builtin universal methods are
+     * looked up by their canonical spelling. No two builtin tables spell the
+     * same name differently.
+     */
+    protected function canonicalUniversalMethodName(string $method): string
+    {
+        if (self::$universalMethodNames === null) {
+            self::$universalMethodNames = [];
+            foreach (self::UNIVERSAL_METHODS as $methods) {
+                foreach (array_keys($methods) as $name) {
+                    self::$universalMethodNames[strtolower($name)] = $name;
+                }
+            }
+        }
+        return self::$universalMethodNames[strtolower($method)] ?? $method;
+    }
+
     protected function isUniversalMethodMutating(string $type, string $method): bool
     {
-        return isset(self::UNIVERSAL_MUTATING_METHODS[$type][$method]);
+        return isset(self::UNIVERSAL_MUTATING_METHODS[$type][$this->canonicalUniversalMethodName($method)]);
     }
 
     protected function detectUniversalMethodReturnType(string $type, string $method): ?string
     {
-        $builtin = self::UNIVERSAL_METHODS[$type][$method]['return_type'] ?? null;
+        $builtin = self::UNIVERSAL_METHODS[$type][$this->canonicalUniversalMethodName($method)]['return_type'] ?? null;
         if ($builtin !== null) {
             return $builtin;
         }
@@ -485,7 +506,7 @@ trait UniversalMethodCall
 
     protected function findUniversalMethodAnyType(string $type, string $method): ?array
     {
-        $builtin = self::UNIVERSAL_METHODS[$type][$method] ?? null;
+        $builtin = self::UNIVERSAL_METHODS[$type][$this->canonicalUniversalMethodName($method)] ?? null;
         if ($builtin !== null) {
             return $builtin;
         }
@@ -628,6 +649,9 @@ trait UniversalMethodCall
      */
     protected function parseUniversalMethodCall(Node\Expr\MethodCall $expr, string $receiver, string $method, array $def, bool $isVar = true): ?string
     {
+        if ($def['handler'] !== 'provider_extension') {
+            $method = $this->canonicalUniversalMethodName($method);
+        }
         if ($this->getTypedArrayDefinition($expr->var) !== null
             && in_array($def['handler'], ['php_fn_ref', 'direct_method_mutate', 'provider_extension'], true)) {
             $this->fatalError($expr, 'Typed arrays cannot use untyped mutating or extension methods');
@@ -716,6 +740,9 @@ trait UniversalMethodCall
      */
     protected function genStreamNullGuard(Node\Expr\MethodCall $expr, string $receiver, string $method, array $def): string
     {
+        if ($def['handler'] !== 'provider_extension') {
+            $method = $this->canonicalUniversalMethodName($method);
+        }
         $this->validateUniversalMethodArgs($expr, $method, $def, false);
         $args = $this->normalizeUniversalNamedArgs($expr, $method, $def);
 

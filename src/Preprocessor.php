@@ -44,6 +44,7 @@ use PhpParser\NodeAbstract;
 use PhpParser\NodeFinder;
 use PhpParser\NodeTraverser;
 use PhpParser\NodeVisitor\NameResolver;
+use TypePhp\Transform\KeywordMethodNameNormalizer;
 
 abstract class Preprocessor extends CompilerBase
 {
@@ -479,6 +480,7 @@ abstract class Preprocessor extends CompilerBase
 
             $traverser = new NodeTraverser();
             $traverser->addVisitor(new NameResolver(null, ['replaceNodes' => false]));
+            $traverser->addVisitor(new KeywordMethodNameNormalizer());
             if ($this->isNanoPolicyMode()) {
                 $traverser->addVisitor(new NanoSyntaxValidationVisitor(
                     fn (Node $node, string $message) => $this->fatalError($node, $message),

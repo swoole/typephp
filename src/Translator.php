@@ -20,6 +20,7 @@ use PhpParser\NodeAbstract;
 use PhpParser\NodeTraverser;
 use PhpParser\NodeVisitor\CloningVisitor;
 use PhpParser\NodeVisitor\NameResolver;
+use TypePhp\Transform\KeywordMethodNameNormalizer;
 use TypePhp\Analysis\CompilationStatistics;
 use TypePhp\Analysis\LocalClosureAnalyzer;
 use TypePhp\Analysis\NativeObjectStackPromotionAnalyzer;
@@ -4949,6 +4950,7 @@ CODE;
         $ast = $this->getAstCache()->load($this->file, $phpCode);
         $traverser = new NodeTraverser();
         $traverser->addVisitor(new NameResolver(null, ['replaceNodes' => false]));
+        $traverser->addVisitor(new KeywordMethodNameNormalizer());
         if ($this->isNanoPolicyMode()) {
             $traverser->addVisitor(new NanoSyntaxValidationVisitor(
                 fn (Node $node, string $message) => $this->fatalError($node, $message),

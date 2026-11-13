@@ -2,7 +2,7 @@
 Native int div()/mod() by zero and INT_MIN by -1 raise SIGFPE; float division yields INF/NAN
 --SKIPIF--
 <?php
-if (!function_exists('pcntl_fork')) exit("skip pcntl extension not loaded");
+if (PHP_OS_FAMILY === 'Windows') exit("skip POSIX shell required");
 ?>
 --FILE--
 <?php
@@ -16,44 +16,42 @@ function modulo(int $a, int $b): int
     return $a->mod($b);
 }
 
-function run_case(int $kind, int $a, int $b): void
-{
-    $pid = pcntl_fork();
-    if ($pid === 0) {
-        if ($kind === 0) {
-            divide($a, $b);
-        } else {
-            modulo($a, $b);
-        }
-        exit(0);
-    }
-    pcntl_waitpid($pid, $status);
-    if (pcntl_wifsignaled($status)) {
-        echo "signal ", pcntl_wtermsig($status) === SIGFPE ? "SIGFPE" : "other", "\n";
-    } else {
-        echo "exit ", pcntl_wexitstatus($status), "\n";
-    }
-}
-
 function float_div(float $a, float $b): float
 {
     return $a->div($b);
 }
 
-function main(): void
+// The shell reports a process killed by signal N as exit status 128 + N.
+function run_child(string $self, string $kind, int $a, int $b): void
 {
-    run_case(0, 10, 2);
-    run_case(0, 10, 0);
-    run_case(1, 10, 0);
-    run_case(0, PHP_INT_MIN, -1);
+    $command = escapeshellarg($self) . " $kind $a $b >/dev/null 2>&1; echo \$?";
+    echo $kind, " ", trim((string) shell_exec('sh -c ' . escapeshellarg($command))), "\n";
+}
+
+function main(int $argc, array $argv): void
+{
+    if ($argc > 1) {
+        $a = (int) $argv[2];
+        $b = (int) $argv[3];
+        if ($argv[1] === 'div') {
+            divide($a, $b);
+        } else {
+            modulo($a, $b);
+        }
+        return;
+    }
+    run_child($argv[0], 'div', 10, 2);
+    run_child($argv[0], 'div', 10, 0);
+    run_child($argv[0], 'mod', 10, 0);
+    run_child($argv[0], 'div', PHP_INT_MIN, -1);
     var_dump(float_div(1.0, 0.0), float_div(-1.0, 0.0), is_nan(float_div(0.0, 0.0)));
 }
 ?>
 --EXPECT--
-exit 0
-signal SIGFPE
-signal SIGFPE
-signal SIGFPE
+div 0
+div 136
+mod 136
+div 136
 float(INF)
 float(-INF)
 bool(true)

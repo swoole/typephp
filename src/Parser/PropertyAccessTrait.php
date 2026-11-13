@@ -1329,6 +1329,19 @@ trait PropertyAccessTrait
                 $def = $declared;
             }
         }
+        if ($property instanceof Node\Identifier) {
+            $scalarRead = $this->emitDeclaredScalarPropertyRead(
+                $expr,
+                $objectVar,
+                $objectName,
+                $this->parseIdentifier($property),
+                $def,
+                $update,
+            );
+            if ($scalarRead !== null) {
+                return $scalarRead;
+            }
+        }
         if ($def && $this->usesNativeScalarStorage($def->type)) {
             $propName = $this->parseIdentifier($property);
             $typedFetch = $this->emitNativeInstancePropertyTypedFetch(
@@ -1435,6 +1448,68 @@ trait PropertyAccessTrait
     {
         $call = new Expr\MethodCall($expr->var, $setter, [new Node\Arg($value)], $expr->getAttributes());
         return $this->parseMethodCall($call);
+    }
+
+    /**
+     * Lower a read of a declared scalar property to its zval slot.
+     *
+     * `attr(offset, AttrMode::Get)` materializes a Variant for every read,
+     * including the refcount traffic and the temporary that follows. When the
+     * property is stored as a plain zval scalar, the typed accessor reads the
+     * same slot without boxing, which removes that cost from hot loops.
+     *
+     * The receiver must be an exact class so the persistent property offset
+     * cannot move when a subclass redeclares the property: `$this` in a final
+     * class, or a typed object variable whose declared class is final.
+     * Readonly properties keep the Zend initialization check, nullable
+     * properties may hold null (which the typed accessors reject), and hooks
+     * require their own lowering, so all three keep the existing path.
+     */
+    private function emitDeclaredScalarPropertyRead(
+        Expr\PropertyFetch $expr,
+        string $objectVar,
+        string $objectName,
+        string $propName,
+        ?PropertyDef $def,
+        bool $update,
+    ): ?string {
+        if ($def === null) {
+            $def = $this->findReadablePropertyDefinition($expr);
+        }
+        if ($def === null
+            || $update
+            || $def->isReadonly()
+            || $def->nullable
+            || !$def->isPublic()
+            || $def->isStatic()
+            || $def->getter !== null
+            || $def->setter !== null
+            || $def->virtual) {
+            return null;
+        }
+        if ($def->type !== Type::INT && $def->type !== Type::FLOAT) {
+            return null;
+        }
+        if (!$this->usesNativeScalarStorage($def->type)) {
+            return null;
+        }
+        if ($objectVar === 'this_') {
+            $receiverClass = $this->getFullClassName();
+        } elseif ($this->isTypedObject($objectName)) {
+            $receiverClass = $this->getObjectType($objectName);
+        } else {
+            return null;
+        }
+        if ($receiverClass === ''
+            || $this->isNativeObjectClass($receiverClass)
+            || !$this->isFinalClass($receiverClass)) {
+            return null;
+        }
+        $accessor = $def->type === Type::INT ? 'attrInt' : 'attrFloat';
+        $this->setNativePropertyValueSource($expr, self::NATIVE_PROPERTY_VALUE_VAR);
+        $expr->setAttribute(self::ATTR_LOWERED_TYPE, $def->type);
+        return $objectVar . '.' . $accessor
+            . '(' . $this->getPropertyOffset($receiverClass, $propName) . ')';
     }
 
     private function emitNativeInstancePropertyTypedFetch(

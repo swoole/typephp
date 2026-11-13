@@ -1,5 +1,35 @@
 # TypePHP change log
 
+## 0.10.0
+
+### Keyword methods can be implemented by classes (type contract fixed)
+
+Starting with 0.10.0, method precedence changed: TypePHP-compiled classes, traits and interfaces may now declare `toInt()`,
+`toFloat()`, `toString()`, `toBool()` and `toArray()`. Previously the keyword
+methods were fully built in: a same-named method was silently ignored for
+`toInt`/`toFloat`/`toString`/`toBool`, and only `toArray` was validated.
+
+The contract can never change, because the type system depends on it (for
+example `toArray()` is always `php::Array`). The declaration must be `public`,
+non-static, take no parameters and return exactly the keyword's type, not
+nullable and not by reference; otherwise compilation fails (this now also
+covers interfaces and Native classes for all five names, and the check is
+case-insensitive). When the receiver's static class declares such a method,
+the call is an ordinary method call and takes precedence over the built-in
+conversion. For `toString()` the order is `toString()`, `__toString()`, then
+the default conversion.
+
+Dynamic object method dispatch (`mixed` receivers) is still undecided and under discussion.
+
+Limits: only TypePHP-compiled classes are considered. `mixed` receivers, `null`
+and PHP-internal classes keep the default conversion; `toAny`, `toRef`,
+`toObject`, `instanceOf`, `toStdList`, `toStdDict`, `toStream`, `toBigInt`,
+`toBigFloat` and `toDecimal` stay reserved. Code that already declared one of
+the five names with a different signature must now match the keyword contract
+or rename the method.
+
+---
+
 ## 0.8.0
 
 ### Breaking: native scalar storage is now the default
@@ -86,36 +116,36 @@ call argument wrapper. `toRef()` remains the equivalent keyword method.
 
 All projects using the old spellings must update their source and rebuild.
 
-### Keyword methods can be implemented by classes (type contract fixed)
-
-TypePHP-compiled classes, traits and interfaces may now declare `toInt()`,
-`toFloat()`, `toString()`, `toBool()` and `toArray()`. Previously the keyword
-methods were fully built in: a same-named method was silently ignored for
-`toInt`/`toFloat`/`toString`/`toBool`, and only `toArray` was validated.
-
-The contract can never change, because the type system depends on it (for
-example `toArray()` is always `php::Array`). The declaration must be `public`,
-non-static, take no parameters and return exactly the keyword's type, not
-nullable and not by reference; otherwise compilation fails (this now also
-covers interfaces and Native classes for all five names, and the check is
-case-insensitive). When the receiver's static class declares such a method,
-the call is an ordinary method call and takes precedence over the built-in
-conversion. For `toString()` the order is `toString()`, `__toString()`, then
-the default conversion.
-
-Limits: only TypePHP-compiled classes are considered. `mixed` receivers, `null`
-and PHP-internal classes keep the default conversion; `toAny`, `toRef`,
-`toObject`, `instanceOf`, `toStdList`, `toStdDict`, `toStream`, `toBigInt`,
-`toBigFloat` and `toDecimal` stay reserved. Code that already declared one of
-the five names with a different signature must now match the keyword contract
-or rename the method.
-
 ### Compatibility policy before 1.0
 
 TypePHP is still pre-1.0 software. Public compiler APIs, TypePHP-specific source
 syntax, generated-code interfaces, configuration, and packaging may change
 between minor releases. Breaking changes will be documented here, but users
 should review the change log and run their full test suite before upgrading.
+
+---
+
+## 0.10.0（中文）
+
+### 关键词方法可由 class 自行实现（类型契约固定）
+
+从 0.10.0 起调整了方法优先级：由 TypePHP 编译的 class、trait、interface 现在可以声明 `toInt()`、`toFloat()`、
+`toString()`、`toBool()`、`toArray()`。此前关键词方法完全内置：`toInt`/`toFloat`/
+`toString`/`toBool` 的同名方法会被静默忽略，只有 `toArray` 会被校验。
+
+类型契约不可更改，因为类型系统依赖它（例如 `toArray()` 一定是 `php::Array`）。
+声明必须是 `public`、非 static、无参数，且返回类型与关键词完全一致，不可为
+nullable、不可按引用返回，否则编译报错（现在这五个名称对 interface 和 Native
+class 也同样校验，且不区分大小写）。当接收者的静态类声明了此类方法时，调用按普通
+方法处理，优先于内置转换。`toString()` 的顺序为 `toString()`、`__toString()`、
+默认转换。
+
+动态对象方法调用（`mixed` 接收者）暂无方案，仍在讨论中。
+
+限制：仅考虑由 TypePHP 编译的 class；`mixed` 接收者、`null` 和 PHP 内置类仍使用
+默认转换；`toAny`、`toRef`、`toObject`、`instanceOf`、`toStdList`、`toStdDict`、
+`toStream`、`toBigInt`、`toBigFloat`、`toDecimal` 仍为保留名。已用不同签名声明这五个
+名称的代码，需改为符合关键词契约或重命名。
 
 ---
 
@@ -188,24 +218,6 @@ TypePHP 不在全局命名空间安装兼容函数。应用可以自行定义并
 调用参数包装器使用。`toRef()` 仍是等价的关键词方法。
 
 使用旧写法的项目必须修改源码并重新编译。
-
-### 关键词方法可由 class 自行实现（类型契约固定）
-
-由 TypePHP 编译的 class、trait、interface 现在可以声明 `toInt()`、`toFloat()`、
-`toString()`、`toBool()`、`toArray()`。此前关键词方法完全内置：`toInt`/`toFloat`/
-`toString`/`toBool` 的同名方法会被静默忽略，只有 `toArray` 会被校验。
-
-类型契约不可更改，因为类型系统依赖它（例如 `toArray()` 一定是 `php::Array`）。
-声明必须是 `public`、非 static、无参数，且返回类型与关键词完全一致，不可为
-nullable、不可按引用返回，否则编译报错（现在这五个名称对 interface 和 Native
-class 也同样校验，且不区分大小写）。当接收者的静态类声明了此类方法时，调用按普通
-方法处理，优先于内置转换。`toString()` 的顺序为 `toString()`、`__toString()`、
-默认转换。
-
-限制：仅考虑由 TypePHP 编译的 class；`mixed` 接收者、`null` 和 PHP 内置类仍使用
-默认转换；`toAny`、`toRef`、`toObject`、`instanceOf`、`toStdList`、`toStdDict`、
-`toStream`、`toBigInt`、`toBigFloat`、`toDecimal` 仍为保留名。已用不同签名声明这五个
-名称的代码，需改为符合关键词契约或重命名。
 
 ### 1.0 之前的兼容性策略
 

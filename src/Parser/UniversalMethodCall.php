@@ -531,6 +531,7 @@ trait UniversalMethodCall
         string $class,
         string $method,
         bool $receiverIsDefinitelyObject,
+        ?Node $site = null,
     ): ?array {
         $class = ltrim($class, '\\');
         if ($class !== '' && $this->objectTypeDeclaresMethod($class, $method)) {
@@ -548,6 +549,9 @@ trait UniversalMethodCall
 
             $extension = $this->findProviderExtension($current, $method);
             if ($extension !== null) {
+                if ($site !== null) {
+                    $this->warnSubClassDeclaresMethod($site, $class, $method);
+                }
                 return $extension;
             }
 
@@ -564,6 +568,35 @@ trait UniversalMethodCall
         return $receiverIsDefinitelyObject
             ? $this->findProviderExtension(Type::OBJECT, $method)
             : null;
+    }
+
+    /**
+     * Extension methods are bound to the receiver's static class and win over
+     * same-named methods of subclasses. That is easy to misread, so warn.
+     */
+    private function warnSubClassDeclaresMethod(Node $site, string $class, string $method): void
+    {
+        $visited = [];
+        $stack = $this->classSubClasses[strtolower($class)] ?? [];
+        while ($stack !== []) {
+            $subClass = array_shift($stack);
+            if (isset($visited[$subClass])) {
+                continue;
+            }
+            $visited[$subClass] = true;
+            $classDef = $this->getClassDef($subClass);
+            if ($classDef !== null && $classDef->hasMethod($method)) {
+                $this->warning(
+                    $site,
+                    "Extension method {$class}::{$method}() is bound to the static type and is called instead of "
+                    . "{$classDef->getNamespacedName(false)}::{$method}()",
+                );
+                return;
+            }
+            foreach ($this->classSubClasses[$subClass] ?? [] as $child) {
+                $stack[] = $child;
+            }
+        }
     }
 
     private function objectTypeDeclaresMethod(string $class, string $method): bool
@@ -746,6 +779,9 @@ trait UniversalMethodCall
     {
         $nativeFunc = $definition['fn'];
         $tail = $this->parseNativeCallArgs($args, $nativeFunc, 1);
+        if (isset($definition['null_guard'])) {
+            $receiver = 'typephp_object_receiver(' . $receiver . ', "' . addcslashes($definition['null_guard'], '"\\') . '")';
+        }
         return self::PREFIX . $nativeFunc . '(' . $this->getCeWrapper($definition['class']) . ', '
             . $receiver . ($tail === '' ? '' : ', ' . $tail) . ')';
     }

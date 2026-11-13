@@ -122,4 +122,32 @@ class UniversalMethodCallTest extends \BaseTest
     {
         $this->exec('Method name `toBigInt()` is reserved for a TypePHP keyword method', 'keyword-method-reserved-name.php');
     }
+
+    public function testExtensionMethodWarnsWhenSubclassDeclaresRealMethod(): void
+    {
+        global $translator;
+        $compiler = \TypePhp\CompilerTest::create(TYPEPHP_ROOT_PATH);
+        $translator = $compiler;
+        $reporter = new class implements \TypePhp\Diagnostics\DiagnosticReporter {
+            public array $warnings = [];
+
+            public function fatal(string $message): never
+            {
+                throw new \TypePhp\Exception\TestError($message);
+            }
+
+            public function warning(\PhpParser\Node $node, string $file, string $message): void
+            {
+                $this->warnings[] = $message;
+            }
+        };
+        $compiler->setDiagnosticReporter($reporter);
+        $source = TYPEPHP_ROOT_PATH . '/phpunit/code/universal-method-subclass-conflict.php';
+        $compiler->addFiles([$source]);
+        $compiler->prepareFile($source);
+        $compiler->convertFile($source);
+
+        self::assertCount(1, $reporter->warnings);
+        self::assertStringContainsString('is called instead of ExtChild::shout()', $reporter->warnings[0]);
+    }
 }

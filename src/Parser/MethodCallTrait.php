@@ -1021,9 +1021,10 @@ trait MethodCallTrait
                     $class,
                     $methodName,
                     $this->isDefinitelyObjectReceiver($expr->var, $object, $class, $type),
+                    $expr,
                 );
                 if ($extension !== null) {
-                    return $this->parseUniversalMethodCall($expr, $object, $methodName, $extension);
+                    return $this->parseUniversalMethodCall($expr, $object, $methodName, $this->guardExtensionReceiver($extension, $expr->var, $methodName));
                 }
                 try {
                     $directMagicCall = $this->parseDirectNativeMagicCall($expr, $object, $class, $method);
@@ -1043,9 +1044,10 @@ trait MethodCallTrait
                     $class,
                     $methodName,
                     $this->isDefinitelyObjectReceiver($expr->var, $object, $class, $type),
+                    $expr,
                 );
                 if ($extension !== null) {
-                    return $this->parseUniversalMethodCall($expr, $object, $methodName, $extension);
+                    return $this->parseUniversalMethodCall($expr, $object, $methodName, $this->guardExtensionReceiver($extension, $expr->var, $methodName));
                 }
             }
         }
@@ -1077,9 +1079,10 @@ trait MethodCallTrait
                 $extensionClass,
                 $methodName,
                 $this->isDefinitelyObjectReceiver($expr->var, $object, $extensionClass, $type),
+                $expr,
             );
             if ($extension !== null) {
-                return $this->parseUniversalMethodCall($expr, $object, $methodName, $extension, false);
+                return $this->parseUniversalMethodCall($expr, $object, $methodName, $this->guardExtensionReceiver($extension, $expr->var, $methodName), false);
             }
         }
 
@@ -1292,6 +1295,23 @@ trait MethodCallTrait
         return '(EXPECTED(' . $object . '.isObject() && ' . $object . '.ce() == ' . $ce
             . ' && !zend_object_is_lazy(' . $object . '.object()))'
             . ' ? ' . $direct . ' : ' . $fallback . ')';
+    }
+
+    /**
+     * Static types cannot prove an object receiver is non-null: a local may
+     * have been assigned null on some path. Mark the extension call so the
+     * receiver is checked at runtime, matching PHP's member-call-on-null Error.
+     */
+    private function guardExtensionReceiver(array $extension, Expr $receiver, string $method): array
+    {
+        if ($extension['handler'] !== 'provider_extension' || $receiver instanceof Expr\New_) {
+            return $extension;
+        }
+        if ($this->isVarExpr($receiver) && $this->parseIdentifier($receiver) === 'this_') {
+            return $extension;
+        }
+        $extension['null_guard'] = $method;
+        return $extension;
     }
 
     private function isDefinitelyObjectReceiver(

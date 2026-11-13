@@ -460,11 +460,11 @@ class ClassTest extends \BaseTest
         );
         $this->assertStringContainsString('php_hierarchybasemethods__inheritedextension(', $cpp);
         $this->assertMatchesRegularExpression(
-            '/php_hierarchychildmethods__nearestextension\([^,\n]+, child\)/',
+            '/php_hierarchychildmethods__nearestextension\([^,\n]+, typephp_object_receiver\(child, "[^"]+"\)\)/',
             $cpp,
         );
         $this->assertMatchesRegularExpression(
-            '/php_hierarchybasemethods__nearestextension\([^,\n]+, base\)/',
+            '/php_hierarchybasemethods__nearestextension\([^,\n]+, typephp_object_receiver\(base, "[^"]+"\)\)/',
             $cpp,
         );
         $this->assertSame(

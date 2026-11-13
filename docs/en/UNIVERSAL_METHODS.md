@@ -96,9 +96,13 @@ example `$s->replace(replace: '+', search: '-')` or `$s->pad(8, pad_type: STR_PA
 - Operands are still evaluated in source order, as in PHP.
 - Argument unpacking (`...$args`) and named arguments on other handlers are compile errors.
 
+### 2.4 Extension methods are bound to the static type
+
+A `MethodsFor` extension is chosen from the receiver's declared class. If a compiled subclass declares a real method with the same name, the extension is still called, and the compiler emits a warning because it bypasses that subclass method. Subclasses loaded at runtime are not detected.
+
 ---
 
-## 3. Supported Types Overview
+# 3. Supported Types Overview
 
 | Type | Method Count | Main Categories |
 |------|---------|---------|

@@ -23,6 +23,10 @@ For `mixed`/`any`/`object` receivers, `toInt`/`toFloat`/`toString`/`toBool` chec
 
 `php::toArray()` uses the same shared signature check. The names `toStream`, `toBigInt`, `toBigFloat`, `toDecimal`, `toObject`, `toStdList` and `toStdDict` can no longer be declared by ordinary classes (compile error; Native classes keep their explicit conversion methods). A class loaded at runtime that declares them is silently ignored by the dynamic path.
 
+Extension methods (`MethodsFor`) are bound to the receiver's static class. If a compiled subclass declares a real method with the same name, the extension is still called (as before), but the compiler now emits a warning because this is easy to misread. Subclasses loaded at runtime are not detected.
+
+Object extension calls now check the receiver at runtime (except `$this` and `new`): a null receiver throws PHP's `Call to a member function x() on null` Error instead of passing null to the extension.
+
 `toAny`, `toRef` and `instanceOf` stay reserved as before. Code that already declared one of the five customizable names with a different signature must now match the keyword contract or rename the method.
 
 ---
@@ -140,6 +144,10 @@ class 也同样校验，且不区分大小写）。当接收者的静态类声�
 对 `mixed`/`any`/`object` 接收者，`toInt`/`toFloat`/`toString`/`toBool` 在运行时检查（phpx 新增 `typephp_keyword_to_*`）：仅当对象的类声明了同名方法才调用并校验签名；其他值（含 `null`）仍直接走 Zend 转换。`php::toInt()` 及 `(int)$obj` 等强制转换不变。
 
 `php::toArray()` 与其共用同一段签名检查。`toStream`、`toBigInt`、`toBigFloat`、`toDecimal`、`toObject`、`toStdList`、`toStdDict` 现在不允许普通 class 声明（编译报错；Native class 的显式转换方法不受影响）；运行时加载的类若声明了这些名称，动态路径会静默忽略。
+
+扩展方法（`MethodsFor`）按接收者的静态类绑定。若已编译的子类声明了同名真实方法，仍调用扩展方法（与之前一致），但编译器现在会给出警告，避免误解。运行时才加载的子类不会被检测。
+
+对象扩展方法调用现在会在运行时检查接收者（`$this` 与 `new` 除外）：接收者为 null 时抛出 PHP 的 `Call to a member function x() on null` Error，而不是把 null 传给扩展方法。
 
 `toAny`、`toRef`、`instanceOf` 仍为保留名。已用不同签名声明这五个可自定义名称的代码，需改为符合关键词契约或重命名。
 

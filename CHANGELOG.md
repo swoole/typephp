@@ -27,6 +27,10 @@ Extension methods (`MethodsFor`) are bound to the receiver's static class. If a 
 
 Object extension calls now check the receiver at runtime (except `$this` and `new`): a null receiver throws PHP's `Call to a member function x() on null` Error instead of passing null to the extension.
 
+String/stream/array methods whose PHP function may return `false` (`base64Decode`, `mbDetectEncoding`, `mbConvertEncoding`, `jsonEncode`, and the stream `write/read/stat/tell/getChar/getLine/getContents/copy/getSocketName/recvFrom/sendTo/getRecord`) now throw a `TypeError` instead of silently coercing `false` (new phpx `php::toExactString/Int/Array()`). `STREAM::enableCrypto()` now returns `var` (`true`, `false` or `0`) instead of a misleading `int`.
+
+`int`/`float` `add/sub/mul/div/mod()`, `max()`, `min()`, `abs()` and (for `float`) `pow()` are now native: the result has the receiver's type (PHP's functions may return the other numeric type) and the argument must have that type (`float` also accepts `int`); `int` `abs(PHP_INT_MIN)` wraps like C++. A `var` argument is checked at runtime (new phpx `php::toExactInt/Float()`) and throws a `TypeError` instead of being coerced; strings are rejected at compile time. `jsonDecodeToObject()` throws a `TypeError` unless the decoded value is an object (new phpx `php::toExactObject()`).
+
 `toAny`, `toRef` and `instanceOf` stay reserved as before. Code that already declared one of the five customizable names with a different signature must now match the keyword contract or rename the method.
 
 ---
@@ -148,6 +152,10 @@ class 也同样校验，且不区分大小写）。当接收者的静态类声�
 扩展方法（`MethodsFor`）按接收者的静态类绑定。若已编译的子类声明了同名真实方法，仍调用扩展方法（与之前一致），但编译器现在会给出警告，避免误解。运行时才加载的子类不会被检测。
 
 对象扩展方法调用现在会在运行时检查接收者（`$this` 与 `new` 除外）：接收者为 null 时抛出 PHP 的 `Call to a member function x() on null` Error，而不是把 null 传给扩展方法。
+
+PHP 函数可能返回 `false` 的字符串/流/数组方法（`base64Decode`、`mbDetectEncoding`、`mbConvertEncoding`、`jsonEncode`，以及流的 `write/read/stat/tell/getChar/getLine/getContents/copy/getSocketName/recvFrom/sendTo/getRecord`）现在抛出 `TypeError`，不再静默转换 `false`（phpx 新增 `php::toExactString/Int/Array()`）。 `STREAM::enableCrypto()` 的返回类型改为 `var`（`true`、`false` 或 `0`），不再误报为 `int`。
+
+`int`/`float` 的 `add/sub/mul/div/mod()`、`max()`、`min()`、`abs()` 以及 `float` 的 `pow()` 现为原生实现：结果类型与接收者一致（PHP 函数可能返回另一种数值类型），参数必须是同类型（`float` 也接受 `int`）；`int` 的 `abs(PHP_INT_MIN)` 与 C++ 一样回绕。`var` 参数在运行时检查（phpx 新增 `php::toExactInt/Float()`），类型不符抛出 `TypeError`，不做转换；字符串在编译期报错。`jsonDecodeToObject()` 在解码结果不是对象时抛出 `TypeError`（phpx 新增 `php::toExactObject()`）。
 
 `toAny`、`toRef`、`instanceOf` 仍为保留名。已用不同签名声明这五个可自定义名称的代码，需改为符合关键词契约或重命名。
 

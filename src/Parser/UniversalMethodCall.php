@@ -18,15 +18,15 @@ trait UniversalMethodCall
     private ?array $methodsForRegistry = null;
     protected const array UNIVERSAL_METHODS = [
         Type::INT => [
-            'add'      => ['handler' => 'calc_op', 'op' => '+', 'return_type' => Type::INT, 'min_args' => 1, 'max_args' => 1],
-            'sub'      => ['handler' => 'calc_op', 'op' => '-', 'return_type' => Type::INT, 'min_args' => 1, 'max_args' => 1],
-            'mul'      => ['handler' => 'calc_op', 'op' => '*', 'return_type' => Type::INT, 'min_args' => 1, 'max_args' => 1],
-            'div'      => ['handler' => 'calc_op', 'op' => '/', 'return_type' => Type::INT, 'min_args' => 1, 'max_args' => 1],
-            'mod'      => ['handler' => 'calc_op', 'op' => '%', 'return_type' => Type::INT, 'min_args' => 1, 'max_args' => 1],
+            'add'      => ['handler' => 'calc_op', 'op' => '+', 'return_type' => Type::INT, 'min_args' => 1, 'max_args' => 1, 'arg_types' => [Type::INT]],
+            'sub'      => ['handler' => 'calc_op', 'op' => '-', 'return_type' => Type::INT, 'min_args' => 1, 'max_args' => 1, 'arg_types' => [Type::INT]],
+            'mul'      => ['handler' => 'calc_op', 'op' => '*', 'return_type' => Type::INT, 'min_args' => 1, 'max_args' => 1, 'arg_types' => [Type::INT]],
+            'div'      => ['handler' => 'calc_op', 'op' => '/', 'return_type' => Type::INT, 'min_args' => 1, 'max_args' => 1, 'arg_types' => [Type::INT]],
+            'mod'      => ['handler' => 'calc_op', 'op' => '%', 'return_type' => Type::INT, 'min_args' => 1, 'max_args' => 1, 'arg_types' => [Type::INT]],
             'inc'      => ['handler' => 'calc_inc', 'return_type' => Type::INT, 'min_args' => 0, 'max_args' => 0],
             'dec'      => ['handler' => 'calc_dec', 'return_type' => Type::INT, 'min_args' => 0, 'max_args' => 0],
             // math
-            'abs'     => ['handler' => 'php_fn', 'fn' => 'abs', 'return_type' => Type::INT, 'min_args' => 0, 'max_args' => 0],
+            'abs'     => ['handler' => 'cpp_fn', 'fn' => 'typephp_int_abs', 'return_type' => Type::INT, 'min_args' => 0, 'max_args' => 0],
             'ceil'    => ['handler' => 'php_fn', 'fn' => 'ceil', 'return_type' => Type::FLOAT, 'min_args' => 0, 'max_args' => 0],
             'floor'   => ['handler' => 'php_fn', 'fn' => 'floor', 'return_type' => Type::FLOAT, 'min_args' => 0, 'max_args' => 0],
             'round'   => ['handler' => 'php_fn', 'fn' => 'round', 'return_type' => Type::FLOAT, 'min_args' => 0, 'max_args' => 2],
@@ -44,23 +44,23 @@ trait UniversalMethodCall
             'atan2'   => ['handler' => 'php_fn', 'fn' => 'atan2', 'return_type' => Type::FLOAT, 'min_args' => 1, 'max_args' => 1],
             'deg2rad' => ['handler' => 'php_fn', 'fn' => 'deg2rad', 'return_type' => Type::FLOAT, 'min_args' => 0, 'max_args' => 0],
             'rad2deg' => ['handler' => 'php_fn', 'fn' => 'rad2deg', 'return_type' => Type::FLOAT, 'min_args' => 0, 'max_args' => 0],
-            'max'     => ['handler' => 'php_fn', 'fn' => 'max', 'return_type' => Type::INT, 'min_args' => 1, 'max_args' => 1],
-            'min'     => ['handler' => 'php_fn', 'fn' => 'min', 'return_type' => Type::INT, 'min_args' => 1, 'max_args' => 1],
+            'max'     => ['handler' => 'cpp_fn', 'fn' => 'typephp_native_max', 'return_type' => Type::INT, 'min_args' => 1, 'max_args' => 1, 'arg_types' => [Type::INT]],
+            'min'     => ['handler' => 'cpp_fn', 'fn' => 'typephp_native_min', 'return_type' => Type::INT, 'min_args' => 1, 'max_args' => 1, 'arg_types' => [Type::INT]],
         ],
         Type::FLOAT => [
-            'add'      => ['handler' => 'calc_op', 'op' => '+', 'return_type' => Type::FLOAT, 'min_args' => 1, 'max_args' => 1],
-            'sub'      => ['handler' => 'calc_op', 'op' => '-', 'return_type' => Type::FLOAT, 'min_args' => 1, 'max_args' => 1],
-            'mul'      => ['handler' => 'calc_op', 'op' => '*', 'return_type' => Type::FLOAT, 'min_args' => 1, 'max_args' => 1],
-            'div'      => ['handler' => 'calc_op', 'op' => '/', 'return_type' => Type::FLOAT, 'min_args' => 1, 'max_args' => 1],
+            'add'      => ['handler' => 'calc_op', 'op' => '+', 'return_type' => Type::FLOAT, 'min_args' => 1, 'max_args' => 1, 'arg_types' => [Type::FLOAT]],
+            'sub'      => ['handler' => 'calc_op', 'op' => '-', 'return_type' => Type::FLOAT, 'min_args' => 1, 'max_args' => 1, 'arg_types' => [Type::FLOAT]],
+            'mul'      => ['handler' => 'calc_op', 'op' => '*', 'return_type' => Type::FLOAT, 'min_args' => 1, 'max_args' => 1, 'arg_types' => [Type::FLOAT]],
+            'div'      => ['handler' => 'calc_op', 'op' => '/', 'return_type' => Type::FLOAT, 'min_args' => 1, 'max_args' => 1, 'arg_types' => [Type::FLOAT]],
             'inc'      => ['handler' => 'calc_inc', 'return_type' => Type::FLOAT, 'min_args' => 0, 'max_args' => 0],
             'dec'      => ['handler' => 'calc_dec', 'return_type' => Type::FLOAT, 'min_args' => 0, 'max_args' => 0],
             // math
-            'abs'     => ['handler' => 'php_fn', 'fn' => 'abs', 'return_type' => Type::FLOAT, 'min_args' => 0, 'max_args' => 0],
+            'abs'     => ['handler' => 'cpp_fn', 'fn' => 'std::fabs', 'return_type' => Type::FLOAT, 'min_args' => 0, 'max_args' => 0],
             'ceil'    => ['handler' => 'php_fn', 'fn' => 'ceil', 'return_type' => Type::FLOAT, 'min_args' => 0, 'max_args' => 0],
             'floor'   => ['handler' => 'php_fn', 'fn' => 'floor', 'return_type' => Type::FLOAT, 'min_args' => 0, 'max_args' => 0],
             'round'   => ['handler' => 'php_fn', 'fn' => 'round', 'return_type' => Type::FLOAT, 'min_args' => 0, 'max_args' => 2],
             'sqrt'    => ['handler' => 'php_fn', 'fn' => 'sqrt', 'return_type' => Type::FLOAT, 'min_args' => 0, 'max_args' => 0],
-            'pow'     => ['handler' => 'php_fn', 'fn' => 'pow', 'return_type' => Type::FLOAT, 'min_args' => 1, 'max_args' => 1],
+            'pow'     => ['handler' => 'cpp_fn', 'fn' => 'typephp_float_pow', 'return_type' => Type::FLOAT, 'min_args' => 1, 'max_args' => 1, 'arg_types' => [Type::FLOAT]],
             'log'     => ['handler' => 'php_fn', 'fn' => 'log', 'return_type' => Type::FLOAT, 'min_args' => 0, 'max_args' => 1],
             'log10'   => ['handler' => 'php_fn', 'fn' => 'log10', 'return_type' => Type::FLOAT, 'min_args' => 0, 'max_args' => 0],
             'exp'     => ['handler' => 'php_fn', 'fn' => 'exp', 'return_type' => Type::FLOAT, 'min_args' => 0, 'max_args' => 0],
@@ -73,8 +73,8 @@ trait UniversalMethodCall
             'atan2'   => ['handler' => 'php_fn', 'fn' => 'atan2', 'return_type' => Type::FLOAT, 'min_args' => 1, 'max_args' => 1],
             'deg2rad' => ['handler' => 'php_fn', 'fn' => 'deg2rad', 'return_type' => Type::FLOAT, 'min_args' => 0, 'max_args' => 0],
             'rad2deg' => ['handler' => 'php_fn', 'fn' => 'rad2deg', 'return_type' => Type::FLOAT, 'min_args' => 0, 'max_args' => 0],
-            'max'     => ['handler' => 'php_fn', 'fn' => 'max', 'return_type' => Type::FLOAT, 'min_args' => 1, 'max_args' => 1],
-            'min'     => ['handler' => 'php_fn', 'fn' => 'min', 'return_type' => Type::FLOAT, 'min_args' => 1, 'max_args' => 1],
+            'max'     => ['handler' => 'cpp_fn', 'fn' => 'typephp_native_max', 'return_type' => Type::FLOAT, 'min_args' => 1, 'max_args' => 1, 'arg_types' => [Type::FLOAT]],
+            'min'     => ['handler' => 'cpp_fn', 'fn' => 'typephp_native_min', 'return_type' => Type::FLOAT, 'min_args' => 1, 'max_args' => 1, 'arg_types' => [Type::FLOAT]],
         ],
         Type::BOOL => [
         ],
@@ -134,7 +134,7 @@ trait UniversalMethodCall
             'crc32'                 => ['handler' => 'php_fn', 'fn' => 'crc32', 'return_type' => Type::INT, 'min_args' => 0, 'max_args' => 0],
             'hash'                  => ['handler' => 'php_fn', 'fn' => 'hash', 'receiver_pos' => 2, 'return_type' => Type::STR, 'min_args' => 1, 'max_args' => 2],
             'hashCode'              => ['handler' => 'direct_method', 'method' => 'hashCode', 'return_type' => Type::INT, 'min_args' => 0, 'max_args' => 0],
-            'base64Decode'          => ['handler' => 'php_fn', 'fn' => 'base64_decode', 'return_type' => Type::STR, 'min_args' => 0, 'max_args' => 0],
+            'base64Decode'          => ['handler' => 'php_fn', 'fn' => 'base64_decode', 'return_type' => Type::STR, 'min_args' => 0, 'max_args' => 0, 'result_wrapper' => 'php::toExactString'],
             'base64Encode'          => ['handler' => 'php_fn', 'fn' => 'base64_encode', 'return_type' => Type::STR, 'min_args' => 0, 'max_args' => 0],
             'urlDecode'             => ['handler' => 'php_fn', 'fn' => 'urldecode', 'return_type' => Type::STR, 'min_args' => 0, 'max_args' => 0],
             'urlEncode'             => ['handler' => 'php_fn', 'fn' => 'urlencode', 'return_type' => Type::STR, 'min_args' => 0, 'max_args' => 0],
@@ -163,14 +163,14 @@ trait UniversalMethodCall
             'mbCut'                 => ['handler' => 'php_fn', 'fn' => 'mb_strcut', 'return_type' => Type::STR, 'min_args' => 1, 'max_args' => 3],
             'mbRTrim'               => ['handler' => 'php_fn', 'fn' => 'mb_rtrim', 'return_type' => Type::STR, 'min_args' => 0, 'max_args' => 1],
             'mbLTrim'               => ['handler' => 'php_fn', 'fn' => 'mb_ltrim', 'return_type' => Type::STR, 'min_args' => 0, 'max_args' => 1],
-            'mbDetectEncoding'      => ['handler' => 'php_fn', 'fn' => 'mb_detect_encoding', 'return_type' => Type::STR, 'min_args' => 0, 'max_args' => 2],
-            'mbConvertEncoding'     => ['handler' => 'php_fn', 'fn' => 'mb_convert_encoding', 'return_type' => Type::STR, 'min_args' => 1, 'max_args' => 2],
+            'mbDetectEncoding'      => ['handler' => 'php_fn', 'fn' => 'mb_detect_encoding', 'return_type' => Type::STR, 'min_args' => 0, 'max_args' => 2, 'result_wrapper' => 'php::toExactString'],
+            'mbConvertEncoding'     => ['handler' => 'php_fn', 'fn' => 'mb_convert_encoding', 'return_type' => Type::STR, 'min_args' => 1, 'max_args' => 2, 'result_wrapper' => 'php::toExactString'],
             'mbConvertCase'         => ['handler' => 'php_fn', 'fn' => 'mb_convert_case', 'return_type' => Type::STR, 'min_args' => 0, 'max_args' => 2],
             // serialize
             'unserialize'           => ['handler' => 'php_fn', 'fn' => 'unserialize', 'return_type' => Type::VAR, 'min_args' => 0, 'max_args' => 0],
             'unmarshal'             => ['handler' => 'php_fn', 'fn' => 'unserialize', 'return_type' => Type::VAR, 'min_args' => 0, 'max_args' => 0],
             'jsonDecode'            => ['handler' => 'php_fn', 'fn' => 'json_decode', 'return_type' => Type::VAR, 'min_args' => 0, 'max_args' => 2, 'const_args' => [1 => 'true']],
-            'jsonDecodeToObject'    => ['handler' => 'php_fn', 'fn' => 'json_decode', 'return_type' => Type::OBJECT, 'min_args' => 0, 'max_args' => 2, 'const_args' => [1 => 'false']],
+            'jsonDecodeToObject'    => ['handler' => 'php_fn', 'fn' => 'json_decode', 'return_type' => Type::OBJECT, 'min_args' => 0, 'max_args' => 2, 'const_args' => [1 => 'false'], 'result_wrapper' => 'php::toExactObject'],
             // phpx C++ methods (no PHP function equivalent)
             'equals'                => ['handler' => 'direct_method', 'method' => 'equals', 'return_type' => Type::BOOL, 'min_args' => 1, 'max_args' => 2],
         ],
@@ -230,7 +230,7 @@ trait UniversalMethodCall
             // serialize
             'serialize'         => ['handler' => 'php_fn', 'fn' => 'serialize', 'return_type' => Type::STR, 'min_args' => 0, 'max_args' => 0],
             'marshal'           => ['handler' => 'php_fn', 'fn' => 'serialize', 'return_type' => Type::STR, 'min_args' => 0, 'max_args' => 0],
-            'jsonEncode'        => ['handler' => 'php_fn', 'fn' => 'json_encode', 'return_type' => Type::STR, 'min_args' => 0, 'max_args' => 2],
+            'jsonEncode'        => ['handler' => 'php_fn', 'fn' => 'json_encode', 'return_type' => Type::STR, 'min_args' => 0, 'max_args' => 2, 'result_wrapper' => 'php::toExactString'],
             // phpx C++ methods (no PHP function equivalent)
             'set'               => ['handler' => 'direct_method_mutate', 'method' => 'set', 'return_type' => Type::ARRAY, 'min_args' => 2, 'max_args' => 2],
             'get'               => ['handler' => 'direct_method', 'method' => 'get', 'return_type' => Type::VAR, 'min_args' => 1, 'max_args' => 1],
@@ -239,21 +239,21 @@ trait UniversalMethodCall
         ],
         Type::STREAM => [
             // --- stdext stream_methods ---
-            'write'             => ['handler' => 'php_fn', 'fn' => 'fwrite', 'return_type' => Type::INT, 'min_args' => 1, 'max_args' => 2],
-            'read'              => ['handler' => 'php_fn', 'fn' => 'fread', 'return_type' => Type::STR, 'min_args' => 1, 'max_args' => 1],
+            'write'             => ['handler' => 'php_fn', 'fn' => 'fwrite', 'return_type' => Type::INT, 'min_args' => 1, 'max_args' => 2, 'result_wrapper' => 'php::toExactInt'],
+            'read'              => ['handler' => 'php_fn', 'fn' => 'fread', 'return_type' => Type::STR, 'min_args' => 1, 'max_args' => 1, 'result_wrapper' => 'php::toExactString'],
             'close'             => ['handler' => 'php_fn', 'fn' => 'fclose', 'return_type' => Type::BOOL, 'min_args' => 0, 'max_args' => 0],
             'dataSync'          => ['handler' => 'php_fn', 'fn' => 'fdatasync', 'return_type' => Type::BOOL, 'min_args' => 0, 'max_args' => 0],
             'sync'              => ['handler' => 'php_fn', 'fn' => 'fsync', 'return_type' => Type::BOOL, 'min_args' => 0, 'max_args' => 0],
             'truncate'          => ['handler' => 'php_fn', 'fn' => 'ftruncate', 'return_type' => Type::BOOL, 'min_args' => 0, 'max_args' => 1],
-            'stat'              => ['handler' => 'php_fn', 'fn' => 'fstat', 'return_type' => Type::ARRAY, 'min_args' => 0, 'max_args' => 0],
+            'stat'              => ['handler' => 'php_fn', 'fn' => 'fstat', 'return_type' => Type::ARRAY, 'min_args' => 0, 'max_args' => 0, 'result_wrapper' => 'php::toExactArray'],
             'seek'              => ['handler' => 'php_fn', 'fn' => 'fseek', 'return_type' => Type::INT, 'min_args' => 1, 'max_args' => 2],
-            'tell'              => ['handler' => 'php_fn', 'fn' => 'ftell', 'return_type' => Type::INT, 'min_args' => 0, 'max_args' => 0],
+            'tell'              => ['handler' => 'php_fn', 'fn' => 'ftell', 'return_type' => Type::INT, 'min_args' => 0, 'max_args' => 0, 'result_wrapper' => 'php::toExactInt'],
             'lock'              => ['handler' => 'php_fn', 'fn' => 'flock', 'return_type' => Type::BOOL, 'min_args' => 1, 'max_args' => 2],
             'eof'               => ['handler' => 'php_fn', 'fn' => 'feof', 'return_type' => Type::BOOL, 'min_args' => 0, 'max_args' => 0],
-            'getChar'           => ['handler' => 'php_fn', 'fn' => 'fgetc', 'return_type' => Type::STR, 'min_args' => 0, 'max_args' => 0],
-            'getLine'           => ['handler' => 'php_fn', 'fn' => 'fgets', 'return_type' => Type::STR, 'min_args' => 0, 'max_args' => 1],
+            'getChar'           => ['handler' => 'php_fn', 'fn' => 'fgetc', 'return_type' => Type::STR, 'min_args' => 0, 'max_args' => 0, 'result_wrapper' => 'php::toExactString'],
+            'getLine'           => ['handler' => 'php_fn', 'fn' => 'fgets', 'return_type' => Type::STR, 'min_args' => 0, 'max_args' => 1, 'result_wrapper' => 'php::toExactString'],
             // --- stream_* functions ---
-            'getContents'       => ['handler' => 'php_fn', 'fn' => 'stream_get_contents', 'return_type' => Type::STR, 'min_args' => 0, 'max_args' => 2],
+            'getContents'       => ['handler' => 'php_fn', 'fn' => 'stream_get_contents', 'return_type' => Type::STR, 'min_args' => 0, 'max_args' => 2, 'result_wrapper' => 'php::toExactString'],
             'getMetaData'       => ['handler' => 'php_fn', 'fn' => 'stream_get_meta_data', 'return_type' => Type::ARRAY, 'min_args' => 0, 'max_args' => 0],
             'isLocal'           => ['handler' => 'php_fn', 'fn' => 'stream_is_local', 'return_type' => Type::BOOL, 'min_args' => 0, 'max_args' => 0],
             'isTTY'             => ['handler' => 'php_fn', 'fn' => 'stream_isatty', 'return_type' => Type::BOOL, 'min_args' => 0, 'max_args' => 0],
@@ -263,15 +263,15 @@ trait UniversalMethodCall
             'setTimeout'        => ['handler' => 'php_fn', 'fn' => 'stream_set_timeout', 'return_type' => Type::BOOL, 'min_args' => 1, 'max_args' => 2],
             'setWriteBuffer'    => ['handler' => 'php_fn', 'fn' => 'stream_set_write_buffer', 'return_type' => Type::INT, 'min_args' => 1, 'max_args' => 1],
             'supportsLock'      => ['handler' => 'php_fn', 'fn' => 'stream_supports_lock', 'return_type' => Type::BOOL, 'min_args' => 0, 'max_args' => 0],
-            'copy'              => ['handler' => 'php_fn', 'fn' => 'stream_copy_to_stream', 'return_type' => Type::INT, 'min_args' => 1, 'max_args' => 3],
+            'copy'              => ['handler' => 'php_fn', 'fn' => 'stream_copy_to_stream', 'return_type' => Type::INT, 'min_args' => 1, 'max_args' => 3, 'result_wrapper' => 'php::toExactInt'],
             // --- stream_socket_* functions ---
             'accept'            => ['handler' => 'php_fn', 'fn' => 'stream_socket_accept', 'return_type' => Type::STREAM, 'min_args' => 0, 'max_args' => 1],
-            'enableCrypto'      => ['handler' => 'php_fn', 'fn' => 'stream_socket_enable_crypto', 'return_type' => Type::INT, 'min_args' => 1, 'max_args' => 3],
-            'getSocketName'     => ['handler' => 'php_fn', 'fn' => 'stream_socket_get_name', 'return_type' => Type::STR, 'min_args' => 1, 'max_args' => 1],
-            'recvFrom'          => ['handler' => 'php_fn', 'fn' => 'stream_socket_recvfrom', 'return_type' => Type::STR, 'min_args' => 1, 'max_args' => 2],
-            'sendTo'            => ['handler' => 'php_fn', 'fn' => 'stream_socket_sendto', 'return_type' => Type::INT, 'min_args' => 1, 'max_args' => 3],
+            'enableCrypto'      => ['handler' => 'php_fn', 'fn' => 'stream_socket_enable_crypto', 'return_type' => Type::VAR, 'min_args' => 1, 'max_args' => 3],
+            'getSocketName'     => ['handler' => 'php_fn', 'fn' => 'stream_socket_get_name', 'return_type' => Type::STR, 'min_args' => 1, 'max_args' => 1, 'result_wrapper' => 'php::toExactString'],
+            'recvFrom'          => ['handler' => 'php_fn', 'fn' => 'stream_socket_recvfrom', 'return_type' => Type::STR, 'min_args' => 1, 'max_args' => 2, 'result_wrapper' => 'php::toExactString'],
+            'sendTo'            => ['handler' => 'php_fn', 'fn' => 'stream_socket_sendto', 'return_type' => Type::INT, 'min_args' => 1, 'max_args' => 3, 'result_wrapper' => 'php::toExactInt'],
             'shutdown'          => ['handler' => 'php_fn', 'fn' => 'stream_socket_shutdown', 'return_type' => Type::BOOL, 'min_args' => 1, 'max_args' => 1],
-            'getRecord'         => ['handler' => 'php_fn', 'fn' => 'stream_get_line', 'return_type' => Type::STR, 'min_args' => 0, 'max_args' => 2],
+            'getRecord'         => ['handler' => 'php_fn', 'fn' => 'stream_get_line', 'return_type' => Type::STR, 'min_args' => 0, 'max_args' => 2, 'result_wrapper' => 'php::toExactString'],
             // --- stream filters ---
             'appendFilter'      => ['handler' => 'php_fn', 'fn' => 'stream_filter_append', 'return_type' => Type::VAR, 'min_args' => 1, 'max_args' => 3],
             'prependFilter'     => ['handler' => 'php_fn', 'fn' => 'stream_filter_prepend', 'return_type' => Type::VAR, 'min_args' => 1, 'max_args' => 3],
@@ -742,6 +742,7 @@ trait UniversalMethodCall
         }
         $this->validateUniversalMethodArgs($expr, $method, $def, $isVar);
         $args = $this->normalizeUniversalNamedArgs($expr, $method, $def);
+        $this->assertUniversalArgumentTypes($method, $def, $args);
 
         if ($this->getTypedArrayDefinition($expr->var) !== null && in_array($method, ['keyExists', 'get'], true)) {
             $argument = $expr->args[0];
@@ -760,7 +761,7 @@ trait UniversalMethodCall
             }
         }
 
-        return match ($def['handler']) {
+        $call = match ($def['handler']) {
             'calc_op'              => $this->genUniversalCalcOp($receiver, $def['op'], $args),
             'calc_inc'             => '(' . $receiver . ' + 1)',
             'calc_dec'             => '(' . $receiver . ' - 1)',
@@ -773,6 +774,8 @@ trait UniversalMethodCall
             'provider_extension'   => $this->genProviderExtensionCall($receiver, $def, $args),
             default                => null,
         };
+
+        return isset($def['result_wrapper']) && $call !== null ? $def['result_wrapper'] . '(' . $call . ')' : $call;
     }
 
     protected function genProviderExtensionCall(string $receiver, array $definition, array $args): string
@@ -816,6 +819,10 @@ trait UniversalMethodCall
             return $methodCall;
         }
 
+        if (isset($def['result_wrapper']) && $methodCall !== null) {
+            $methodCall = $def['result_wrapper'] . '(' . $methodCall . ')';
+        }
+
         $tmpVar = $this->addTmpVar(Type::VAR);
         $this->addBeforeStmtLine("{$tmpVar} = {$methodCall};");
         return $tmpVar;
@@ -857,6 +864,40 @@ trait UniversalMethodCall
         }
 
         $this->assertUniversalArgumentForms($expr, $method, $def);
+    }
+
+    /**
+     * Some methods return a result whose type is fixed by the receiver, so
+     * their arguments must already have the declared native type. A float
+     * parameter also accepts int, which widens losslessly for these methods.
+     */
+    /** @var array<int, string> */
+    protected array $universalArgWrappers = [];
+
+    protected function assertUniversalArgumentTypes(string $method, array $def, array $args): void
+    {
+        foreach ($def['arg_types'] ?? [] as $index => $expected) {
+            $argument = $args[$index] ?? null;
+            if (!$argument instanceof Node\Arg) {
+                continue;
+            }
+            $actual = $this->detectTypeOfExpr($argument->value);
+            $wrapper = [Type::INT => 'php::toExactInt', Type::FLOAT => 'php::toExactFloat'][$expected] ?? null;
+            if ($actual === Type::VAR && $wrapper !== null) {
+                // Strict typing: a var argument is checked at runtime, never coerced.
+                $this->universalArgWrappers[spl_object_id($argument->value)] = $wrapper;
+                continue;
+            }
+            if ($this->checkArgType($actual, $expected, false)
+                || ($expected === Type::FLOAT && $actual === Type::INT)) {
+                continue;
+            }
+            $position = $index + 1;
+            $this->fatalError(
+                $argument,
+                "Method `{$method}()` argument {$position} must be of type {$expected}, {$actual} given",
+            );
+        }
     }
 
     /**
@@ -1004,9 +1045,15 @@ trait UniversalMethodCall
         return $order;
     }
 
+    protected function wrapUniversalArgument(Node $node, string $code): string
+    {
+        $wrapper = $this->universalArgWrappers[spl_object_id($node)] ?? null;
+        return $wrapper === null ? $code : $wrapper . '(' . $code . ')';
+    }
+
     protected function genUniversalCalcOp(string $object, string $op, array $args): string
     {
-        $argExpr = $this->parseExpr($args[0]->value);
+        $argExpr = $this->wrapUniversalArgument($args[0]->value, $this->parseExpr($args[0]->value));
         return '(' . $object . ' ' . $op . ' ' . $argExpr . ')';
     }
 
@@ -1147,7 +1194,10 @@ trait UniversalMethodCall
     {
         $userArgs = [];
         foreach ($this->universalArgLoweringOrder($args) as $index) {
-            $userArgs[$index] = $this->parseOrderedOperand($args[$index]->value, false);
+            $userArgs[$index] = $this->wrapUniversalArgument(
+                $args[$index]->value,
+                $this->parseOrderedOperand($args[$index]->value, false),
+            );
         }
         ksort($userArgs);
 

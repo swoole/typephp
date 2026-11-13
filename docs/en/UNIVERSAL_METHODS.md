@@ -675,7 +675,7 @@ $client->recvFrom(1024);                 // stream_socket_recvfrom(...)
 $client->recvFrom(1024, 0, $addr);       // with address
 
 // Control
-$client->enableCrypto(true);             // stream_socket_enable_crypto → enables TLS
+$client->enableCrypto(true);             // stream_socket_enable_crypto → enables TLS; returns var (true, false or 0)
 $client->shutdown(STREAM_SHUT_RDWR);     // stream_socket_shutdown(...)
 
 // Filters

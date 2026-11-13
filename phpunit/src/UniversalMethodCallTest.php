@@ -150,4 +150,14 @@ class UniversalMethodCallTest extends \BaseTest
         self::assertCount(1, $reporter->warnings);
         self::assertStringContainsString('is called instead of ExtChild::shout()', $reporter->warnings[0]);
     }
+
+    public function testNativeMaxRejectsDifferentArgumentType(): void
+    {
+        $this->exec('Method `max()` argument 1 must be of type', 'universal-method-arg-type.php');
+    }
+
+    public function testNativeArithmeticRejectsFloatArgumentOnInt(): void
+    {
+        $this->exec('Method `add()` argument 1 must be of type', 'universal-method-arith-arg-type.php');
+    }
 }

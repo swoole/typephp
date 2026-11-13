@@ -674,7 +674,7 @@ $client->recvFrom(1024);                 // stream_socket_recvfrom(...)
 $client->recvFrom(1024, 0, $addr);       // 带地址
 
 // 控制
-$client->enableCrypto(true);             // stream_socket_enable_crypto → 启用 TLS
+$client->enableCrypto(true);             // stream_socket_enable_crypto → 启用 TLS；返回 var（true、false 或 0）
 $client->shutdown(STREAM_SHUT_RDWR);     // stream_socket_shutdown(...)
 
 // 过滤器

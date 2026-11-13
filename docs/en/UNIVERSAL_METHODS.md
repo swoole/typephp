@@ -142,7 +142,7 @@ $a = 100;
 $b = $a->add(50);  // $a becomes 150, $b is also 150 (returns the new value)
 ```
 
-> **Native semantics**: arithmetic on a native `int`/`float` compiles to plain C++ operators and does **not** follow PHP rules. For example `div(0)`/`mod(0)` raise SIGFPE for `int`, `int` overflow wraps (undefined behavior for signed types) instead of promoting to float, and `float` division by zero yields `inf`/`nan` instead of throwing `DivisionByZeroError`. Use `var int` (or `var float`) when PHP semantics such as exceptions or overflow promotion are required.
+> **Native semantics**: arithmetic on a native `int`/`float` compiles to plain C++ operators and does **not** follow PHP rules. For example `div(0)`/`mod(0)` raise SIGFPE for `int`, `int` overflow wraps (undefined behavior for signed types) instead of promoting to float, and `float` division by zero yields `inf`/`nan` instead of throwing `DivisionByZeroError`. `INT_MIN`'s `div(-1)`/`mod(-1)` also raises SIGFPE. These methods deliberately add no divisor check, so hot loops pay no cost; when the divisor may be zero, test it yourself (`if ($divisor == 0) { ... }`) before calling `div()`/`mod()`. Use `var int` (or `var float`) when PHP semantics such as exceptions or overflow promotion are required.
 
 ### 4.2 Math Functions
 

@@ -84,4 +84,17 @@ class DeclaredScalarPropertyReadTest extends BaseTest
         $this->assertStringContainsString('typephp_read_property_scoped(', $code);
         $this->assertStringNotContainsString('attrInt(get_persistent_prop(', $code);
     }
+
+    public function testNarrowedMixedReceiverKeepsVariantRead(): void
+    {
+        try {
+            $outputFile = $this->compileCode('declared-scalar-property-read-narrowed.php');
+        } catch (TestError $e) {
+            $this->fail($e->getMessage());
+        }
+
+        $code = file_get_contents($outputFile);
+        $this->assertStringContainsString('attr(get_persistent_prop(', $code);
+        $this->assertStringNotContainsString('attrInt(get_persistent_prop(', $code);
+    }
 }

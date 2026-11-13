@@ -1496,6 +1496,12 @@ trait PropertyAccessTrait
         if ($objectVar === 'this_') {
             $receiverClass = $this->getFullClassName();
         } elseif ($this->isTypedObject($objectName)) {
+            // A proven runtime class does not imply object storage: a `mixed`
+            // parameter narrowed by instanceof keeps Variant storage, and only
+            // Object exposes the typed accessors.
+            if ($this->getVarType($objectName) !== Type::OBJECT) {
+                return null;
+            }
             $receiverClass = $this->getObjectType($objectName);
         } else {
             return null;

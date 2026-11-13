@@ -90,7 +90,10 @@ final class MatchExpressionCodegenTest extends \BaseTest
     {
         $fnCode = $this->extractFunction('php_testmatcharmpropertyread');
         self::assertStringContainsString('[&]() -> php::Int {', $fnCode);
-        self::assertStringContainsString('php::toInt(obj.attr(', $fnCode);
+        // The arm already reads the slot as an int, so the conversion happens
+        // at the lambda boundary instead of around the property fetch.
+        self::assertStringContainsString('obj.attrInt(get_persistent_prop(', $fnCode);
+        self::assertStringContainsString('php::toInt([&]() -> php::Int {', $fnCode);
 
         $ternaryCode = $this->extractFunction('php_testmatcharmternarypropertyread');
         self::assertStringContainsString('[&]() -> php::Int {', $ternaryCode);

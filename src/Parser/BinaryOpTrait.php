@@ -860,6 +860,13 @@ trait BinaryOpTrait
         }
 
         if ($expr instanceof Expr\PropertyFetch) {
+            // A checked property read can already return a converted scalar
+            // even though its source is a dynamic Zend property. Snapshot the
+            // emitted value in native storage so its lowered type stays valid.
+            $lowered = $this->getLoweredExpressionType($expr);
+            if ($lowered !== null && $this->usesNativeScalarStorage($lowered)) {
+                return $lowered;
+            }
             $nativePropertyVar = $this->getNativePropertyVar($expr);
             if ($nativePropertyVar !== null && $nativePropertyVar === $value) {
                 $info = $this->getObjectPropInfoByVar($nativePropertyVar);

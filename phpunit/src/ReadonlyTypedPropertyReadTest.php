@@ -63,4 +63,27 @@ class ReadonlyTypedPropertyReadTest extends BaseTest
         $this->assertStringNotContainsString('_object_prop_', $code);
         $this->assertStringNotContainsString('AttrMode::Update', $code);
     }
+
+    public function testReadonlyScalarArithmeticKeepsConvertedOperandsUnboxed(): void
+    {
+        $code = file_get_contents($this->compileFixture('readonly-typed-property-arithmetic.php'));
+
+        $this->assertStringContainsString('typephp_read_property_scoped(', $code);
+        $this->assertStringContainsString('php::Float tmp_var_', $code);
+        $this->assertStringContainsString('php::Int tmp_var_', $code);
+        $this->assertStringContainsString('php::Bool tmp_var_', $code);
+        $this->assertStringNotContainsString('php::Var tmp_var_', $code);
+        $this->assertStringNotContainsString('.attrInt(', $code);
+        $this->assertStringNotContainsString('.attrFloat(', $code);
+    }
+
+    public function testReadonlyArithmeticPreservesVarIntStorage(): void
+    {
+        $code = file_get_contents($this->compileFixture('readonly-typed-property-arithmetic-varint.php'));
+
+        $this->assertStringContainsString('php::Var tmp_var_', $code);
+        $this->assertStringContainsString('php::Float tmp_var_', $code);
+        $this->assertStringNotContainsString('php::Int tmp_var_', $code);
+        $this->assertStringContainsString('typephp_read_property_scoped(', $code);
+    }
 }

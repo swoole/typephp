@@ -1707,7 +1707,7 @@ trait AssignOpTrait
             $this->assertNotNativeObjectArrayKey($target->dim);
         }
         $type = $this->detectTypeOfExpr($target->var);
-        [$container, $containerBefore, $containerAfter] = $this->parseArrayDimWriteContainer($target->var);
+        [$container, $containerBefore, $containerAfter, $containerResolve] = $this->parseArrayDimWriteContainer($target->var);
         if ($target->dim === null) {
             $key = self::VALUE_NULL;
             $keyBefore = $keyAfter = [];
@@ -1722,13 +1722,25 @@ trait AssignOpTrait
 
         $code = '[&]() -> php::Var {' . PHP_EOL;
         $code .= $this->formatCapturedStmtLines($containerBefore);
-        $code .= $this->getIndent() . 'auto&& ' . $stableContainer . ' = ' . $container . ';' . PHP_EOL;
-        $code .= $this->formatCapturedStmtLines($keyBefore);
-        $code .= $this->getIndent() . 'php::Var ' . $stableKey . ' = ' . $key . ';' . PHP_EOL;
-        $code .= $this->formatCapturedStmtLines($keyAfter);
+        $keyCapture = $this->formatCapturedStmtLines($keyBefore)
+            . $this->getIndent() . 'php::Var ' . $stableKey . ' = ' . $key . ';' . PHP_EOL
+            . $this->formatCapturedStmtLines($keyAfter);
+        $lateKey = $target->dim instanceof Variable && is_string($target->dim->name);
+        if (!$lateKey) {
+            $code .= $keyCapture;
+        }
         $code .= $this->formatCapturedStmtLines($rightBefore);
         $code .= $this->getIndent() . 'php::Var ' . $stableValue . ' = ' . $value . ';' . PHP_EOL;
         $code .= $this->formatCapturedStmtLines($rightAfter);
+        // Computed keys/receivers already own their results. Borrow slots
+        // afterwards: the RHS may unset them, rehash their parent or throw.
+        $code .= $this->formatCapturedStmtLines($containerResolve);
+        $code .= $this->getIndent() . 'auto&& ' . $stableContainer . ' = ' . $container . ';' . PHP_EOL;
+        if ($lateKey) {
+            // Zend reads a CV operand at ASSIGN_DIM, after FETCH_DIM_W has
+            // resolved the parent. A computed key already owns a temp value.
+            $code .= $keyCapture;
+        }
 
         if ($operator !== null) {
             // Like Zend ASSIGN_DIM_OP, evaluate the RHS before offsetGet(),
@@ -1756,62 +1768,160 @@ trait AssignOpTrait
     }
 
     /**
-     * Resolve a writable container from the base outwards. Complete each key's
-     * reference writebacks before evaluating the next key, and keep property
-     * receivers alive while an indirect property/bucket wrapper is in use.
+     * Capture computed receiver/key values before the RHS, then resolve slots
+     * from the base outwards, reading CV operands at their original fetch.
+     * No borrowed bucket may span a call which can remove it. Retain temporary
+     * property receivers throughout the write.
      *
-     * @return array{string, array<string>, array<string>}
+     * @return array{string, list<string>, list<string>, list<string>}
      */
     private function parseArrayDimWriteContainer(Expr $receiver): array
     {
         if ($receiver instanceof Expr\ArrayDimFetch) {
-            if ($this->isVarExpr($receiver->var) && $receiver->var->name === 'GLOBALS') {
-                return $this->parseExprWithCapturedStmts($receiver, writable: true);
+            if ($this->isStdContainerExpr($receiver)
+                || $this->isNativeObjectClass($this->detectClassOfExpr($receiver->var))
+                || $this->getTypedArrayAccessDefinition($receiver) !== null
+                || $this->getTypedArrayPropertyReadDefinition($receiver) !== null) {
+                // These backends have their own checked/value fetches; do not
+                // turn them into an unchecked PHP array item() lookup.
+                [$value, $before, $after] = $this->parseExprWithCapturedStmts($receiver);
+                $stable = $this->genTmpVarName();
+                $before[] = 'auto&& ' . $stable . ' = ' . $value . ';';
+                return [$stable, $before, $after, []];
             }
-            [$base, $before, $after] = $this->parseArrayDimWriteContainer($receiver->var);
+            if ($this->isVarExpr($receiver->var) && $receiver->var->name === 'GLOBALS') {
+                $before = $after = [];
+                if ($receiver->dim !== null && $this->getStaticGlobalsSlot($receiver) === null
+                    && !($receiver->dim instanceof Variable && is_string($receiver->dim->name))) {
+                    [$key, $before, $after] = $this->parseExprWithCapturedStmts($receiver->dim);
+                    $stableKey = $this->addTmpVar($this->detectTypeOfExpr($receiver->dim));
+                    $before[] = $stableKey . ' = ' . $key . ';';
+                    foreach ($after as $line) {
+                        $before[] = $line;
+                    }
+                    $after = $this->arrayWriteTemporaryCleanup($stableKey);
+                    $receiver = clone $receiver;
+                    $receiver->dim = new Variable($stableKey);
+                }
+                [$container, $globalBefore, $globalAfter] = $this->parseExprWithCapturedStmts($receiver, writable: true);
+                foreach ($globalBefore as $line) {
+                    $before[] = $line;
+                }
+                foreach ($globalAfter as $line) {
+                    $after[] = $line;
+                }
+                return [$container, $before, $after, []];
+            }
+            [$base, $before, $after, $resolve] = $this->parseArrayDimWriteContainer($receiver->var);
             $container = $this->genTmpVarName();
-            $before[] = 'auto&& ' . $container . ' = ' . $base . ';';
+            $resolve[] = 'auto&& ' . $container . ' = ' . $base . ';';
             if ($receiver->dim === null) {
-                return [$container . '.newItem()', $before, $after];
+                return [$container . '.newItem()', $before, $after, $resolve];
             }
             $this->assertNotNativeObjectArrayKey($receiver->dim);
             [$key, $keyBefore, $keyAfter] = $this->parseExprWithCapturedStmts($receiver->dim);
+            $lateKey = $receiver->dim instanceof Variable && is_string($receiver->dim->name);
             foreach ($keyBefore as $line) {
-                $before[] = $line;
+                if ($lateKey) {
+                    $resolve[] = $line;
+                } else {
+                    $before[] = $line;
+                }
             }
             $stableKey = $this->genTmpVarName();
-            $before[] = 'php::Var ' . $stableKey . ' = ' . $key . ';';
-            foreach ($keyAfter as $line) {
-                $before[] = $line;
+            if ($lateKey) {
+                $resolve[] = 'php::Var ' . $stableKey . ' = ' . $key . ';';
+            } else {
+                $before[] = 'php::Var ' . $stableKey . ' = ' . $key . ';';
             }
-            return [$container . '.item(' . $stableKey . ', true)', $before, $after];
+            foreach ($keyAfter as $line) {
+                if ($lateKey) {
+                    $resolve[] = $line;
+                } else {
+                    $before[] = $line;
+                }
+            }
+            return [$container . '.item(' . $stableKey . ', true)', $before, $after, $resolve];
         }
         if ($receiver instanceof Expr\PropertyFetch) {
             // $this is held by the current call frame. Keep its original AST
             // identity, which also selects a trait's active property scope.
             if ($receiver->var instanceof Variable && $receiver->var->name === 'this') {
-                return $this->parseExprWithCapturedStmts($receiver, writable: true);
+                [$receiver, $before, $after] = $this->captureArrayWriteMemberName($receiver);
+                [$container, $propertyBefore, $propertyAfter] = $this->parseExprWithCapturedStmts($receiver, writable: true);
+                foreach ($propertyBefore as $line) {
+                    $before[] = $line;
+                }
+                foreach ($propertyAfter as $line) {
+                    $after[] = $line;
+                }
+                return [$container, $before, $after, []];
             }
-            [$object, $before, $after] = $this->parseExprWithCapturedStmts($receiver->var);
+            [$object, $before, $after, $resolve] = $this->parseArrayDimWriteContainer($receiver->var);
             $class = $this->detectClassOfExpr($receiver->var);
             $stableObject = $this->addObjectTmpVar($class);
             if (!$this->isNativeObjectClass($class)) {
                 $object = 'php::toObject(' . $object . ')';
             }
-            $before[] = $stableObject . ' = ' . $object . ';';
-            foreach ($after as $line) {
-                $before[] = $line;
-            }
+            $resolve[] = $stableObject . ' = ' . $object . ';';
             $property = clone $receiver;
             $property->var = new Variable($stableObject, $receiver->var->getAttributes());
+            [$property, $nameBefore, $nameAfter] = $this->captureArrayWriteMemberName($property);
+            foreach ($nameBefore as $line) {
+                $before[] = $line;
+            }
             [$container, $propertyBefore, $propertyAfter] = $this->parseExprWithCapturedStmts($property, writable: true);
             foreach ($propertyBefore as $line) {
                 $before[] = $line;
             }
+            foreach ($nameAfter as $line) {
+                $propertyAfter[] = $line;
+            }
+            foreach ($after as $line) {
+                $propertyAfter[] = $line;
+            }
             $propertyAfter[] = $this->getTemporaryCleanup($stableObject);
-            return [$container, $before, $propertyAfter];
+            return [$container, $before, $propertyAfter, $resolve];
         }
-        return $this->parseExprWithCapturedStmts($receiver, writable: true);
+        if ($receiver instanceof Expr\StaticPropertyFetch) {
+            return $this->parseStaticArrayWriteContainer($receiver);
+        }
+        [$container, $before, $after] = $this->parseExprWithCapturedStmts($receiver, writable: true);
+        if (!$receiver instanceof Variable) {
+            // Function/method receivers return a value, unlike a variable's
+            // writable slot. Evaluate that value at its original position.
+            $stable = $this->genTmpVarName();
+            $before[] = 'auto&& ' . $stable . ' = ' . $container . ';';
+            $container = $stable;
+        }
+        return [$container, $before, $after, []];
+    }
+
+    /** @return array{Expr\PropertyFetch, list<string>, list<string>} */
+    private function captureArrayWriteMemberName(Expr\PropertyFetch $property): array
+    {
+        if ($property->name instanceof Node\Identifier
+            || ($property->name instanceof Variable && is_string($property->name->name))) {
+            return [$property, [], []];
+        }
+        [$name, $before, $after] = $this->parseExprWithCapturedStmts($property->name);
+        $stableName = $this->addTmpVar($this->detectTypeOfExpr($property->name));
+        $before[] = $stableName . ' = ' . $name . ';';
+        foreach ($after as $line) {
+            $before[] = $line;
+        }
+        $property = clone $property;
+        $property->name = new Variable($stableName);
+        return [$property, $before, $this->arrayWriteTemporaryCleanup($stableName)];
+    }
+
+    /** @return list<string> */
+    private function arrayWriteTemporaryCleanup(string $temporary): array
+    {
+        [, , $after] = $this->captureStmtLines(function () use ($temporary): void {
+            $this->scheduleTemporaryCleanup($temporary);
+        });
+        return $after;
     }
 
     protected function parseAssignOpShiftLeft(Expr\AssignOp\ShiftLeft $node): string

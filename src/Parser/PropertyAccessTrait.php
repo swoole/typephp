@@ -637,6 +637,46 @@ trait PropertyAccessTrait
         return $this->getLiteralString($this->getNamespacedClassName($name));
     }
 
+    /** @return array{string, list<string>, list<string>, list<string>} */
+    private function parseStaticArrayWriteContainer(Expr\StaticPropertyFetch $expr): array
+    {
+        [$container, $before, $after] = $this->captureStmtLines(function () use ($expr): ?string {
+            return $this->parsePythonModuleStaticPropertyFetch($expr) ?? $this->parseNativeStaticPropertyFetch($expr);
+        });
+        if ($container !== null) {
+            return [$container, $before, $after, []];
+        }
+
+        // FETCH_CLASS precedes the RHS (and may autoload/throw), whereas a
+        // static property's CV name is read later by FETCH_STATIC_PROP_W.
+        [$class, $before, $classAfter] = $this->captureStmtLines(fn() => $this->getDynamicStaticClassValue($expr->class));
+        $classValue = $this->genTmpVarName();
+        $classEntry = $this->genTmpVarName();
+        $before[] = 'php::Var ' . $classValue . ' = ' . $class . ';';
+        $before[] = 'auto* ' . $classEntry . ' = ' . $classValue . '.isObject() ? ' . $classValue . '.ce() : '
+            . Symbol::getClassEntrySafe() . '(php::toString(' . $classValue . '));';
+        foreach ($classAfter as $line) {
+            $before[] = $line;
+        }
+        [$property, $nameBefore, $nameAfter] = $this->captureStmtLines(fn() => $this->propertyNameToStr($expr->name, literal: true));
+        $resolve = [];
+        if ($expr->name instanceof Expr\Variable && is_string($expr->name->name)) {
+            $resolve = $nameBefore;
+            $after = $nameAfter;
+        } else {
+            foreach ($nameBefore as $line) {
+                $before[] = $line;
+            }
+            $propertyValue = $this->genTmpVarName();
+            $before[] = 'php::Var ' . $propertyValue . ' = ' . $property . ';';
+            foreach ($nameAfter as $line) {
+                $before[] = $line;
+            }
+            $property = 'php::toString(' . $propertyValue . ')';
+        }
+        return [Symbol::getStaticProperty() . '(' . $classEntry . ', ' . $property . ')', $before, $after, $resolve];
+    }
+
 
     protected function getFixedObjectPropDefaultValue(PropertyDef $def): ?string
     {

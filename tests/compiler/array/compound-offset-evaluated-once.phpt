@@ -48,6 +48,7 @@ function main(): void
 
     $rhsIndex = 0;
     $rhsValues = [10, 20];
+    // PHP reads a plain variable offset after the RHS has incremented it.
     $rhsResult = ($rhsValues[$rhsIndex] += ++$rhsIndex);
 
     var_dump($rhsIndex, $rhsValues[0], $rhsValues[1], $rhsResult);
@@ -82,9 +83,9 @@ int(40)
 int(30)
 int(40)
 int(1)
-int(11)
-int(20)
-int(11)
+int(10)
+int(21)
+int(21)
 string(1) "b"
 int(15)
 int(20)

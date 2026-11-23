@@ -1,0 +1,9 @@
+name: typephp_thread_internal_entry
+mode: bin
+sources:
+  - main.php
+  - workers.php
+embedded-files:
+  - worker-script.php
+ext-deps:
+  - swoole

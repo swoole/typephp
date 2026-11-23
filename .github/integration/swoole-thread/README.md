@@ -89,9 +89,28 @@ compiler option and records `literal_strings=false`.
 
 ## Executable entrypoint
 
-`bin-main.php` guards application startup with
-`Swoole\Thread::getInfo()['is_main_thread']`. Worker RINIT happens before Swoole
-sets `Thread::getArguments()`, so testing whether arguments are null is not a
-safe entrypoint guard. Worker scripts intentionally call compiled exported
+The host invokes the compiled application entry after request initialization;
+worker RINIT only initializes request-local state. `bin-main.php` therefore
+needs no application-level main-thread guard. Legacy PHPX SDKs use a generated
+main-thread guard in RINIT. Worker scripts intentionally call compiled exported
 functions without including their original PHP source. Falling back to the
 interpreted implementation would hide missing compiled symbols.
+
+`internal-entry/project.yml` adds a bounded executable probe for Swoole's
+internal-function and internal-class static-method entries. Build it with the
+source compiler and a Swoole extension containing internal-entry support:
+
+```sh
+php .github/integration/swoole-thread/source-compiler.php \
+  .github/integration/swoole-thread/internal-entry/project.yml \
+  --job 1 --output /path/to/artifacts/thread-internal
+/path/to/artifacts/thread-internal
+```
+
+The expected output is `swoole-internal-entry-ok`. The probe checks positional
+arguments, `getArguments()`, request-local static state, shutdown callbacks,
+and the original script-entry path. Its main-thread assertion fails immediately
+if main is accidentally entered in a worker, preventing recursive thread creation.
+For a deployment check, build a private copy and remove its `worker-script.php`
+after compilation: that script is embedded, and the function/class definitions
+must be provided by the compiled module.

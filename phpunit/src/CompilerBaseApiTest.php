@@ -1966,6 +1966,7 @@ YAML);
 
         $this->assertContains('TYPEPHP_PROJECT_NAME=module_accessor', $options['user_defines']);
         $this->assertContains('TYPEPHP_RUNTIME_EXPORTS=1', $options['user_defines']);
+        $this->assertContains('TYPEPHP_PROJECT_SEPARATE_ENTRY=1', $options['user_defines']);
         $this->assertArrayNotHasKey('forced_include', $options->toArray());
         $this->assertArrayNotHasKey('precompiled_header', $options->toArray());
         $this->assertFalse($this->compiler->hasMiscObjectFileCache($entry));

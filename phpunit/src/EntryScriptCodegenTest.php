@@ -50,6 +50,21 @@ PHP,
         self::assertStringNotContainsString('php::eval("\\n', $extension);
         self::assertStringNotContainsString('zend_disable_functions(', $extension);
         self::assertStringNotContainsString('typephp_disable_nano_function(', $extension);
+
+        $rinit = substr(
+            $extension,
+            strpos($extension, 'PHP_RINIT_FUNCTION('),
+            strpos($extension, 'PHP_RSHUTDOWN_FUNCTION(') - strpos($extension, 'PHP_RINIT_FUNCTION('),
+        );
+        // Current SDKs run main through a host-owned callback. Legacy SDKs
+        // retain a main-thread-only fallback rather than re-entering main in workers.
+        self::assertStringContainsString('#ifndef TYPEPHP_RUNTIME_SEPARATE_ENTRY', $rinit);
+        self::assertStringContainsString('if (tsrm_is_main_thread()) {', $rinit);
+        self::assertStringContainsString(
+            "TYPEPHP_EMBED_RUN_MAIN_FUNCTION(entry_script) {\n"
+                . 'php::eval(std::string(257, \'\\n\') + "main();",',
+            $extension,
+        );
     }
 
     public function testNanoEntrypointForwardsArgcAndArgvWithTheSharedContract(): void

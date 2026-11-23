@@ -1902,7 +1902,13 @@ CODE;
         }
         $code .= 'module_init();' . PHP_EOL;
 
+        $embeddedEntryCode = '';
         if ($this->isBuildModeBin() && $this->hasSapi('embed') && !$this->isNanoMode()) {
+            // New PHPX runtimes invoke the application after request startup.
+            // Older SDKs still need this RINIT entry, restricted to the main
+            // thread so a Swoole worker cannot recursively start the application.
+            $code .= '#ifndef TYPEPHP_RUNTIME_SEPARATE_ENTRY' . PHP_EOL;
+            $code .= '#ifdef ZTS' . PHP_EOL . 'if (tsrm_is_main_thread()) {' . PHP_EOL . '#endif' . PHP_EOL;
             if ($this->isSapiBuild()) {
                 $code .= 'if (strcmp(sapi_module.name, "embed") == 0) {' . PHP_EOL;
             }
@@ -1928,10 +1934,13 @@ CODE;
                 $entryScriptArg = 'std::string(' . $entryLineOffset . ", '\\n') + " . $entryScriptArg;
             }
 
-            $code .= 'php::eval(' . $entryScriptArg . ', ' . $entryFileArg . ');' . PHP_EOL;
+            $embeddedEntryCode = 'php::eval(' . $entryScriptArg . ', ' . $entryFileArg . ');' . PHP_EOL;
+            $code .= $embeddedEntryCode;
             if ($this->isSapiBuild()) {
                 $code .= '}' . PHP_EOL;
             }
+            $code .= '#ifdef ZTS' . PHP_EOL . '}' . PHP_EOL . '#endif' . PHP_EOL;
+            $code .= '#endif' . PHP_EOL;
         }
 
         if ($this->isSapiBuild()) {
@@ -2067,6 +2076,10 @@ CODE;
                     $code .= $this->getIndent() . $releaseAstConstantFn . '();' . PHP_EOL;
                 }
                 $code .= '}' . PHP_EOL;
+                $code .= '#ifdef TYPEPHP_RUNTIME_SEPARATE_ENTRY' . PHP_EOL;
+                $code .= 'TYPEPHP_EMBED_RUN_MAIN_FUNCTION(' . $this->targetName . ') {' . PHP_EOL;
+                $code .= $embeddedEntryCode;
+                $code .= '}' . PHP_EOL . '#endif' . PHP_EOL;
             }
         } else {
             $code .= '}  // namespace ' . $projectNamespace . PHP_EOL;

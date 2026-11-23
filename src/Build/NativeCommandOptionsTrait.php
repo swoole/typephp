@@ -151,6 +151,9 @@ trait NativeCommandOptionsTrait
         unset($values['forced_include'], $values['precompiled_header']);
         $values['user_defines'][] = 'TYPEPHP_RUNTIME_EXPORTS=1';
         $values['user_defines'][] = 'TYPEPHP_PROJECT_NAME=' . $this->targetName;
+        if (!$this->isNanoMode()) {
+            $values['user_defines'][] = 'TYPEPHP_PROJECT_SEPARATE_ENTRY=1';
+        }
         return new CompileOptions($values);
     }
 

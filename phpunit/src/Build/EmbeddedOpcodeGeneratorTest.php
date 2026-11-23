@@ -152,7 +152,17 @@ final class EmbeddedOpcodeGeneratorTest extends TestCase
         $this->verifyBuiltinCalls(true);
     }
 
-    private function verifyBuiltinCalls(bool $differentLayout): void
+    public function testFramelessLayoutProbeRejectsACacheMiss(): void
+    {
+        $this->verifyBuiltinCalls(true, true);
+    }
+
+    public function testFramelessLayoutProbeReplaysADifferentSystemId(): void
+    {
+        $this->verifyBuiltinCalls(true, false, true);
+    }
+
+    private function verifyBuiltinCalls(bool $differentLayout, bool $cacheMiss = false, bool $differentSystemId = false): void
     {
         $extensionArguments = $this->opcacheArguments();
         $ffiArguments = [];
@@ -165,7 +175,9 @@ function embeddedBuiltinCalls(string $value): array {
     return [strtolower($value), ltrim($value, 'A'), str_ends_with($value, 'Z'),
         array_diff_key(['keep' => 1, 'drop' => 2], ['drop' => 0]), str_contains($value, 'b')];
 }
+return 'cached';
 PHP);
+        touch($this->anonymousFile, time() - 10);
         $generator = $this->generator(false, [...$extensionArguments, '-d', 'opcache.opt_debug_level=131072']);
         $batch = $generator->prepare([$this->anonymousFile], [$this->anonymousFile => '@typephp:anon:test']);
         mkdir($batch->cacheDirectory($this->anonymousFile), 0777, true);
@@ -178,20 +190,51 @@ PHP);
         self::assertStringContainsString('strtolower', $dump);
         self::assertStringNotContainsString('FRAMELESS_ICALL', $dump);
         self::assertStringNotContainsString('JMP_FRAMELESS', $dump);
-        self::assertArrayHasKey($this->anonymousFile, $generator->compile($batch));
+        $blobs = $generator->compile($batch);
+        self::assertArrayHasKey($this->anonymousFile, $blobs);
+        if ($differentSystemId) {
+            $original = $blobs[$this->anonymousFile];
+            $bytes = file_get_contents($original);
+            $systemId = substr($bytes, 8, 32);
+            $otherId = str_repeat('0', 32);
+            $other = str_replace(
+                '/' . $systemId . '/', '/' . $otherId . '/', str_replace('\\', '/', $original), $replacements,
+            );
+            self::assertSame(1, $replacements);
+            mkdir(dirname($other), 0777, true);
+            file_put_contents($other, substr_replace($bytes, $otherId, 8, 32));
+            self::assertTrue(unlink($original));
+            $blobs[$this->anonymousFile] = $other;
+        }
+        if ($differentLayout) {
+            $mtime = filemtime($this->anonymousFile);
+            $length = filesize($this->anonymousFile);
+            // Preserve the size and timestamp but change the return marker.
+            // A cache miss is now distinguishable from a cached execution.
+            file_put_contents($this->anonymousFile, str_pad("<?php return 'source';", $length));
+            touch($this->anonymousFile, $mtime + ($cacheMiss ? 1 : 0));
+        }
 
         // Load the produced cache in a fresh process with all normal builtins
         // enabled. The build-only disabled-functions policy must not leak into
         // the cached program's execution.
         $execute = $differentLayout
-            ? [dirname(__DIR__, 2) . '/code/embedded-opcode-frameless-layout.php', $this->anonymousFile]
+            ? [dirname(__DIR__, 2) . '/code/embedded-opcode-frameless-layout.php', $this->anonymousFile, $blobs[$this->anonymousFile]]
             : ['-r', 'require $argv[1]; echo json_encode(embeddedBuiltinCalls("AbZ"));', $this->anonymousFile];
         [$status, $stdout, $stderr] = $this->runPhp([
             PHP_BINARY, '-n', ...$extensionArguments, ...$ffiArguments,
             '-d', 'opcache.enable_cli=1', '-d', 'opcache.file_cache_only=1',
+            '-d', 'opcache.file_update_protection=0',
+            '-d', 'opcache.validate_timestamps=1',
+            '-d', 'opcache.jit_buffer_size=0',
             '-d', 'opcache.file_cache=' . $batch->cacheDirectory($this->anonymousFile),
             ...$execute,
         ]);
+        if ($cacheMiss) {
+            self::assertNotSame(0, $status);
+            self::assertStringContainsString('OPcache did not replay the generated cache', $stdout . $stderr);
+            return;
+        }
         self::assertSame(0, $status, $stderr);
         self::assertSame('["abz","bZ",true,{"keep":1},true]', $stdout);
     }

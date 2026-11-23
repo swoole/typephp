@@ -10,13 +10,17 @@ namespace TypePhp\Build;
 
 final class EmbeddedOpcodeGenerator
 {
+    private ?string $compileIniPath = null;
+
     private const string DRIVER_SOURCE = <<<'PHP'
 <?php
 echo PHP_VERSION, "\n";
-foreach (array_slice($argv, 1) as $path) {
+foreach ($argv as $index => $path) {
+    if ($index === 0) {
+        continue;
+    }
     if (!opcache_compile_file($path)) {
-        fwrite(STDERR, "OPcache could not compile: {$path}\n");
-        exit(1);
+        throw new RuntimeException("OPcache could not compile: {$path}");
     }
 }
 PHP;
@@ -191,7 +195,7 @@ PHP;
             throw new \RuntimeException("Cannot hash anonymous class source: {$file}");
         }
         $key = hash('sha256', implode("\n", [
-            'anonymous-opcodes-v1',
+            'anonymous-opcodes-v2-portable-calls',
             $file,
             $fileHash,
             $this->buildSignature,
@@ -207,7 +211,7 @@ PHP;
             throw new \RuntimeException("Cannot read vendor directory mtime: {$vendorRoot}");
         }
         $key = hash('sha256', implode("\n", [
-            'vendor-directory-mtime-opcodes-v2',
+            'vendor-directory-mtime-opcodes-v3-portable-calls',
             $vendorRoot,
             (string) $mtime,
             $this->buildSignature,
@@ -231,7 +235,8 @@ PHP;
     {
         $command = [
             $this->php,
-            '-n',
+            '-c',
+            $this->compileConfiguration(),
             ...$this->extensionArguments,
             '-d',
             'opcache.enable_cli=1',
@@ -244,11 +249,64 @@ PHP;
             $this->driverPath(),
             $file,
         ];
+        $environment = getenv();
+        $environment['PHP_INI_SCAN_DIR'] = '';
+        return $this->runPhp($command, $environment);
+    }
+
+    /**
+     * Frameless ICALL operands contain indices into a process-local
+     * frameless-handler table. That table can differ between CLI and embed
+     * even for the same PHP version. Hide internal functions while compiling
+     * embedded files so calls retain their names and resolve in the target VM.
+     * The target runtime's functions and the AOT C++ paths are unaffected.
+     */
+    private function compileConfiguration(): string
+    {
+        if ($this->compileIniPath !== null) {
+            return $this->compileIniPath;
+        }
+        [$status, $stdout, $stderr] = $this->runPhp([
+            $this->php, '-n', ...$this->extensionArguments,
+            '-r', 'echo json_encode(get_defined_functions()["internal"]);',
+        ]);
+        $functions = json_decode($stdout, true);
+        if ($status !== 0 || !is_array($functions)) {
+            throw new \RuntimeException("Cannot query embedded opcode build functions:\n{$stderr}");
+        }
+        $disabled = [];
+        foreach ($functions as $function) {
+            if (!is_string($function)) {
+                throw new \RuntimeException('Invalid embedded opcode build function name');
+            }
+            // The serializer has no frameless entry. PHP exposes exit/die
+            // (8.4+) and clone (8.5+) as functions but forbids disabling them.
+            if (!in_array($function, ['opcache_compile_file', 'exit', 'die', 'clone'], true)) {
+                $disabled[] = $function;
+            }
+        }
+        // Use an isolated INI rather than a long -d argument: a full function
+        // list can exceed the Windows command-line length limit. Suppressing
+        // the scan directory keeps the process as isolated as the old -n path.
+        // Each generator owns its INI: replacing a shared file can leave a
+        // gap on Windows and let another PHP process use its default config.
+        $path = $this->buildDirectory . '/cache/opcache/portable-build-'
+            . bin2hex(random_bytes(12)) . '.ini';
+        AtomicFile::write($path, 'disable_functions=' . implode(',', $disabled) . PHP_EOL, '.ini-');
+        return $this->compileIniPath = $path;
+    }
+
+    /** @param list<string> $command
+     * @param array<string, string>|null $environment
+     * @return array{int, string, string}
+     */
+    private function runPhp(array $command, ?array $environment = null): array
+    {
         $process = proc_open($command, [
             0 => ['pipe', 'r'],
             1 => ['pipe', 'w'],
             2 => ['pipe', 'w'],
-        ], $pipes);
+        ], $pipes, null, $environment);
         if (!is_resource($process)) {
             throw new \RuntimeException('Cannot start the PHP OPcache build process');
         }

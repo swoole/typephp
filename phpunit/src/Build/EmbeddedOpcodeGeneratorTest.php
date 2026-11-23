@@ -121,13 +121,136 @@ final class EmbeddedOpcodeGeneratorTest extends TestCase
         self::assertSame(0, $second->vendorHits());
     }
 
-    private function generator(bool $force = false): EmbeddedOpcodeGenerator
+    public function testLegacyOpcodeCachesAreNotReused(): void
+    {
+        $vendor = dirname($this->vendorFile, 2);
+        $vendorKey = hash('sha256', implode("\n", [
+            'vendor-directory-mtime-opcodes-v2', $vendor, (string) filemtime($vendor), 'build-signature',
+        ]));
+        $anonymousKey = hash('sha256', implode("\n", [
+            'anonymous-opcodes-v1', $this->anonymousFile, hash_file('sha256', $this->anonymousFile), 'build-signature',
+        ]));
+        $this->writeBlob($this->buildDirectory . '/cache/opcache/vendor-' . substr($vendorKey, 0, 20), $this->vendorFile, 'unsafe');
+        $this->writeBlob($this->buildDirectory . '/cache/opcache/anonymous-' . substr($anonymousKey, 0, 20), $this->anonymousFile, 'unsafe');
+
+        $batch = $this->generator()->prepare(
+            [$this->vendorFile, $this->anonymousFile],
+            [$this->anonymousFile => '@typephp:anon:test'],
+        );
+
+        self::assertSame([], $batch->cachedBlobs());
+        self::assertSame([$this->vendorFile, $this->anonymousFile], $batch->pendingFiles());
+    }
+
+    public function testEmbeddedBuiltinsResolveByNameWithoutFramelessIndices(): void
+    {
+        $this->verifyBuiltinCalls(false);
+    }
+
+    public function testEmbeddedBuiltinsSurviveADifferentFramelessTable(): void
+    {
+        $this->verifyBuiltinCalls(true);
+    }
+
+    private function verifyBuiltinCalls(bool $differentLayout): void
+    {
+        $extensionArguments = $this->opcacheArguments();
+        $ffiArguments = [];
+        if ($differentLayout) {
+            $ffiArguments = $this->ffiArguments();
+        }
+        file_put_contents($this->anonymousFile, <<<'PHP'
+<?php
+function embeddedBuiltinCalls(string $value): array {
+    return [strtolower($value), ltrim($value, 'A'), str_ends_with($value, 'Z'),
+        array_diff_key(['keep' => 1, 'drop' => 2], ['drop' => 0]), str_contains($value, 'b')];
+}
+PHP);
+        $generator = $this->generator(false, [...$extensionArguments, '-d', 'opcache.opt_debug_level=131072']);
+        $batch = $generator->prepare([$this->anonymousFile], [$this->anonymousFile => '@typephp:anon:test']);
+        mkdir($batch->cacheDirectory($this->anonymousFile), 0777, true);
+        [$status, $version, $dump] = (new \ReflectionMethod($generator, 'compileFile'))->invoke(
+            $generator, $this->anonymousFile, $batch->cacheDirectory($this->anonymousFile),
+        );
+
+        self::assertSame(0, $status, $dump);
+        self::assertSame(PHP_VERSION, strtok($version, "\r\n"));
+        self::assertStringContainsString('strtolower', $dump);
+        self::assertStringNotContainsString('FRAMELESS_ICALL', $dump);
+        self::assertStringNotContainsString('JMP_FRAMELESS', $dump);
+        self::assertArrayHasKey($this->anonymousFile, $generator->compile($batch));
+
+        // Load the produced cache in a fresh process with all normal builtins
+        // enabled. The build-only disabled-functions policy must not leak into
+        // the cached program's execution.
+        $execute = $differentLayout
+            ? [dirname(__DIR__, 2) . '/code/embedded-opcode-frameless-layout.php', $this->anonymousFile]
+            : ['-r', 'require $argv[1]; echo json_encode(embeddedBuiltinCalls("AbZ"));', $this->anonymousFile];
+        [$status, $stdout, $stderr] = $this->runPhp([
+            PHP_BINARY, '-n', ...$extensionArguments, ...$ffiArguments,
+            '-d', 'opcache.enable_cli=1', '-d', 'opcache.file_cache_only=1',
+            '-d', 'opcache.file_cache=' . $batch->cacheDirectory($this->anonymousFile),
+            ...$execute,
+        ]);
+        self::assertSame(0, $status, $stderr);
+        self::assertSame('["abz","bZ",true,{"keep":1},true]', $stdout);
+    }
+
+    /** @return list<string> */
+    private function ffiArguments(): array
+    {
+        $extension = ini_get('extension_dir') . DIRECTORY_SEPARATOR
+            . (PHP_OS_FAMILY === 'Windows' ? 'php_ffi.dll' : 'ffi.' . PHP_SHLIB_SUFFIX);
+        foreach ([['-d', 'ffi.enable=1'], ['-d', 'ffi.enable=1', '-d', 'extension=' . $extension]] as $arguments) {
+            [$status] = $this->runPhp([
+                PHP_BINARY, '-n', ...$arguments, '-r', 'exit(class_exists("FFI") ? 0 : 1);',
+            ]);
+            if ($status === 0) {
+                return $arguments;
+            }
+        }
+        self::markTestSkipped('FFI is needed only to simulate a different frameless table in this test');
+    }
+
+    /** @return list<string> */
+    private function opcacheArguments(): array
+    {
+        $extension = ini_get('extension_dir') . DIRECTORY_SEPARATOR
+            . (PHP_OS_FAMILY === 'Windows' ? 'php_opcache.dll' : 'opcache.' . PHP_SHLIB_SUFFIX);
+        foreach ([[], ['-d', 'zend_extension=' . $extension]] as $arguments) {
+            [$status] = $this->runPhp([
+                PHP_BINARY, '-n', ...$arguments, '-r', 'exit(function_exists("opcache_compile_file") ? 0 : 1);',
+            ]);
+            if ($status === 0) {
+                return $arguments;
+            }
+        }
+        self::markTestSkipped('The build PHP CLI needs OPcache for the file-cache integration test');
+    }
+
+    /** @param list<string> $command
+     * @return array{int, string, string}
+     */
+    private function runPhp(array $command): array
+    {
+        $process = proc_open($command, [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes);
+        self::assertIsResource($process);
+        fclose($pipes[0]);
+        $stdout = stream_get_contents($pipes[1]);
+        $stderr = stream_get_contents($pipes[2]);
+        fclose($pipes[1]);
+        fclose($pipes[2]);
+        return [proc_close($process), (string) $stdout, (string) $stderr];
+    }
+
+    /** @param list<string> $extensionArguments */
+    private function generator(bool $force = false, array $extensionArguments = []): EmbeddedOpcodeGenerator
     {
         return new EmbeddedOpcodeGenerator(
             $this->buildDirectory,
             'app',
             PHP_BINARY,
-            [],
+            $extensionArguments,
             PHP_VERSION,
             'build-signature',
             $force,

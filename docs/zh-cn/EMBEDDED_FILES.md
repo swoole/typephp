@@ -157,6 +157,12 @@ php -r 'var_dump(PHP_VERSION, PHP_ZTS, extension_loaded("Zend OPcache"), functio
 TypePHP 自己也会用 `-n` 探测 OPcache，并尝试加载标准位置中的扩展。仅有 `tpc`
 可执行文件但没有匹配的 PHP CLI 和 OPcache 时，无法构建 `embedded-files`。
 
+生成 opcode 时使用隔离的构建专用 INI，隐藏内部函数声明，保留 OPcache 序列化函数
+及不能禁用的语言结构，使内嵌调用保留函数名，而不携带进程局部的 frameless
+handler 索引。即使 PHP 版本一致，CLI 与 embed SAPI 的这些索引也可能不同。
+生成程序的内部函数保持正常，
+AOT C++ 代码生成不受影响；采用旧策略的 vendor 和匿名类 opcode 缓存会重新生成。
+
 OPcache 只参与构建期序列化。运行生成的程序时：
 
 - 不需要启用或安装 OPcache 扩展；

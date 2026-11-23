@@ -174,6 +174,14 @@ TypePHP probes OPcache with `-n` and tries the standard extension locations.
 A standalone `tpc` without the matching PHP CLI and OPcache cannot build an
 `embedded-files` project.
 
+Opcode generation uses an isolated build-only INI that hides internal function
+declarations, keeping the OPcache serializer and non-disableable language
+constructs available. This keeps embedded calls bound by name instead
+of storing process-local frameless-handler indices, which may differ between
+CLI and embed SAPIs even with the same PHP version. The generated program keeps
+its normal internal functions; AOT C++ code generation is unchanged. Existing
+vendor and anonymous-class opcode caches from the older policy are rebuilt.
+
 OPcache is only the build-time serializer. The generated program does not need:
 
 - the OPcache extension;

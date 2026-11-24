@@ -94,6 +94,55 @@ final class IncrementalDeclarationTest extends TestCase
         self::assertSame($this->provider, $this->invoke($compiler, 'getSymbolDeclarationFile', 'constant:Incremental\\LIMIT'));
     }
 
+    public function testDevirtualizedDescendantIncludesItsImplementationDeclaration(): void
+    {
+        $this->assertDevirtualizedDescendantDeclarations('abstract protected function value(int $step = 1): int;');
+    }
+
+    public function testUniqueConcreteOverrideIncludesItsImplementationDeclaration(): void
+    {
+        $this->assertDevirtualizedDescendantDeclarations('protected function value(int $step = 1): int { return $step; }');
+    }
+
+    private function assertDevirtualizedDescendantDeclarations(string $declaration): void
+    {
+        $provider = <<<'PHP'
+<?php
+abstract class DispatchParent
+{
+    METHOD_DECLARATION
+    public function run(): int { return $this->value(); }
+}
+trait DispatchImplementation
+{
+    protected function value(int $step = 7): int { return $step; }
+}
+PHP;
+        file_put_contents($this->provider, str_replace('METHOD_DECLARATION', $declaration, $provider));
+        file_put_contents($this->independent, <<<'PHP'
+<?php
+class DispatchChild extends DispatchParent { use DispatchImplementation; }
+PHP);
+        file_put_contents($this->consumer, <<<'PHP'
+<?php
+function main(): void { var_dump((new DispatchChild())->run()); }
+PHP);
+        foreach ([1, 2] as $_) {
+            $compiler = $this->convertProject();
+            $cpp = file_get_contents($compiler->getCppFile($this->provider));
+            self::assertStringContainsString('php_dispatchchild__value(this_)', $cpp);
+            self::assertStringContainsString(
+                '#include <' . basename($compiler->getDeclarationHeaderFile($this->independent)) . '>',
+                $cpp,
+                'An ancestor directly calling its unique descendant must include that implementation header',
+            );
+            self::assertStringContainsString(
+                'php_dispatchchild__value(',
+                file_get_contents($compiler->getDeclarationHeaderFile($this->independent)),
+            );
+        }
+    }
+
     public function testGroupedDeclarationsPreserveHelpersAndFilesWithoutFunctions(): void
     {
         $this->copyFixture('grouped/provider.php', $this->provider);

@@ -325,7 +325,12 @@ trait MethodCallTrait
         $nativeFunc = $this->getNativeMethod($expr, $target->functionDef->declaringClass, $method);
         if ($nativeFunc !== false) {
             $this->checkFunction($nativeFunc);
-            return $this->hasFunction($nativeFunc) ? $nativeFunc : false;
+            if ($this->hasFunction($nativeFunc)) {
+                // The selected implementation may live in a descendant file
+                // absent from the receiver's original declaration dependencies.
+                $this->recordSymbolUse($this->file, $this->getNativeFunctionDependencySymbol($nativeFunc));
+                return $nativeFunc;
+            }
         }
         return false;
     }

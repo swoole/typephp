@@ -20,6 +20,7 @@ use PhpParser\ParserFactory;
 use PhpParser\PhpVersion;
 use PhpParser\PrettyPrinter;
 use TypePhp\Analysis\CompilationStatistics;
+use TypePhp\Analysis\MethodDispatchAnalysis;
 use TypePhp\Backend\CompilerBackend;
 use TypePhp\Backend\CompilerFactory;
 use TypePhp\Build\AstCache;
@@ -488,6 +489,7 @@ abstract class CompilerBase implements PropertyAccessContext
     protected bool $traitDeclarationsComposed = false;
     protected bool $declarationExpressionsFinalized = false;
     protected bool $methodOverrideFlagsFinalized = false;
+    protected ?MethodDispatchAnalysis $methodDispatchAnalysis = null;
     protected const array PHP_RUNTIME_TYPE_MAP = [
         'integer' => Type::INT,
         'double' => Type::FLOAT,

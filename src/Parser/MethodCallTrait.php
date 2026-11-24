@@ -8,6 +8,7 @@
 namespace TypePhp\Parser;
 
 use TypePhp\Type;
+use TypePhp\Analysis\MethodDispatchAnalysis;
 
 use PhpParser\Modifiers;
 use PhpParser\Node;
@@ -146,20 +147,6 @@ trait MethodCallTrait
         return isset($this->classMethodOverride[$fullMethodNameLower]) and $this->classMethodOverride[$fullMethodNameLower];
     }
 
-    protected function getOverrideMethodName(string $class, string $method): string
-    {
-        if (!$this->hasClass($class) && !$this->hasInterface($class)
-            && !$this->isInternalClass($class) && !$this->isInternalInterface($class)) {
-            $class = $this->getNamespacedClassName($class);
-        }
-        return $class . '::' . $method;
-    }
-
-    protected function hasSubClasses(string $classNameLower): bool
-    {
-        return !empty($this->classSubClasses[$classNameLower]);
-    }
-
     protected function isCurrentClassFinal(): bool
     {
         return $this->classDef && ($this->classDef->flags & Modifiers::FINAL) !== 0;
@@ -264,49 +251,6 @@ trait MethodCallTrait
     }
 
     /**
-     * Determine whether a method call can be devirtualized to a direct native call.
-     *
-     * Returns true when the exact class is known at compile time:
-     *  1. $this->m() in a final class (no subclass possible)
-     *  2. $this->m() where m is final (can't be overridden)
-     *  3. $this->m() where m is private (not virtual)
-     *  4. $obj->m() where obj's class has no known subclasses
-     *  5. $obj->m() where obj is SSA-stable and its class is final
-     */
-    protected function canDevirtualize(string $object, string $class, string $method): bool
-    {
-        // Case 1: Calling on 'this_' in a final class
-        if ($object === 'this_' && $this->isCurrentClassFinal()) {
-            return true;
-        }
-
-        // Case 2 & 3: Method is final or private
-        $flags = $this->getMethodFlags($class, $method);
-        if ($flags & (Modifiers::FINAL | Modifiers::PRIVATE)) {
-            return true;
-        }
-
-        // Case 4: Typed object whose class has no known subclasses
-        if ($object !== 'this_' && $this->hasClass($class) && !$this->isBuildModeLib()) {
-            $classLower = strtolower($class);
-            if (!$this->hasSubClasses($classLower) && !$this->isInterface($class) && !$this->isAbstractClass($class)) {
-                return true;
-            }
-        }
-
-        // Case 5: SSA stability proves the variable identity, not necessarily
-        // the runtime class. Only final classes are exact enough here.
-        if ($object !== 'this_' && isset($this->context->stableObjects[$object])) {
-            $stableClass = $this->context->stableObjects[$object];
-            if ($this->isFinalClass($stableClass)) {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    /**
      * Materialize a non-variable receiver as an object temporary carrying its
      * statically detected class, keeping PHP's evaluation order (receiver before
      * arguments). Dispatching directly is still up to findNativeMethod().
@@ -320,27 +264,32 @@ trait MethodCallTrait
         return $object;
     }
 
-    protected function findNativeMethod(CallLike $expr, string $object, string $method): string|false
+    protected function findNativeMethod(
+        CallLike $expr,
+        string $object,
+        string $method,
+        bool $exactReceiver = false,
+    ): string|false
     {
-        $classDef = null;
         if ($object === 'this_') {
             $class = $this->getFullClassName();
-            $classDef = $this->classDef;
+        } elseif (isset($this->context->exactObjects[$object])) {
+            $class = $this->context->exactObjects[$object];
         } elseif (isset($this->context->objects[$object])) {
             $class = $this->context->objects[$object];
             // SSA-stable: use exact type from stableObjects (more specific than declared type)
             if (isset($this->context->stableObjects[$object])) {
                 $class = $this->context->stableObjects[$object];
             }
-        } elseif (($class = $this->context->getRefinedObjectClass($object)) !== '') {
-            // instanceof proves an upper bound. Only an unoverridable method
-            // can bypass runtime dispatch through a non-final bound.
-            if (!$this->isFinalClass($class)
-                && !($this->getMethodFlags($class, $method) & (Modifiers::FINAL | Modifiers::PRIVATE))) {
+        } else {
+            // instanceof and abstract parameter declarations supply upper bounds.
+            $class = $this->context->getRefinedObjectClass($object);
+            if ($class === '') {
+                $class = $this->getDeclaredObjectType($object);
+            }
+            if ($class === '') {
                 return false;
             }
-        } else {
-            return false;
         }
 
         if ($this->hasInaccessibleDeclaredMethod($class, $method)) {
@@ -350,35 +299,33 @@ trait MethodCallTrait
             return false;
         }
 
-        $nativeFunc = $this->getNativeMethod($expr, $class, $method);
-        // A Native class exists but the method was not found; this may be a dynamic call
-        if (!$nativeFunc) {
+        $analysis = $this->methodDispatchAnalysis ??= new MethodDispatchAnalysis($this->symbols);
+        $declaration = $analysis->resolve($class, $method);
+        if ($declaration === null) {
+            // Preserve inherited internal-method and magic dispatch handling.
+            $this->getNativeMethod($expr, $class, $method);
             if ($this->hasClass($class) and $this->getNativeMethod($expr, $class, '__call', false)) {
                 throw new DynamicCall();
             }
+            return false;
         }
 
-        $fullMethodName = $this->getOverrideMethodName($class, $method);
-
-        // Libraries may be extended by consumers outside this compilation.
-        // final/private methods and proven exact classes remain direct calls.
-        if ($this->isOverrideMethod($fullMethodName) || $this->isBuildModeLib()) {
-            if (!$this->canDevirtualize($object, $class, $method)) {
-                return false;
-            }
+        // Exact objects select their declaration even when descendants override
+        // it. Other receivers need one implementation across their whole subtree.
+        // Private methods retain lexical binding rather than child redeclarations.
+        if ($exactReceiver || isset($this->context->exactObjects[$object]) || $this->isFinalClass($class)
+            || ($declaration->flags & (Modifiers::FINAL | Modifiers::PRIVATE))) {
+            $target = $declaration;
+        } else {
+            $target = $analysis->uniqueImplementation($class, $method);
         }
-        if ($nativeFunc) {
-            if ($this->hasClass($class) && $this->getMethodFlags($class, $method) & Modifiers::ABSTRACT) {
-                return false;
-            }
-            if ($object !== 'this_' && !isset($this->context->stableObjects[$object])
-                && ($this->isAbstractClass($class) || $this->isInterface($class))) {
-                return false;
-            }
+        if ($target === null || ($target->flags & Modifiers::ABSTRACT) || $target->functionDef === null) {
+            return false;
+        }
+        $nativeFunc = $this->getNativeMethod($expr, $target->functionDef->declaringClass, $method);
+        if ($nativeFunc !== false) {
             $this->checkFunction($nativeFunc);
-            if ($this->hasFunction($nativeFunc)) {
-                return $nativeFunc;
-            }
+            return $this->hasFunction($nativeFunc) ? $nativeFunc : false;
         }
         return false;
     }
@@ -1002,7 +949,10 @@ trait MethodCallTrait
             }
             $nativeFunc = false;
             try {
-                $nativeFunc = $this->findNativeMethod($expr, $object, $this->parseIdentifier($expr->name));
+                $exactReceiver = $materializedUserReceiver && $expr->var instanceof Expr\New_
+                    && $expr->var->class instanceof Node\Name
+                    && strtolower($expr->var->class->toString()) !== 'static';
+                $nativeFunc = $this->findNativeMethod($expr, $object, $this->parseIdentifier($expr->name), $exactReceiver);
                 if ($nativeFunc) {
                     $expr->setAttribute('nativeCall', $nativeFunc);
                     try {

@@ -1,15 +1,5 @@
 <?php
 namespace LibraryLifecycle {
-    class Derived extends Base
-    {
-        protected function hook(): void { $this->count += 1; }
-    }
-
-    class NonEmptyDerived extends NonEmptyBase
-    {
-        protected function hook(): void { $this->count += 1; }
-    }
-
     class Worker implements Handler
     {
         public function act(): void { echo "hook\n"; }

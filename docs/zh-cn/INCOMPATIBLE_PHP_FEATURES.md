@@ -68,6 +68,7 @@
 
 ## 对象模型
 
+- 方法去虚化以本次编译范围内的继承图为准，适用于 bin/ext/lib。外部 ZendPHP 代码或另行编译的 TypePHP 项目继承 TypePHP 类时，不可覆盖其方法；stub 未标记 final 不代表支持外部覆盖。需要覆盖的继承关系必须一起编译，详见[类继承规则](CLASS_INHERITANCE.md#方法分派与去虚化)。
 - `toInt()`、`toString()`、`toArray()` 等保留关键词方法先于普通对象方法解析；例外：由 TypePHP 编译的 class 若以与关键词完全一致的签名（public、非 static、无参数、返回类型完全一致且不可为 nullable）声明了 `toInt/toFloat/toString/toBool/toArray`，则调用该类自己的方法；其他签名一律编译报错。
 - `toAny()` 和 `toRef()` 是不可覆盖的 TypePHP 关键词方法，普通 class-like 声明不得定义同名方法；`toInt/toFloat/toString/toBool/toArray` 允许 class 自行实现，但签名必须与关键词完全一致（方法名按 PHP 规则大小写不敏感）。Native class 仅可显式定义返回 `mixed/any` 的 `toAny()` 转换方法，不提供隐式转换；Native class 不支持 `toRef()`。
 - 固定值类型属性未显式初始化时使用类型零值，不保留 ZendPHP 的完整 uninitialized 状态；因此 `??` 等依赖 uninitialized 状态的表达式可能不同。

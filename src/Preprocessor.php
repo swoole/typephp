@@ -512,6 +512,7 @@ abstract class Preprocessor extends CompilerBase
             // The prepared class graph changed; override flags must be
             // re-finalized before the next conversion.
             $this->methodOverrideFlagsFinalized = false;
+            $this->methodDispatchAnalysis = null;
             // CompilerTest and embedding users may invoke prepareFile()
             // directly instead of the project pipeline. Preserve same-file
             // forward Native references for that public entry path as well.
@@ -580,6 +581,7 @@ abstract class Preprocessor extends CompilerBase
             // Trait methods are real methods of their consuming classes and
             // therefore change virtual-dispatch analysis.
             $this->methodOverrideFlagsFinalized = false;
+            $this->methodDispatchAnalysis = null;
         } finally {
             $this->restoreCompilerPhase($previousPhase);
         }

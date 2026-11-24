@@ -7247,7 +7247,7 @@ CODE;
                     // See the internal-parent branch above: a private method
                     // may be redeclared freely. Generated code stays correct
                     // because private calls are devirtualized to the declaring
-                    // class's body (canDevirtualize()), matching PHP's
+                    // class's body, matching PHP's
                     // private-scope binding, and Native classes never give
                     // private methods a virtual slot (isNativeVirtualMethod()).
                     break;

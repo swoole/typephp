@@ -139,6 +139,7 @@ incompatible with or more restrictive than standard PHP.
 
 ## Object model
 
+- Method devirtualization uses the current compilation's class hierarchy in bin/ext/lib builds. External ZendPHP code or separately compiled TypePHP consumers inheriting a TypePHP class must not override its methods, even if its stub does not declare them final. Compile overriding subclasses together with their bases; see [class inheritance](CLASS_INHERITANCE.md#method-dispatch-and-devirtualization).
 - Reserved keyword methods such as `toInt()`, `toString()`, and `toArray()` are
   resolved before ordinary object methods, except that a TypePHP-compiled class
   declaring `toInt/toFloat/toString/toBool/toArray` with the exact keyword

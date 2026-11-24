@@ -59,6 +59,7 @@ function selectionNullsafeLocal(?SelectionTypeRoot $root): mixed
 }
 function selectionPolymorphic(?SelectionTypeBase $root): int { return $root?->count() ?? 0; }
 function selectionNormalHop(?SelectionTypeRoot $root): mixed { return $root?->next()->constantValue(); }
+function selectionGuardedHop(?SelectionTypeRoot $root): mixed { return $root?->next()?->constantValue(); }
 function selectionReferences(?SelectionTypeRoot $root, array &$events): int { return $root?->record($events) ?? 0; }
 function selectionStatic(): int { $object = SelectionTypeRoot::$shared ?? new SelectionTypeValue(); return $object->value(); }
 function selectionResetRoot(?SelectionTypeRoot &$root): int { $root = null; return 2; }

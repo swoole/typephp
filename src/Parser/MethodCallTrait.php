@@ -282,11 +282,10 @@ trait MethodCallTrait
                 $class = $this->context->stableObjects[$object];
             }
         } else {
-            // instanceof and abstract parameter declarations supply upper bounds.
+            // Signature-only declarations do not authorize native dispatch.
+            // Nullsafe chains use them for normal hops that must still reject
+            // a null receiver. Only explicit dispatch/refinement facts qualify.
             $class = $this->context->getRefinedObjectClass($object);
-            if ($class === '') {
-                $class = $this->getDeclaredObjectType($object);
-            }
             if ($class === '') {
                 return false;
             }

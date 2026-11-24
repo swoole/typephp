@@ -62,6 +62,7 @@ function selectionNullsafeLocal(?SelectionTypeRoot $root): mixed
 }
 function selectionPolymorphic(?SelectionTypeBase $root): int { return $root?->count() ?? 0; }
 function selectionNormalHop(?SelectionTypeRoot $root): mixed { return $root?->next()->constantValue(); }
+function selectionGuardedHop(?SelectionTypeRoot $root): mixed { return $root?->next()?->constantValue(); }
 function selectionReferences(?SelectionTypeRoot $root, array &$events): int { return $root?->record($events) ?? 0; }
 function selectionStatic(): int { $object = SelectionTypeRoot::$shared ?? new SelectionTypeValue(); return $object->value(); }
 function selectionResetRoot(?SelectionTypeRoot &$root): int { $root = null; return 2; }
@@ -91,7 +92,9 @@ function main(): void
     $root->child = new SelectionTypeValue(9);
     var_dump(selectionProperty($root), selectionNullsafeObject($root), selectionNullsafeLocal($root), selectionNestedProperty($root));
     var_dump(selectionPolymorphic(new SelectionTypeChild()));
+    var_dump(selectionGuardedHop($root), selectionNormalHop($root));
     $root->child = null;
+    var_dump(selectionGuardedHop($root), selectionGuardedHop(null), selectionNormalHop(null));
     try {
         selectionNormalHop($root);
         echo "unexpected\n";
@@ -132,6 +135,11 @@ int(9)
 int(9)
 int(9)
 int(2)
+int(8)
+int(8)
+NULL
+NULL
+NULL
 normal-hop-error
 int(0)
 int(3)

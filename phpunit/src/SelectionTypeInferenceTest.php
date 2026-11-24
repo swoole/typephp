@@ -77,6 +77,14 @@ final class SelectionTypeInferenceTest extends BaseTest
         self::assertStringNotContainsString('php::VarList{events}', $body);
     }
 
+    public function testGuardedNormalHopRetainsDirectDispatch(): void
+    {
+        $body = $this->body('selectionguardedhop');
+        self::assertStringContainsString('php_selectiontypevalue__constantvalue(', $body);
+        self::assertStringNotContainsString('typephp_call_method_cached(', $body);
+        self::assertSame(2, substr_count($body, '.isNull()'));
+    }
+
     private function body(string $name): string
     {
         global $translator;

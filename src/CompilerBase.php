@@ -2556,7 +2556,9 @@ abstract class CompilerBase implements PropertyAccessContext
     {
         $indent = $this->getIndent();
         $fragment = rtrim($fragment, "\r\n");
-        $lines = preg_split('/\R/', $fragment);
+        // Only physical newlines delimit C++ lines. \R also consumes UTF-8
+        // continuation bytes such as 0x85 and other non-newline whitespace.
+        $lines = preg_split('/\r\n|\r|\n/', $fragment);
         if ($lines === false) {
             return $indent . $fragment;
         }

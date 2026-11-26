@@ -684,7 +684,8 @@ trait FuncCallOptimizer
         if ($this->isPropertyFetch($arg) and $this->isVarExpr($arg->var)) {
             $obj = $this->parseIdentifier($arg->var);
             $tmpRef = $this->genTmpVarName();
-            $this->addBeforeStmtLine('auto&& ' . $tmpRef . ' = ' . $obj . '.attr(' . $this->propertyNameToStr($arg->name) . ', php::AttrMode::Update);');
+            $slot = $this->emitDynamicPropertySlotRead($obj, $this->propertyNameToStr($arg->name), true);
+            $this->addBeforeStmtLine('auto&& ' . $tmpRef . ' = ' . $slot . ';');
             return $tmpRef;
         }
         return $this->getArg($expr, $i);

@@ -105,15 +105,35 @@ trait PropertyAccessTrait
 
     protected function emitDynamicPropertyRead(string $object, string $property, ?string $cache = null): string
     {
-        if ($this->usesTraitPropertyScope($object)) {
+        if ($cache === null && !$this->class) {
+            return "{$object}.getProperty({$property})";
+        }
+        return $this->emitDynamicPropertySlotRead($object, $property, false, $cache);
+    }
+
+    protected function emitDynamicPropertySlotRead(
+        string $object,
+        string $property,
+        bool $update,
+        ?string $cache = null,
+    ): string {
+        $mode = $this->escapeAttrMode($update);
+        if ($cache !== null && !$this->usesTraitPropertyScope($object)) {
+            return 'typephp_read_property_cached(' . $object . ', ' . $property . ', ' . $mode . ', ' . $cache . ')';
+        }
+        if ($this->class) {
             return 'typephp_read_property_scoped('
-                . $object . ', ' . $property . ', php::FakeScopeGuard::current(), php::AttrMode::Get)';
+                . $object . ', ' . $property . ', ' . $this->getLexicalPropertyScope() . ', ' . $mode . ')';
         }
-        if ($cache !== null) {
-            return 'typephp_read_property_cached('
-                . $object . ', ' . $property . ', php::AttrMode::Get, ' . $cache . ')';
+        return "{$object}.attr({$property}, {$mode})";
+    }
+
+    private function getLexicalPropertyScope(): string
+    {
+        if ($this->classDef?->trait !== null) {
+            return 'php::FakeScopeGuard::current()';
         }
-        return "{$object}.getProperty({$property})";
+        return $this->class ? $this->getLocalClassEntryPtr($this->getFullClassName()) : 'nullptr';
     }
 
     protected function emitDynamicPropertyWrite(
@@ -166,13 +186,6 @@ trait PropertyAccessTrait
         $this->assertDynamicPropertyTarget($target);
 
         return $target->getDynamicObjectExpr() . '.unsetProperty(' . $target->getDynamicPropertyExpr() . ')';
-    }
-
-    protected function emitDynamicPropertyTargetRef(PropertyWriteTarget $target): string
-    {
-        $this->assertDynamicPropertyTarget($target);
-
-        return $target->getDynamicObjectExpr() . '.attrRef(' . $target->getDynamicPropertyExpr() . ')';
     }
 
     protected function emitDynamicPropertyTargetAppendArray(
@@ -332,17 +345,7 @@ trait PropertyAccessTrait
         ?string $cache = null,
     ): string
     {
-        if ($this->usesTraitPropertyScope($object)) {
-            return 'typephp_read_property_scoped('
-                . $object . ', ' . $property . ', php::FakeScopeGuard::current(), php::AttrMode::Update)'
-                . ".newItem() = {$value}";
-        }
-        if ($cache !== null) {
-            return 'typephp_read_property_cached('
-                . $object . ', ' . $property . ', php::AttrMode::Update, ' . $cache . ')'
-                . ".newItem() = {$value}";
-        }
-        return "{$object}.attr({$property}, php::AttrMode::Update).newItem() = {$value}";
+        return $this->emitDynamicPropertySlotRead($object, $property, true, $cache) . ".newItem() = {$value}";
     }
 
     protected function emitDynamicPropertyUpdateArray(
@@ -353,17 +356,7 @@ trait PropertyAccessTrait
         ?string $cache = null,
     ): string
     {
-        if ($this->usesTraitPropertyScope($object)) {
-            return 'typephp_read_property_scoped('
-                . $object . ', ' . $property . ', php::FakeScopeGuard::current(), php::AttrMode::Update)'
-                . ".item({$dim}, true) = {$value}";
-        }
-        if ($cache !== null) {
-            return 'typephp_read_property_cached('
-                . $object . ', ' . $property . ', php::AttrMode::Update, ' . $cache . ')'
-                . ".item({$dim}, true) = {$value}";
-        }
-        return "{$object}.attr({$property}, php::AttrMode::Update).item({$dim}, true) = {$value}";
+        return $this->emitDynamicPropertySlotRead($object, $property, true, $cache) . ".item({$dim}, true) = {$value}";
     }
 
     protected function assertDynamicPropertyTarget(PropertyWriteTarget $target): void
@@ -385,23 +378,34 @@ trait PropertyAccessTrait
         // mutation error emitted by preparePropertyWriteTarget().
         $target = $this->preparePropertyWriteTarget($expr, true);
         if ($this->canEmitDynamicPropertyTarget($target)) {
-            $objectExpr = $target->getDynamicObjectExpr();
-            if (!$this->hasVar($objectExpr)) {
-                $this->fatalError($errorNode, 'Undefined variable `$' . $objectExpr . '`');
+            $object = $target->getDynamicObjectExpr();
+            $property = $target->getDynamicPropertyExpr();
+        } else {
+            $object = $this->isVarExpr($expr->var) ? $this->parseIdentifier($expr->var) : $this->parseExpr($expr->var);
+            $property = $this->propertyNameToStr($expr->name);
+        }
+        if ($this->isVarExpr($expr->var) && !$this->hasVar($object)) {
+            $this->fatalError($errorNode, 'Undefined variable `$' . $object . '`');
+        }
+
+        $receiver = $this->parenthesizeOpenOperand($object);
+        $scope = $this->getLexicalPropertyScope();
+
+        $access = $this->getNativePropertyAccess($expr);
+        if ($access !== null) {
+            $definition = $access->getPropertyDef();
+            if (!$definition->isReadonly()
+                && !$definition->isPrivateSet()
+                && !$definition->isProtectedSet()
+                && !$definition->virtual
+                && $definition->getter === null
+                && $definition->setter === null
+            ) {
+                $fallbackName = $this->genCharPtr($access->resolution->property, true);
+                return $receiver . '.attrRef(' . $access->offset . ', ' . $fallbackName . ', ' . $scope . ')';
             }
-            return $this->emitDynamicPropertyTargetRef($target);
         }
-
-        if (!$this->isVarExpr($expr->var)) {
-            return $this->parseExpr($expr->var) . '.attrRef(' . $this->propertyNameToStr($expr->name) . ')';
-        }
-
-        $objectExpr = $this->parseIdentifier($expr->var);
-        if (!$this->hasVar($objectExpr)) {
-            $this->fatalError($errorNode, 'Undefined variable `$' . $objectExpr . '`');
-        }
-
-        return $objectExpr . '.attrRef(' . $this->propertyNameToStr($expr->name) . ')';
+        return $receiver . '.attrRef(' . $property . ', ' . $scope . ')';
     }
 
     protected function emitStaticPropertyFetchRef(Expr\StaticPropertyFetch $expr, NodeAbstract $errorNode): string
@@ -1349,15 +1353,13 @@ trait PropertyAccessTrait
                 . $objectVar . ', ' . $id . ', ' . $directMagic['classEntry'] . ', '
                 . $this->getPropertyAccessCache() . ', [&]() {'
                 . ' return ' . $directMagic['function'] . '(' . $objectVar . ', ' . $id . '); })';
-        } elseif ($this->usesTraitPropertyScope($objectVar)) {
-            $getProperty = 'typephp_read_property_scoped('
-                . $objectVar . ', ' . $id . ', php::FakeScopeGuard::current(), ' . $this->escapeAttrMode($update) . ')';
-        } elseif ($this->isIdExpr($property) && !$this->isNativePropertyAccess($expr)) {
-            $getProperty = 'typephp_read_property_cached('
-                . $objectVar . ', ' . $id . ', ' . $this->escapeAttrMode($update) . ', '
-                . $this->getPropertyAccessCache() . ')';
-        } else {
+        } elseif ($this->isNativePropertyAccess($expr)) {
             $getProperty = $objectVar . '.attr(' . $id . ', ' . $this->escapeAttrMode($update) . ')';
+        } else {
+            $cache = $this->isIdExpr($property) && !$this->usesTraitPropertyScope($objectVar)
+                ? $this->getPropertyAccessCache()
+                : null;
+            $getProperty = $this->emitDynamicPropertySlotRead($objectVar, $id, $update, $cache);
         }
         $def = $this->getNativePropertyDef($expr);
         if ($def === null && $nativeExpressionClass !== '') {

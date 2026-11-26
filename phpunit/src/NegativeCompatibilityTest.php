@@ -273,6 +273,36 @@ function main(): void
 PHP,
         ];
 
+        yield 'reserved boolean constant import alias' => [
+            'prepare',
+            'Cannot use const ZERO as true because the alias is a reserved literal',
+            <<<'PHP'
+<?php
+const ZERO = 0;
+use const ZERO as true; // @diagnostic
+PHP,
+        ];
+
+        yield 'reserved constant alias is case insensitive in a mixed group import' => [
+            'prepare',
+            'Cannot use const AliasSource\\ZERO as FaLsE because the alias is a reserved literal',
+            <<<'PHP'
+<?php
+namespace AliasConsumer;
+use AliasSource\{Thing, const ZERO as FaLsE}; // @diagnostic
+PHP,
+        ];
+
+        yield 'implicit constant import cannot shadow null' => [
+            'prepare',
+            'Cannot use const AliasSource\\NULL as NULL because the alias is a reserved literal',
+            <<<'PHP'
+<?php
+namespace AliasConsumer;
+use const AliasSource\NULL; // @diagnostic
+PHP,
+        ];
+
         yield 'closure reference return' => [
             'convert',
             'Closure and arrow functions cannot return by reference',

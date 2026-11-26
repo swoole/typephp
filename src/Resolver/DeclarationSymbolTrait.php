@@ -154,6 +154,9 @@ trait DeclarationSymbolTrait
     private function registerUseImportAlias(Node\UseItem $use, int $type, string $id): string
     {
         $alias = $use->getAlias()->toString();
+        if ($type === Node\Stmt\Use_::TYPE_CONSTANT && in_array(strtolower($alias), ['true', 'false', 'null'], true)) {
+            $this->fatalError($use, "Cannot use const {$id} as {$alias} because the alias is a reserved literal");
+        }
         // PHP class and function names are case-insensitive, while constant
         // aliases are case-sensitive. The three import kinds have independent
         // symbol tables, so the same alias may be used once in each domain.

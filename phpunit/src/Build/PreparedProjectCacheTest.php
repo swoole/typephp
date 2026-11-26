@@ -113,4 +113,53 @@ PHP);
         self::assertFalse($this->invoke($compiler, 'restorePreparedProject', $key));
         self::assertFalse($this->invoke($compiler, 'hasClass', 'Prepared\\Child'));
     }
+
+    public function testCacheRestoreKeepsCurrentProcessResourceConstants(): void
+    {
+        $file = $this->directory . '/source.php';
+        $property = new \ReflectionProperty(CompilerBase::class, 'internalConstants');
+        $firstStream = fopen('php://memory', 'w+');
+        $currentStream = fopen('php://memory', 'w+');
+        try {
+            $first = $this->compiler();
+            $property->setValue($first, $property->getValue($first) + ['CACHE_STREAM' => $firstStream]);
+            $key = $this->invoke($first, 'preparedProjectKey', [$file]);
+            $first->prepareFile($file);
+            $this->invoke($first, 'storePreparedProject', $key);
+
+            $second = $this->compiler();
+            $property->setValue($second, $property->getValue($second) + ['CACHE_STREAM' => $currentStream]);
+            self::assertTrue($this->invoke($second, 'restorePreparedProject', $key));
+            $restored = $property->getValue($second);
+            self::assertSame($currentStream, $restored['CACHE_STREAM']);
+            foreach (['STDIN', 'STDOUT', 'STDERR'] as $name) {
+                self::assertIsResource($restored[$name]);
+                self::assertSame(constant($name), $restored[$name]);
+                self::assertFalse($this->invoke($second, 'isInternalScalarConstant', $name));
+            }
+        } finally {
+            fclose($firstStream);
+            fclose($currentStream);
+        }
+    }
+
+    public function testResourceCacheKeysIgnoreHandleIdentityButKeepConstantType(): void
+    {
+        $compiler = $this->compiler();
+        $property = new \ReflectionProperty(CompilerBase::class, 'internalConstants');
+        $constants = $property->getValue($compiler);
+        $first = fopen('php://memory', 'w+');
+        $second = fopen('php://memory', 'w+');
+        try {
+            $property->setValue($compiler, $constants + ['CACHE_STREAM' => $first]);
+            $streamKey = $this->invoke($compiler, 'preparedProjectKey', [$this->directory . '/source.php']);
+            $property->setValue($compiler, $constants + ['CACHE_STREAM' => $second]);
+            self::assertSame($streamKey, $this->invoke($compiler, 'preparedProjectKey', [$this->directory . '/source.php']));
+            $property->setValue($compiler, $constants + ['CACHE_STREAM' => 0]);
+            self::assertNotSame($streamKey, $this->invoke($compiler, 'preparedProjectKey', [$this->directory . '/source.php']));
+        } finally {
+            fclose($first);
+            fclose($second);
+        }
+    }
 }

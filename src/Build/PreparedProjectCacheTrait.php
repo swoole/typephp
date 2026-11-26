@@ -7,7 +7,7 @@ trait PreparedProjectCacheTrait
 {
     private const array PREPARED_PROJECT_FIELDS = [
         'symbols', 'preparedFileAsts', 'constants', 'symbolDeclInFile', 'symbolCallInFile',
-        'classMethodOverride', 'classSubClasses', 'internalFunctions', 'internalConstants',
+        'classMethodOverride', 'classSubClasses', 'internalFunctions',
         'stdTypeMap', 'nativeClassDeclarations', 'nativeGlobalObjects', 'nativeGlobalTypeResolver',
         'globalVars', 'globalVarsInFile', 'globalVarDeclInFile', 'linkLibs',
         'traitDeclarationsComposed', 'declarationExpressionsFinalized', 'methodOverrideFlagsFinalized',
@@ -25,10 +25,20 @@ trait PreparedProjectCacheTrait
             $extensions[$extension] = phpversion($extension);
         }
         $initialState = $this->capturePreparedProjectState();
+        // Resources serialize as integer zero. They belong to this compiler
+        // process and must never be restored from a preprocessing snapshot.
+        // Keep their kind in the key without including process-local handles.
+        $runtimeConstants = [];
+        foreach ($this->internalConstants as $name => $value) {
+            $runtimeConstants[$name] = [
+                get_debug_type($value),
+                is_resource($value) ? get_resource_type($value) : $value,
+            ];
+        }
         return hash('sha256', serialize([
-            2, $this->getIncrementalGeneratorFingerprint(), $sources, PHP_VERSION,
+            3, $this->getIncrementalGeneratorFingerprint(), $sources, PHP_VERSION,
             $extensions, get_defined_constants(), $this->linkLibs,
-            $this->varIntTypes, $this->decimalTypes, $this->bigintTypes, $initialState,
+            $this->varIntTypes, $this->decimalTypes, $this->bigintTypes, $initialState, $runtimeConstants,
         ]));
     }
 

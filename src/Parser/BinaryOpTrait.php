@@ -1368,7 +1368,10 @@ trait BinaryOpTrait
                 $cppLeft = $this->nativeBoolLiteral($astLeft) ?? $cppLeft;
                 $cppRight = $this->nativeBoolLiteral($astRight) ?? $cppRight;
             }
-            return $cppLeft . ' == ' . $cppRight;
+            // These are complete AST operands, not necessarily atoms. Preserve
+            // their boundaries when PHP's === is lowered to C++ ==, including
+            // right-nested equality, assignments and conditional expressions.
+            return '(' . $cppLeft . ') == (' . $cppRight . ')';
         }
         return 'false';
     }

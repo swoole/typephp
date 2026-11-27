@@ -13,13 +13,22 @@ class OperatorTest extends \BaseTest
         $cppFile = $compiler->convertFile($testFile);
         $cpp = file_get_contents($cppFile);
 
-        $this->assertStringContainsString('true == pjax', $cpp);
-        $this->assertStringContainsString('pjax == true', $cpp);
-        $this->assertStringContainsString('false == pjax', $cpp);
-        $this->assertStringContainsString('pjax == false', $cpp);
-        $this->assertStringNotContainsString('php::true_ == pjax', $cpp);
-        $this->assertStringNotContainsString('php::false_ == pjax', $cpp);
+        $this->assertStringContainsString('(true) == (pjax)', $cpp);
+        $this->assertStringContainsString('(pjax) == (true)', $cpp);
+        $this->assertStringContainsString('(false) == (pjax)', $cpp);
+        $this->assertStringContainsString('(pjax) == (false)', $cpp);
+        $this->assertStringNotContainsString('(php::true_) == (pjax)', $cpp);
+        $this->assertStringNotContainsString('(php::false_) == (pjax)', $cpp);
+        $this->assertStringNotContainsString('(pjax) == (php::true_)', $cpp);
+        $this->assertStringNotContainsString('(pjax) == (php::false_)', $cpp);
         $this->assertStringContainsString('php::same(php::true_, value)', $cpp);
+    }
+
+    public function testNativeStrictComparisonPreservesNestedAstOperands(): void
+    {
+        $cpp = $this->compileToCpp('nested-identical-grouping.php');
+        $this->assertStringContainsString('(ready) == ((index) == (limit))', $cpp);
+        $this->assertStringNotContainsString('ready == index == limit', $cpp);
     }
 
     public function testAssignedValueNotIdenticalToNullIsParenthesized(): void

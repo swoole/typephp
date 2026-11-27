@@ -1723,14 +1723,17 @@ trait AssignOpTrait
         $code = '[&]() -> php::Var {' . PHP_EOL;
         $code .= $this->formatCapturedStmtLines($containerBefore);
         $keyCapture = $this->formatCapturedStmtLines($keyBefore)
-            . $this->getIndent() . 'php::Var ' . $stableKey . ' = ' . $key . ';' . PHP_EOL
+            . $this->getIndent() . 'php::Var ' . $stableKey . ' = php::copyValue(' . $key . ');' . PHP_EOL
             . $this->formatCapturedStmtLines($keyAfter);
         $lateKey = $target->dim instanceof Variable && is_string($target->dim->name);
         if (!$lateKey) {
             $code .= $keyCapture;
         }
         $code .= $this->formatCapturedStmtLines($rightBefore);
-        $code .= $this->getIndent() . 'php::Var ' . $stableValue . ' = ' . $value . ';' . PHP_EOL;
+        // A prvalue item()/attrRef() can construct an indirect Variant directly
+        // through C++ copy elision. Mutating the temporary must not write into
+        // the RHS slot; callbacks resolving the LHS must not invalidate it either.
+        $code .= $this->getIndent() . 'php::Var ' . $stableValue . ' = php::copyValue(' . $value . ');' . PHP_EOL;
         $code .= $this->formatCapturedStmtLines($rightAfter);
         // Computed keys/receivers already own their results. Borrow slots
         // afterwards: the RHS may unset them, rehash their parent or throw.
@@ -1830,9 +1833,9 @@ trait AssignOpTrait
             }
             $stableKey = $this->genTmpVarName();
             if ($lateKey) {
-                $resolve[] = 'php::Var ' . $stableKey . ' = ' . $key . ';';
+                $resolve[] = 'php::Var ' . $stableKey . ' = php::copyValue(' . $key . ');';
             } else {
-                $before[] = 'php::Var ' . $stableKey . ' = ' . $key . ';';
+                $before[] = 'php::Var ' . $stableKey . ' = php::copyValue(' . $key . ');';
             }
             foreach ($keyAfter as $line) {
                 if ($lateKey) {

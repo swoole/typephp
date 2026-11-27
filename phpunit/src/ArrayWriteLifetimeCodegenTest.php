@@ -8,7 +8,7 @@ final class ArrayWriteLifetimeCodegenTest extends BaseTest
     public static function receiverFixtures(): iterable
     {
         foreach (['reentrant-write-lifetime', 'array-access-write-evaluation', 'array-access-write-temporary-receiver',
-            'array-access-compound-writes', 'array-access-object-key-writes'] as $name) {
+            'array-access-compound-writes', 'array-access-object-key-writes', 'assignment-operand-snapshots'] as $name) {
             yield $name => [$name];
         }
     }
@@ -72,7 +72,7 @@ final class ArrayWriteLifetimeCodegenTest extends BaseTest
         $body = substr($code, $start, $end - $start);
         preg_match_all('/key =/', $body, $assignments, PREG_OFFSET_CAPTURE);
         self::assertCount(2, $assignments[0]);
-        preg_match('/php::Var tmp_var_\d+ = key;/', $body, $capture, PREG_OFFSET_CAPTURE);
+        preg_match('/php::Var tmp_var_\d+ = php::copyValue\(key\);/', $body, $capture, PREG_OFFSET_CAPTURE);
         self::assertNotEmpty($capture);
         self::assertGreaterThan($assignments[0][1][1], $capture[0][1], 'Variable keys must be read after the RHS');
     }

@@ -71,3 +71,14 @@ These are behavioral requirements, not OS resource controls. The agent running
 a build must enforce them in the actual command and process tree. Explicit
 session-specific exceptions from the user take precedence; do not infer new
 exceptions from them.
+
+## Array assignment operand lifetimes
+
+Ordinary array assignment keys and right-hand values must be materialized with
+`php::copyValue()` at their existing evaluation points. Constructing a `php::Var`
+directly from an `item()`/property prvalue can retain an indirect writable view
+through C++ copy elision; reusing that temporary for a compound result then
+changes the RHS, or a reentrant receiver can invalidate it. Keep computed-key
+and late CV-key ordering intact. This is value capture, not automatic reference
+passing for unknown dynamic calls. Regression: `assignment-operand-snapshots.phpt`;
+the game cold-render probe also checks per-row/group sums and native PHP output.

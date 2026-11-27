@@ -15,6 +15,10 @@ class RequestArrayChild extends RequestArrayParent implements RequestArrayContra
     public const OWN = ['child'];
 }
 
+class RequestArrayLeaf extends RequestArrayParent
+{
+}
+
 function readRequestArrays(): array
 {
     return [RequestArrayParent::DATA, RequestArrayChild::DATA, RequestArrayChild::CONTRACT,

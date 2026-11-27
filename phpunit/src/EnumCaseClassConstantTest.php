@@ -29,6 +29,8 @@ final class EnumCaseClassConstantTest extends \BaseTest
 
     public function testDirectCaseRegistersConstantAst(): void
     {
+        self::assertStringContainsString('Z_TYPE_INFO(const_CB_value) = IS_CONSTANT_AST;', $this->arginfo);
+        self::assertStringNotContainsString('ZVAL_AST(', $this->arginfo);
         self::assertStringContainsString('const_CB_value_fetch_ast->kind = ZEND_AST_CLASS_CONST;', $this->arginfo);
         self::assertStringContainsString('zend_string_init_interned("CodegenEnum", sizeof("CodegenEnum") - 1, 1)', $this->arginfo);
         self::assertStringNotContainsString('ZVAL_LONG(&const_CB_value', $this->arginfo);

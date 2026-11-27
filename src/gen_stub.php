@@ -2910,7 +2910,11 @@ class EvaluatedValue
         $code .= "\t\t{$id}_ast->attr = 0;\n";
         $code .= "\t\tZVAL_EMPTY_ARRAY(&{$id}_ast->val);\n";
         $code .= "\t\tZ_LINENO({$id}_ast->val) = 0;\n";
-        $code .= "\t\tZVAL_AST(&$zvalName, {$id}_ast_ref);\n";
+        // Match Zend's internal enum constants: the persistent AST belongs to
+        // MSHUTDOWN, not to a request zval destructor. ZVAL_AST marks the zval
+        // refcounted even when the referenced allocation is GC_IMMUTABLE.
+        $code .= "\t\tZ_TYPE_INFO($zvalName) = IS_CONSTANT_AST;\n";
+        $code .= "\t\tZ_AST($zvalName) = {$id}_ast_ref;\n";
         $code .= "\t}\n";
         return $code;
     }
@@ -2951,7 +2955,8 @@ class EvaluatedValue
         $code .= "\t\t{$id}_fetch_ast->lineno = 0;\n";
         $code .= "\t\t{$id}_fetch_ast->child[0] = (zend_ast *) {$id}_class_ast;\n";
         $code .= "\t\t{$id}_fetch_ast->child[1] = (zend_ast *) {$id}_const_ast;\n";
-        $code .= "\t\tZVAL_AST(&$zvalName, {$id}_ast_ref);\n";
+        $code .= "\t\tZ_TYPE_INFO($zvalName) = IS_CONSTANT_AST;\n";
+        $code .= "\t\tZ_AST($zvalName) = {$id}_ast_ref;\n";
         $code .= "\t}\n";
         return $code;
     }
@@ -4435,6 +4440,13 @@ class ClassInfo {
             $code .= "\n" . $attributeInitializationCode;
         }
 
+        if ($this->extends !== [] || $this->implements !== []) {
+            // Zend allocates this slot when declaring an AST constant, but an
+            // internal child may inherit all of its AST constants instead.
+            $code .= "\n\tif ((class_entry->ce_flags & ZEND_ACC_HAS_AST_CONSTANTS) && !ZEND_MAP_PTR(class_entry->mutable_data)) {\n";
+            $code .= "\t\tZEND_MAP_PTR_INIT(class_entry->mutable_data, (zend_class_mutable_data *) zend_map_ptr_new());\n";
+            $code .= "\t}\n";
+        }
         $code .= "\n\treturn class_entry;\n";
 
         $code .= "}\n";

@@ -26,11 +26,15 @@ final class ClassArrayRequestScopeTest extends BaseTest
         $arginfo = (string) file_get_contents($compiler->getArgInfoHeaderFile($file));
         // An AST placeholder makes CE_CONSTANTS_TABLE return a per-request
         // descriptor. TLS storage alone would still mutate the shared CE.
-        self::assertStringContainsString('ZVAL_AST(&const_DATA_value,', $arginfo);
+        self::assertStringContainsString('Z_TYPE_INFO(const_DATA_value) = IS_CONSTANT_AST;', $arginfo);
+        self::assertStringNotContainsString('ZVAL_AST(', $arginfo);
         self::assertStringContainsString('GC_PERSISTENT | GC_IMMUTABLE', $arginfo);
         self::assertStringContainsString('typephp_release_ast_constants_', $arginfo);
-        self::assertStringContainsString('ZVAL_AST(&const_CONTRACT_value,', $arginfo);
-        self::assertStringContainsString('ZVAL_AST(&const_OWN_value,', $arginfo);
+        self::assertStringContainsString('Z_TYPE_INFO(const_CONTRACT_value) = IS_CONSTANT_AST;', $arginfo);
+        self::assertStringContainsString('Z_TYPE_INFO(const_OWN_value) = IS_CONSTANT_AST;', $arginfo);
+        $leaf = substr($arginfo, strpos($arginfo, 'php_register_class_RequestArrayLeaf('));
+        self::assertStringContainsString('!ZEND_MAP_PTR(class_entry->mutable_data)', $leaf);
+        self::assertStringContainsString('ZEND_MAP_PTR_INIT(class_entry->mutable_data, (zend_class_mutable_data *) zend_map_ptr_new());', $leaf);
     }
 
     public function testArrayPlaceholderExtUsesTheAstShutdownContract(): void

@@ -1157,7 +1157,7 @@ class Translator extends Preprocessor
                 foreach ($classDef->constants as $constant) {
                     if ($constant->type === Type::ARRAY) {
                         $constName = $this->getNativeClassConstName($constant->name, $classDef->namespace, $classDef->name);
-                        $lines[] = 'extern ' . Type::VAR . ' ' . $constName . ';' . PHP_EOL;
+                        $lines[] = 'extern THREAD_LOCAL ' . Type::VAR . ' ' . $constName . ';' . PHP_EOL;
                     }
                 }
             }
@@ -1589,7 +1589,7 @@ CODE;
             foreach ($classDef->constants as $constant) {
                 if ($constant->type === Type::ARRAY) {
                     $constName = $this->getNativeClassConstName($constant->name, $classDef->namespace, $classDef->name);
-                    $code .= Type::VAR . ' ' . $constName . ";\n";
+                    $code .= 'THREAD_LOCAL ' . Type::VAR . ' ' . $constName . ";\n";
                 }
             }
         }
@@ -1657,7 +1657,7 @@ CODE;
         $releaseAstConstantFns = array_unique($this->releaseAstConstantFns);
         $code .= 'PHP_MINIT_FUNCTION(' . $this->getModuleName() . ') {' . PHP_EOL;
         if ($releaseAstConstantFns !== [] && $this->isBuildModeExt()) {
-            // Lifecycle contract for persistent enum-case AST constants: Zend's
+            // Lifecycle contract for persistent AST class constants: Zend's
             // internal-class teardown (destroy_zend_class) only tolerates them
             // after this module's MSHUTDOWN has released them. A temporary
             // module loaded through dl() cannot honor that ordering —
@@ -1666,7 +1666,7 @@ CODE;
             // registered: with nothing registered, teardown is trivially safe.
             $code .= 'if (type == MODULE_TEMPORARY) {' . PHP_EOL;
             $code .= $this->getIndent() . 'zend_error(E_WARNING, "' . $this->getModuleName()
-                . ' registers enum-case class constants that must be released by MSHUTDOWN'
+                . ' registers AST class constants that must be released by MSHUTDOWN'
                 . ' before class destruction; a temporary module loaded with dl() destroys'
                 . ' its classes first. Load the extension from php.ini instead.");' . PHP_EOL;
             $code .= $this->getIndent() . 'return FAILURE;' . PHP_EOL;

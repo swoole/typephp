@@ -2829,6 +2829,9 @@ class EvaluatedValue
         if ($this->enumCaseRef !== null && $allowConstantAst) {
             return $this->initializeEnumCaseZval($zvalName, $alreadyExists);
         }
+        if ($this->type->isArray() && $allowConstantAst) {
+            return $this->initializeArrayPlaceholderZval($zvalName, $alreadyExists);
+        }
         $cExpr = $this->getCExpr();
 
         $code = '';
@@ -2887,6 +2890,30 @@ class EvaluatedValue
      */
     /** @var array<int, array{string, string}> [declaring class, constant name] of every emitted AST constant, per generated file */
     public static array $emittedAstConstants = [];
+
+    /**
+     * RINIT fills array constants after the request's string/cache setup.
+     * An immutable AST placeholder makes Zend allocate a request-local class
+     * constant descriptor before updateConstant writes it. A plain [] lives
+     * directly in the shared internal-class table and crosses ZTS heaps.
+     */
+    private function initializeArrayPlaceholderZval(string $zvalName, bool $alreadyExists): string
+    {
+        $id = preg_replace('/[^A-Za-z0-9_]/', '_', $zvalName);
+        $code = $alreadyExists ? '' : "\tzval $zvalName;\n";
+        $code .= "\t{\n";
+        $code .= "\t\tzend_ast_ref *{$id}_ast_ref = (zend_ast_ref *) pemalloc(sizeof(zend_ast_ref) + sizeof(zend_ast_zval), 1);\n";
+        $code .= "\t\tGC_SET_REFCOUNT({$id}_ast_ref, 1);\n";
+        $code .= "\t\tGC_TYPE_INFO({$id}_ast_ref) = GC_CONSTANT_AST | ((GC_PERSISTENT | GC_IMMUTABLE) << GC_FLAGS_SHIFT);\n";
+        $code .= "\t\tzend_ast_zval *{$id}_ast = (zend_ast_zval *) GC_AST({$id}_ast_ref);\n";
+        $code .= "\t\t{$id}_ast->kind = ZEND_AST_ZVAL;\n";
+        $code .= "\t\t{$id}_ast->attr = 0;\n";
+        $code .= "\t\tZVAL_EMPTY_ARRAY(&{$id}_ast->val);\n";
+        $code .= "\t\tZ_LINENO({$id}_ast->val) = 0;\n";
+        $code .= "\t\tZVAL_AST(&$zvalName, {$id}_ast_ref);\n";
+        $code .= "\t}\n";
+        return $code;
+    }
 
     private function initializeEnumCaseZval(string $zvalName, bool $alreadyExists): string
     {
@@ -3367,7 +3394,7 @@ class ConstInfo extends VariableLike
         $constName = $this->name->getDeclarationName();
 
         $zvalCode = $value->initializeZval("const_{$constName}_value", allowConstantAst: true);
-        if ($value->enumCaseRef !== null) {
+        if ($value->enumCaseRef !== null || $value->type->isArray()) {
             EvaluatedValue::$emittedAstConstants[] = [ClassInfo::$currentClass, $constName];
         }
 

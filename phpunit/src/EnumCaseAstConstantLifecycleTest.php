@@ -22,7 +22,7 @@ final class EnumCaseAstConstantLifecycleTest extends \BaseTest
         $guardPos = strpos($minit, 'if (type == MODULE_TEMPORARY) {');
         self::assertIsInt($guardPos, 'MINIT must reject dl()-loaded temporary modules');
         self::assertStringContainsString(
-            'registers enum-case class constants that must be released by MSHUTDOWN',
+            'registers AST class constants that must be released by MSHUTDOWN',
             $minit,
         );
         self::assertStringContainsString('Load the extension from php.ini instead.', $minit);
@@ -45,7 +45,7 @@ final class EnumCaseAstConstantLifecycleTest extends \BaseTest
         $minit = $this->sliceFunction($extension, 'PHP_MINIT_FUNCTION', 'PHP_MSHUTDOWN_FUNCTION');
 
         self::assertStringNotContainsString(
-            'registers enum-case class constants that must be released by MSHUTDOWN',
+            'registers AST class constants that must be released by MSHUTDOWN',
             $minit,
         );
         self::assertStringContainsString('register_class_', $minit);
@@ -102,7 +102,7 @@ final class EnumCaseAstConstantLifecycleTest extends \BaseTest
         $extension = $this->generateExtension('class-constant-codegen.php', 'ast_lifecycle_none');
 
         self::assertStringNotContainsString(
-            'registers enum-case class constants that must be released by MSHUTDOWN',
+            'registers AST class constants that must be released by MSHUTDOWN',
             $extension,
         );
         self::assertStringNotContainsString('typephp_release_ast_constants_', $extension);

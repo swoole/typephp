@@ -142,6 +142,48 @@ final class EmbeddedOpcodeGeneratorTest extends TestCase
         self::assertSame([$this->vendorFile, $this->anonymousFile], $batch->pendingFiles());
     }
 
+    public function testBuildProcessUsesAnExplicitEmptyIniScanDirectory(): void
+    {
+        $generator = $this->generator();
+        $generator->prepare([], []);
+        $ini = $this->directory . '/build.ini';
+        file_put_contents($ini, '');
+        // Inspect the real child environment without compiling opcodes or
+        // disabling the functions used by this diagnostic driver.
+        (new \ReflectionProperty($generator, 'compileIniPath'))->setValue($generator, $ini);
+        file_put_contents($this->buildDirectory . '/cache/opcache/compile-embedded-opcodes.php', <<<'PHP'
+<?php
+echo json_encode([
+    'scan_directory' => getenv('PHP_INI_SCAN_DIR'),
+    'scanned_files' => php_ini_scanned_files(),
+]);
+PHP);
+        $inheritedScanDirectory = $this->directory . '/inherited-ini';
+        mkdir($inheritedScanDirectory);
+        file_put_contents($inheritedScanDirectory . '/unwanted.ini', 'precision=7');
+        $previousScanDirectory = getenv('PHP_INI_SCAN_DIR');
+        try {
+            putenv('PHP_INI_SCAN_DIR=' . $inheritedScanDirectory);
+            [$status, $stdout, $stderr] = (new \ReflectionMethod($generator, 'compileFile'))->invoke(
+                $generator, $this->ordinaryFile, $this->buildDirectory . '/cache/opcache',
+            );
+        } finally {
+            putenv($previousScanDirectory === false
+                ? 'PHP_INI_SCAN_DIR'
+                : 'PHP_INI_SCAN_DIR=' . $previousScanDirectory);
+        }
+
+        self::assertSame(0, $status, $stderr);
+        $configuration = json_decode($stdout, true, 512, JSON_THROW_ON_ERROR);
+        self::assertIsString($configuration['scan_directory']);
+        self::assertNotSame('', $configuration['scan_directory']);
+        self::assertNotSame($inheritedScanDirectory, $configuration['scan_directory']);
+        self::assertDirectoryExists($configuration['scan_directory']);
+        self::assertSame([], array_values(array_diff(scandir($configuration['scan_directory']), ['.', '..'])));
+        self::assertFalse($configuration['scanned_files']);
+        self::assertSame('', $stderr);
+    }
+
     public function testEmbeddedBuiltinsResolveByNameWithoutFramelessIndices(): void
     {
         $this->verifyBuiltinCalls(false);

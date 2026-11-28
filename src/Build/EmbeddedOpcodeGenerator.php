@@ -249,8 +249,12 @@ PHP;
             $this->driverPath(),
             $file,
         ];
+        // proc_open() drops empty environment values, which would restore
+        // PHP's default INI scan directory instead of disabling it.
+        $scanDirectory = $this->buildDirectory . '/cache/opcache/php-ini-scan-empty';
+        $this->ensureDirectory($scanDirectory);
         $environment = getenv();
-        $environment['PHP_INI_SCAN_DIR'] = '';
+        $environment['PHP_INI_SCAN_DIR'] = $scanDirectory;
         return $this->runPhp($command, $environment);
     }
 

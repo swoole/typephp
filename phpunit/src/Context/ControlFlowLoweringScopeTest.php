@@ -7,7 +7,9 @@ use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use TypePhp\CompilerTest;
 use TypePhp\Context\FunctionContext;
+use TypePhp\Entity\FunctionDef;
 use TypePhp\Exception\TestError;
+use TypePhp\Type;
 
 final class ControlFlowLoweringScopeTest extends TestCase
 {
@@ -110,6 +112,28 @@ final class ControlFlowLoweringScopeTest extends TestCase
             'finally' => ['try {} finally { $$bad; }'],
             'nested blocks' => ['{ { $$bad; } }'],
         ];
+    }
+
+    public function testNestedFinallyExitsLowerWithoutDuplicatingCleanup(): void
+    {
+        (new \ReflectionProperty($this->compiler, 'functionDef'))->setValue(
+            $this->compiler, new FunctionDef('finally_probe', Type::INT, ''),
+        );
+        $code = $this->parse('try { try { return 22; } catch (Throwable $e) { return -22; } } finally { echo 7; }');
+        self::assertSame(1, substr_count($code, 'php::echo('));
+        self::assertStringContainsString('goto typephp_finally_', $code);
+        self::assertStringContainsString('return ', $code);
+        self::assertSame(0, $this->context()->scopeLevel);
+        self::assertSame([], $this->context()->scopeLayouts);
+    }
+
+    public function testNestedFinallyLoopExitsKeepValidJumpLevels(): void
+    {
+        $code = $this->parse('while (true) { try { while (true) { try { break 2; } finally { echo 1; } } } finally { echo 2; } }');
+        self::assertSame(2, substr_count($code, 'php::echo('));
+        self::assertStringContainsString('goto typephp_finally_', $code);
+        self::assertSame(0, $this->context()->breakableDepth);
+        self::assertFalse($this->context()->inLoop);
     }
 
     public function testFailedLoopDoesNotAllowFollowingBreakOrContinue(): void

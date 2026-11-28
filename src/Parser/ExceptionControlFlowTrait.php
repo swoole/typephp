@@ -11,9 +11,8 @@ use TypePhp\Type;
 
 use PhpParser\Node;
 use PhpParser\Node\Expr;
-use PhpParser\Node\Expr\Variable;
-use PhpParser\NodeFinder;
 use TypePhp\Generator\Symbol;
+use TypePhp\Transform\FinallyLowering;
 
 trait ExceptionControlFlowTrait
 {
@@ -54,52 +53,39 @@ trait ExceptionControlFlowTrait
 
     protected function parseTryCatch(mixed $v): string
     {
-        $code = $this->parseBeforeStmtLines();
-        $code .= 'try {';
-        $finally = $v->finally;
-        $stmts = $finally ? $this->injectFinallyBeforeReturn($v->stmts, $finally->stmts) : $v->stmts;
-
-        $catches = $v->catches;
-
-        // Pre-register catch variables before parsing the try block so that
-        // injected finally code referencing catch variables (e.g. $e) does not
-        // trigger undefined-variable errors.
-        if ($finally) {
-            foreach ($catches as $catch) {
-                if ($catch->var) {
-                    $varName = $this->parseIdentifier($catch->var);
-                    if (!$this->hasVar($varName) && $this->stmtListUsesVariable($finally->stmts, $varName)) {
-                        $this->addLocalVar($varName, Type::OBJECT);
-                    }
-                }
-            }
+        if ($v->finally !== null) {
+            $lowering = new FinallyLowering(
+                fn () => $this->genTmpVarName(),
+                !$this->context->inClosure && ($this->functionDef?->returnsByRef ?? false),
+            );
+            return $this->parseStmts($lowering->lower($v, $this->context->breakableDepth));
         }
-
-        $code .= PHP_EOL;
-        $code .= $this->parseBlockStmts($stmts);
-        $code .= $this->getIndent() . '}';
-
+        $code = $this->parseBeforeStmtLines();
         $exVar = $this->genTmpVarName();
         $this->addLocalVar($exVar, Type::VAR);
+        // A protected region may be re-entered after an enclosing catch
+        // handles its exception. Do not rethrow a previous iteration's value.
+        $code .= $exVar . ' = php::null;' . PHP_EOL . 'try {';
+        $catches = $v->catches;
+
+        $code .= PHP_EOL;
+        $code .= $this->parseBlockStmts($v->stmts);
+        $code .= $this->getIndent() . '}';
 
         $code .= ' catch (zend_object *_ex) {' . PHP_EOL;
-        $code .= $this->withIndentedBlock(function () use ($exVar, $catches, $finally): string {
+        $code .= $this->withIndentedBlock(function () use ($exVar, $catches): string {
             $code = $this->getIndent() . $exVar . ' = php::catchException();' . PHP_EOL;
             if ($catches) {
                 $catchMatched = $this->genTmpVarName();
                 $code .= $this->getIndent() . 'bool ' . $catchMatched . ' = false;' . PHP_EOL;
                 foreach ($catches as $catch) {
-                    $code .= $this->parseCatch($catch, $exVar, $catchMatched, $finally?->stmts ?? []) . PHP_EOL;
+                    $code .= $this->parseCatch($catch, $exVar, $catchMatched) . PHP_EOL;
                 }
             }
             return $code;
         });
         $code .= $this->getIndent() . '}' . PHP_EOL;
 
-        if ($finally) {
-            $code .= $this->parseStmts($finally->stmts);
-            $code .= PHP_EOL;
-        }
         $rethrow = $this->inGeneratorBody
             ? 'typephp_fiber_rethrow(' . $exVar . ');'
             : 'php::throwException(php::Object(' . $exVar . '));';
@@ -110,100 +96,7 @@ trait ExceptionControlFlowTrait
         return $code;
     }
 
-    protected function injectFinallyBeforeReturn(array $stmts, array $finallyStmts, int $localControlDepth = 0): array
-    {
-        $result = [];
-        foreach ($stmts as $stmt) {
-            if ($stmt instanceof Node\Stmt\Return_) {
-                if ($stmt->expr) {
-                    $tmpVar = $this->addTmpVar(Type::VAR);
-                    $result[] = new Node\Stmt\Expression(new Expr\Assign(new Variable($tmpVar), $stmt->expr));
-                    array_push($result, ...$this->cloneStmtList($finallyStmts));
-                    $result[] = new Node\Stmt\Return_(new Variable($tmpVar));
-                    continue;
-                }
-                array_push($result, ...$this->cloneStmtList($finallyStmts));
-                $result[] = $stmt;
-                continue;
-            }
-
-            if ($stmt instanceof Node\Stmt\Break_ || $stmt instanceof Node\Stmt\Continue_) {
-                $level = $stmt->num instanceof Node\Scalar\Int_ ? $stmt->num->value : 1;
-                if ($level > $localControlDepth) {
-                    array_push($result, ...$this->cloneStmtList($finallyStmts));
-                }
-                $result[] = $stmt;
-                continue;
-            }
-
-            if ($stmt instanceof Node\Stmt\Goto_) {
-                array_push($result, ...$this->cloneStmtList($finallyStmts));
-                $result[] = $stmt;
-                continue;
-            }
-
-            $result[] = $this->injectFinallyBeforeReturnInStmt($stmt, $finallyStmts, $localControlDepth);
-        }
-        return $result;
-    }
-
-    protected function injectFinallyBeforeReturnInStmt(Node\Stmt $stmt, array $finallyStmts, int $localControlDepth): Node\Stmt
-    {
-        if ($stmt instanceof Node\Stmt\If_) {
-            $stmt = clone $stmt;
-            $stmt->stmts = $this->injectFinallyBeforeReturn($stmt->stmts, $finallyStmts, $localControlDepth);
-            foreach ($stmt->elseifs as $index => $elseIf) {
-                $elseIf = clone $elseIf;
-                $elseIf->stmts = $this->injectFinallyBeforeReturn($elseIf->stmts, $finallyStmts, $localControlDepth);
-                $stmt->elseifs[$index] = $elseIf;
-            }
-            if ($stmt->else) {
-                $stmt->else = clone $stmt->else;
-                $stmt->else->stmts = $this->injectFinallyBeforeReturn($stmt->else->stmts, $finallyStmts, $localControlDepth);
-            }
-            return $stmt;
-        }
-
-        if ($stmt instanceof Node\Stmt\For_
-            || $stmt instanceof Node\Stmt\Foreach_
-            || $stmt instanceof Node\Stmt\While_
-            || $stmt instanceof Node\Stmt\Do_
-        ) {
-            $stmt = clone $stmt;
-            $stmt->stmts = $this->injectFinallyBeforeReturn($stmt->stmts, $finallyStmts, $localControlDepth + 1);
-            return $stmt;
-        }
-
-        if ($stmt instanceof Node\Stmt\Switch_) {
-            $stmt = clone $stmt;
-            foreach ($stmt->cases as $index => $case) {
-                $case = clone $case;
-                $case->stmts = $this->injectFinallyBeforeReturn($case->stmts, $finallyStmts, $localControlDepth + 1);
-                $stmt->cases[$index] = $case;
-            }
-            return $stmt;
-        }
-
-        return $stmt;
-    }
-
-    protected function cloneStmtList(array $stmts): array
-    {
-        return array_map(static fn (Node\Stmt $stmt): Node\Stmt => clone $stmt, $stmts);
-    }
-
-    protected function stmtListUsesVariable(array $stmts, string $name): bool
-    {
-        $nodeFinder = new NodeFinder();
-        foreach ($nodeFinder->findInstanceOf($stmts, Variable::class) as $var) {
-            if (is_string($var->name) && $this->escapeVarName($var->name) === $name) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    protected function parseCatch(Node\Stmt\Catch_ $catch, string $exVar, string $catchMatched, array $finallyStmts = []): string
+    protected function parseCatch(Node\Stmt\Catch_ $catch, string $exVar, string $catchMatched): string
     {
         $types = $catch->types;
         $var = $catch->var ? $this->parseIdentifier($catch->var) : '';
@@ -225,22 +118,13 @@ trait ExceptionControlFlowTrait
         }
 
         $code .= '(' . implode(' || ', $conditions) . ')) {' . PHP_EOL;
-        $code .= $this->withIndentedBlock(function () use ($catchMatched, $exVar, $var, $finallyStmts, $catch): string {
+        $code .= $this->withIndentedBlock(function () use ($catchMatched, $exVar, $var, $catch): string {
             $code = $this->getIndent() . $catchMatched . ' = true;' . PHP_EOL;
             if ($var !== '') {
                 $code .= $this->getIndent() . $var . ' = ' . $exVar . ';' . PHP_EOL;
             }
             $code .= $this->getIndent() . "{$exVar} = php::null;" . PHP_EOL;
-            $stmts = $finallyStmts ? $this->injectFinallyBeforeReturn($catch->stmts, $finallyStmts) : $catch->stmts;
-            if ($finallyStmts) {
-                $code .= $this->getIndent() . 'try {' . PHP_EOL;
-                $code .= $this->parseBlockStmts($stmts);
-                $code .= $this->getIndent() . '} catch(zend_object *_catch_throw_ex) {' . PHP_EOL;
-                $code .= $this->withIndentedBlock(fn() => $this->getIndent() . "{$exVar} = php::catchException();" . PHP_EOL);
-                $code .= $this->getIndent() . '}' . PHP_EOL;
-            } else {
-                $code .= $this->parseStmts($stmts);
-            }
+            $code .= $this->parseStmts($catch->stmts);
             return $code;
         });
         $code .= $this->getIndent() . '}';

@@ -63,6 +63,11 @@ class InstanceCallOverride extends InstanceCallBase
 
 function main(): void
 {
+    error_reporting(E_ALL);
+    set_error_handler(static function (int $severity, string $message, string $file, int $line): bool {
+        if ($severity === E_DEPRECATED) { throw new ErrorException($message, 0, $severity, $file, $line); }
+        return false;
+    });
     foreach ([new InstanceCallBase(), new InstanceCallInherited(), new InstanceCallOverride()] as $item) {
         echo $item->fixed(), "\n";
         echo $item->withArgs(), "\n";
@@ -70,6 +75,7 @@ function main(): void
         echo $item->staticFixed(), "\n";
         echo $item->staticDynamic(), "\n";
     }
+    restore_error_handler();
 }
 ?>
 --EXPECT--

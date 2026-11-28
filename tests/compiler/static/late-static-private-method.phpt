@@ -40,6 +40,11 @@ class LatePrivateRedeclared extends LatePrivateBase
 
 function main(): void
 {
+    error_reporting(E_ALL);
+    set_error_handler(static function (int $severity, string $message, string $file, int $line): bool {
+        if ($severity === E_DEPRECATED) { throw new ErrorException($message, 0, $severity, $file, $line); }
+        return false;
+    });
     $inherited = new LatePrivateInherited();
     echo $inherited->viaThis(), "\n";
     echo $inherited->viaStatic(), "\n";
@@ -57,6 +62,7 @@ function main(): void
     } catch (Error $error) {
         echo get_class($error), "\n";
     }
+    restore_error_handler();
 }
 ?>
 --EXPECT--

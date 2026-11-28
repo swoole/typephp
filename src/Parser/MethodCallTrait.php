@@ -1352,7 +1352,7 @@ trait MethodCallTrait
         string $method,
         string $methodPtr,
     ): ?string {
-        if ($expr->args !== [] || !$this->classDef || !$this->methodDef) {
+        if ($expr->args !== [] || !$this->classDef || !$this->methodDef || $this->context->inClosure) {
             return null;
         }
 
@@ -1379,14 +1379,40 @@ trait MethodCallTrait
 
         $calledCe = $this->getCalledCeExpr();
         $direct = 'php::Var(' . self::PREFIX . $nativeFunc . '(this_))';
-        // Keep the receiver and qualify the runtime class: a child private
-        // method must not resolve as the parent's lexical private method.
-        $fallback = ($this->methodDef->flags & Modifiers::STATIC)
-            ? 'php::call(' . $calledCe . ', php::getMethod(' . $calledCe . ', ' . $methodPtr . '))'
-            : 'php::callScoped(this_, php::concat({typephp_get_called_class(' . $calledCe . ')'
-                . ', "::", ' . $methodPtr . '}), ' . $this->getCallableScopeExpr() . ')';
+        $fallback = $this->parseLateStaticRuntimeCall($expr, $method, $methodPtr);
         return '(EXPECTED(' . $calledCe . ' == ' . $this->getClassEntryPtr($class) . ')'
             . ' ? ' . $direct . ' : ' . $fallback . ')';
+    }
+
+    /** Resolve before evaluating arguments and own the target until cleanup. */
+    private function parseLateStaticRuntimeCall(
+        Expr\StaticCall $expr,
+        string $method,
+        string $methodPtr,
+        array $nameBefore = [],
+        array $nameAfter = [],
+    ): string {
+        $caller = $this->context->inClosure
+            ? 'execute_data->func'
+            : $this->getMethodPtr($this->getFullClassName(), $this->methodDef->name);
+        // A static closure carries its outer object only to preserve the
+        // called class. Its compilation context deliberately has no $this.
+        $receiver = $this->context->inClosure && !$this->hasLocalVar('this_') ? 'php::Object{}' : 'this_';
+        [$args, $before, $after] = $this->captureStmtLines(fn () => $this->parseCallArgs(
+            $expr->args,
+            $method,
+            $method === '' ? self::DYNAMIC_CALLED_CLASS : $this->getFullClassName(),
+        ));
+        $target = $this->genTmpVarName();
+        $result = $this->genTmpVarName();
+        // The lambda gives the resolved receiver and any magic trampoline a
+        // bounded lifetime even if argument evaluation or invocation throws.
+        return '[&]() -> php::Var { ' . implode(' ', $nameBefore)
+            . ' auto ' . $target . ' = typephp_resolve_late_static_method('
+            . $this->getCalledCeExpr() . ', ' . $methodPtr . ', ' . $caller . ', ' . $receiver . '); '
+            . implode(' ', $nameAfter) . ' ' . implode(' ', $before)
+            . ' php::Var ' . $result . ' = ' . $target . '.call(' . $args . '); '
+            . implode(' ', $after) . ' return ' . $result . '; }()';
     }
 
     protected function parseStaticCall(Expr\StaticCall $expr): string
@@ -1411,7 +1437,6 @@ trait MethodCallTrait
         $cacheCallable = false;
         $directStaticCall = false;
         $scopedStaticCall = false;
-        $scopedInstanceCall = false;
         $staticCallTarget = '';
         $staticCallMethod = '';
         $canUseDirectCallScope = $this->isNameExpr($expr->class) && $this->isIdExpr($expr->name);
@@ -1435,6 +1460,33 @@ trait MethodCallTrait
         // static-call branch below.
         if ($this->isNameExpr($expr->class) && $class === 'parent') {
             return $this->parseParentMethodCall($expr);
+        }
+
+        if ($class === 'static' && $this->isNameExpr($expr->class)) {
+            if (!$this->classDef || !$this->methodDef) {
+                $this->fatalError($expr, 'Cannot use static:: outside class scope');
+            }
+            if ($this->classDef?->nativeObject) {
+                $this->fatalError(
+                    $expr,
+                    'Native classes do not support late static binding; use `self::` or a concrete class name',
+                );
+            }
+            // First-class callable creation is a separate operation from
+            // invoking a method; keep its existing scoped-Closure lowering.
+            if ($expr->isFirstClassCallable()) {
+                return $this->genPlaceHolder($this->genArray([
+                    $this->getCalledClassExpr(), $this->methodNameToStr($expr->name, literal: true),
+                ]));
+            }
+            if ($this->isIdExpr($expr->name)) {
+                $method = $this->parseIdentifier($expr->name);
+                $methodPtr = $this->methodNameToStr($expr->name, literal: true);
+                return $this->parseExactLateStaticCall($expr, $method, $methodPtr)
+                    ?? $this->parseLateStaticRuntimeCall($expr, $method, $methodPtr);
+            }
+            [$methodPtr, $before, $after] = $this->parseExprWithCapturedStmts($expr->name);
+            return $this->parseLateStaticRuntimeCall($expr, '', $methodPtr, $before, $after);
         }
 
         if (!$this->isNameExpr($expr->class)) {
@@ -1468,19 +1520,13 @@ trait MethodCallTrait
             }
         } elseif ($this->isVarExpr($expr->name)) {
             $staticCallMethod = $this->methodNameToStr($expr->name, literal: true);
-            if ($class === 'static') {
-                $staticCallTarget = $this->getCalledCeExpr();
-            } elseif ($class !== 'self') {
+            if ($class !== 'self') {
                 $resolvedClass = $this->getNamespacedClassName($class);
                 $staticCallTarget = $this->getLocalClassEntryPtr($resolvedClass);
             }
             $fn = 'php::concat({' . $this->identifierToStr($expr->class) . ', "::", ' . $staticCallMethod . '})';
             $placeHolder = $fn;
-            if ($class === 'static' && $this->methodDef !== null
-                && !($this->methodDef->flags & Modifiers::STATIC)) {
-                $scopedInstanceCall = true;
-                $fn = 'php::concat({' . $this->getCalledClassExpr() . ', "::", ' . $staticCallMethod . '})';
-            } elseif ($staticCallTarget !== '') {
+            if ($staticCallTarget !== '') {
                 $directStaticCall = true;
             } else {
                 // `self::$method()` carries a lexical lookup class and a
@@ -1488,35 +1534,6 @@ trait MethodCallTrait
                 // existing scoped callable resolution until the lookup class
                 // and called scope can both be represented explicitly.
                 $cacheCallable = true;
-            }
-        } elseif ($class === 'static') {
-            if ($this->classDef?->nativeObject) {
-                $this->fatalError(
-                    $expr,
-                    'Native classes do not support late static binding; use `self::` or a concrete class name',
-                );
-            }
-            $method = $this->parseIdentifier($expr->name);
-            $methodPtr = $this->methodNameToStr($expr->name, literal: true);
-            $exactCall = $this->parseExactLateStaticCall($expr, $method, $methodPtr);
-            if ($exactCall !== null) {
-                return $exactCall;
-            }
-            $calledCe = $this->getCalledCeExpr();
-            $fn = $calledCe . ', php::getMethod(' . $calledCe . ', ' . $methodPtr . ')';
-            if ($this->debug) {
-                $this->addBeforeStmtLine($this->formatCppLineComment(
-                    'Static Method Call: ',
-                    'static::' . $method . '()'
-                ));
-            }
-            $placeHolder = $this->genArray([$this->getCalledClassExpr(), $methodPtr]);
-            // Used to resolve the method signature when detecting by-reference arguments (late static binding is resolved within the current class hierarchy)
-            $rtFunc = $method;
-            $rtClass = $this->getFullClassName();
-            if ($this->methodDef !== null && !($this->methodDef->flags & Modifiers::STATIC)) {
-                $scopedInstanceCall = true;
-                $fn = 'php::concat({' . $this->getCalledClassExpr() . ', "::", ' . $methodPtr . '})';
             }
         } else {
             if ($class === 'self') {
@@ -1584,9 +1601,6 @@ trait MethodCallTrait
         }
 
         if (empty($expr->args)) {
-            if ($scopedInstanceCall) {
-                return 'php::callScoped(this_, ' . $fn . ', ' . $this->getCallableScopeExpr() . ')';
-            }
             if ($scopedStaticCall) {
                 return 'php::callScoped(' . $fn . ', ' . $this->getCallableScopeExpr() . ')';
             }
@@ -1599,10 +1613,6 @@ trait MethodCallTrait
             return 'php::call(' . $fn . ')';
         }
         try {
-            if ($scopedInstanceCall) {
-                return 'php::callScoped(this_, ' . $fn . ', ' . $this->getCallableScopeExpr() . ', '
-                    . $this->parseCallArgs($expr->args, $rtFunc, $rtClass) . ')';
-            }
             if ($scopedStaticCall) {
                 return 'php::callScoped(' . $fn . ', ' . $this->getCallableScopeExpr() . ', '
                     . $this->parseCallArgs($expr->args, $rtFunc, $rtClass) . ')';

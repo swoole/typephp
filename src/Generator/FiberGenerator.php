@@ -20,6 +20,7 @@ use PhpParser\Node\NullableType;
 use PhpParser\Node\UnionType;
 use TypePhp\Context\FunctionContext;
 use TypePhp\Entity\FunctionDef;
+use TypePhp\Transform\FinallyLowering;
 
 trait FiberGenerator
 {
@@ -144,25 +145,36 @@ trait FiberGenerator
 
     protected function parseYieldStmt(Yield_ $expr): string
     {
+        $closeExit = $this->genYieldCloseExit($expr);
         $payload = $this->genYieldPayload($expr);
         $closed = $this->genTmpVarName();
         $this->addLocalVar($closed, Type::BOOL);
         return $closed . ' = false;' . PHP_EOL
             . $this->getIndent() . $closed . ' = typephp_fiber_yield(' . $payload . ');' . PHP_EOL
             . $this->getIndent() . 'if (' . $closed . ') {' . PHP_EOL
-            . $this->getIndent() . '    return ' . self::VALUE_NULL . ';' . PHP_EOL
+            . $closeExit
             . $this->getIndent() . '}';
     }
 
     protected function parseYieldFromStmt(YieldFrom $expr): string
     {
+        $closeExit = $this->genYieldCloseExit($expr);
         $closed = $this->genTmpVarName();
         $this->addLocalVar($closed, Type::BOOL);
         return $closed . ' = false;' . PHP_EOL
             . $this->getIndent() . 'typephp_fiber_yield_from(' . $this->genYieldFromIterable($expr) . ', &' . $closed . ');' . PHP_EOL
             . $this->getIndent() . 'if (' . $closed . ') {' . PHP_EOL
-            . $this->getIndent() . '    return ' . self::VALUE_NULL . ';' . PHP_EOL
+            . $closeExit
             . $this->getIndent() . '}';
+    }
+
+    private function genYieldCloseExit(Yield_|YieldFrom $expr): string
+    {
+        $exit = $expr->getAttribute(FinallyLowering::ATTR_GENERATOR_CLOSE_EXIT);
+        if ($exit === null) {
+            return $this->getIndent() . '    return ' . self::VALUE_NULL . ';' . PHP_EOL;
+        }
+        return $this->parseBlockStmts($exit);
     }
 
     protected function genYieldPayload(Yield_ $expr): string

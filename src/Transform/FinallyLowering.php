@@ -19,6 +19,8 @@ use PhpParser\Node\Stmt;
  */
 final class FinallyLowering
 {
+    public const string ATTR_GENERATOR_CLOSE_EXIT = 'typephp_generator_close_exit';
+
     private \Closure $allocateName;
     /** @var array<string, true> */
     private array $labels = [];
@@ -45,6 +47,20 @@ final class FinallyLowering
     {
         $result = [];
         foreach ($statements as $statement) {
+            if ($statement instanceof Stmt\Expression
+                && ($statement->expr instanceof Expr\Yield_ || $statement->expr instanceof Expr\YieldFrom)
+            ) {
+                // Closing a suspended Fiber returns from the generator body.
+                // Register that implicit exit while its finally scopes are
+                // still available, just like a source-level return statement.
+                $statement = clone $statement;
+                $statement->expr = clone $statement->expr;
+                $statement->expr->setAttribute(self::ATTR_GENERATOR_CLOSE_EXIT, $this->lowerExit(
+                    new Stmt\Return_(null, $statement->getAttributes()), $scopes, $depth,
+                ));
+                $result[] = $statement;
+                continue;
+            }
             if ($statement instanceof Stmt\TryCatch && $statement->finally !== null) {
                 array_push($result, ...$this->lowerFinally($statement, $scopes, $depth));
                 continue;
